@@ -1176,9 +1176,9 @@ function editCmt(cmtId){
 
 // ── 전체보기 ─────────────────────────────────────────────────────
 const CAT_COLORS = [
-  ['#E8F0FE','#1A4B7A'],['#EAF4EE','#2D6A4F'],['#FFF3E0','#B85C00'],
-  ['#EEEDFE','#534AB7'],['#FAF0EE','#A0291E'],['#EDE4D6','#6B3E2A'],
-  ['#E8F4F0','#1A5C44'],['#FEF3F8','#A0297A']
+  {bg:'#E8F0FE',fg:'#1A4B7A'},{bg:'#EAF4EE',fg:'#2D6A4F'},{bg:'#FFF3E0',fg:'#B85C00'},
+  {bg:'#EEEDFE',fg:'#534AB7'},{bg:'#FAF0EE',fg:'#A0291E'},{bg:'#EDE4D6',fg:'#6B3E2A'},
+  {bg:'#E8F4F0',fg:'#1A5C44'},{bg:'#FEF3F8',fg:'#A0297A'}
 ];
 async function renderAll(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
@@ -1201,7 +1201,7 @@ async function renderAll(area) {
       <div class="post-card-top">
         <span class="post-title-txt">${p.title}</span>
         ${isNew ? '<span class="badge-new">NEW</span>' : ''}
-        <span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:${cc[0]};color:${cc[1]}">${catName}</span>
+        <span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:${cc.bg};color:${cc.fg}">${catName}</span>
       </div>
       <div class="post-meta"><span>${fmtDate(p.created_at)}</span></div>
     </div>`;
@@ -1232,7 +1232,7 @@ async function doSearchAll(){
     return `<div class="post-card" onclick="openPostById(${p.id})">
       <div class="post-card-top"><span class="post-title-txt">${p.title}</span>
         ${isNew ? '<span class="badge-new">NEW</span>' : ''}
-        <span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:${cc[0]};color:${cc[1]}">${p.categories?.name||''}</span>
+        <span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:${cc.bg};color:${cc.fg}">${p.categories?.name||''}</span>
       </div><div class="post-meta"><span>${fmtDate(p.created_at)}</span></div>
     </div>`;
   }).join('') || '<div style="text-align:center;padding:40px;color:var(--th)">검색 결과가 없습니다.</div>';
