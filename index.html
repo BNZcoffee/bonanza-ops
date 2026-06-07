@@ -1155,17 +1155,16 @@ function addCatRow(){
   const list=document.getElementById('catList');
   const i=list.children.length;
   const d=document.createElement('div');d.className='tag-item';d.style.cssText='align-items:center;gap:8px';
-  d.innerHTML=`
-    <select id="ci-${i}" data-id="" style="border:0.5px solid var(--crd);border-radius:6px;padding:4px 6px;font-size:12px;background:var(--cr);cursor:pointer;flex-shrink:0">
-      ${CAT_ICONS.map(ic=>`<option value="${ic.v}">${ic.l}</option>`).join('')}
-    </select>
-    <i class="ti ti-folder" id="ci-preview-${i}" style="font-size:16px;color:var(--br);flex-shrink:0"></i>
-    <input value="" id="cf-${i}" data-id="" placeholder="새 카테고리명" style="flex:1;border:0.5px solid var(--crd);border-radius:6px;padding:6px 10px;font-size:13px;outline:none"/>
-    <button onclick="this.closest('.tag-item').remove()" style="background:none;border:none;color:var(--th);cursor:pointer;padding:4px 6px;font-size:14px;flex-shrink:0"><i class="ti ti-x"></i></button>`;
+  const iconOpts=CAT_ICONS.map(ic=>'<option value="'+ic.v+'">'+ic.l+'</option>').join('');
+  d.innerHTML='<select id="ci-'+i+'" data-id="" style="border:0.5px solid var(--crd);border-radius:6px;padding:4px 6px;font-size:12px;background:var(--cr);cursor:pointer;flex-shrink:0">'+iconOpts+'</select>'
+    +'<i class="ti ti-folder" id="ci-preview-'+i+'" style="font-size:16px;color:var(--br);flex-shrink:0"></i>'
+    +'<input value="" id="cf-'+i+'" data-id="" placeholder="새 카테고리명" style="flex:1;border:0.5px solid var(--crd);border-radius:6px;padding:6px 10px;font-size:13px;outline:none"/>'
+    +'<button onclick="this.closest(\'.tag-item\').remove()" style="background:none;border:none;color:var(--th);cursor:pointer;padding:4px 6px;font-size:14px;flex-shrink:0"><i class=\"ti ti-x\"></i></button>';
   list.appendChild(d);
   const sel=document.getElementById('ci-'+i);
   if(sel)sel.onchange=()=>{const prev=document.getElementById('ci-preview-'+i);if(prev){prev.className='ti '+sel.value;prev.style.cssText='font-size:16px;color:var(--br);flex-shrink:0';}};
 }
+
 async function deleteCat(id,name,btn){
   const{data:posts}=await sb.from('posts').select('id').eq('category_id',id);
   const msg=posts&&posts.length>0
