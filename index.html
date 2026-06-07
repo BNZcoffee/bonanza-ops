@@ -230,6 +230,15 @@ textarea.form-input{min-height:120px;resize:vertical}
   .board-tabs{flex-wrap:nowrap;overflow-x:auto}
   .tab-btn{white-space:nowrap;flex-shrink:0}
 }
+
+.staff-list-table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;border:0.5px solid var(--crd)}
+.staff-list-table th{background:var(--crm);color:var(--ts);font-size:11px;font-weight:700;padding:9px 12px;text-align:left;border-bottom:0.5px solid var(--crd);white-space:nowrap}
+.staff-list-table td{padding:8px 12px;font-size:13px;color:var(--tm);border-bottom:0.5px solid var(--crd);vertical-align:middle}
+.staff-list-table tr:last-child td{border-bottom:none}
+.staff-list-table tr:hover td{background:var(--cr)}
+.staff-tab{background:none;border:0.5px solid var(--crd);border-radius:8px;padding:6px 16px;font-size:13px;color:var(--ts);cursor:pointer}
+.staff-tab.active{background:var(--br);color:#fff;border-color:var(--br)}
+.hint-box{background:var(--gnb);border:0.5px solid var(--gn);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--gn);margin-bottom:12px;line-height:1.7}
 </style>
 </head>
 <body>
@@ -381,6 +390,7 @@ function loginAs(user) {
   document.getElementById('adminNav').style.display = (user.role === 'admin') ? '' : 'none';
   document.getElementById('sidebarInfoTxt').textContent = user.store + ' · ' + user.name;
   document.getElementById('userBadgeEl').innerHTML = `<span class="role-tag">${roleLbl[user.role]||user.role}</span>${user.store} ${user.name}`;
+  loadAppSettings();
   loadCats();
   setInterval(checkScheduled, 60000);
 
@@ -746,40 +756,138 @@ async function submitComment(postId) {
 }
 
 // ── NEW POST ──────────────────────────────────────
-function renderNewPost(area) {
-  const catOpts = allCats.map(c => `<option value="${c.id}"${c.id===currentCatId?' selected':''}>${c.name}</option>`).join('');
+let nQuill = null, nPendingFiles = [], nEditingId = null;
+
+async function openEditPost(id) {
+  const {data} = await sb.from('posts').select('*').eq('id',id).single();
+  if(!data) return;
+  nEditingId = id;
+  currentCatId = data.category_id;
+  renderNewPost(document.getElementById('contentArea'), data);
+}
+
+function renderNewPost(area, ex) {
+  nEditingId = ex ? ex.id : null;
+  nPendingFiles = [];
+  selectedAccess = ex ? (ex.access||'all') : 'all';
+  const catOpts = allCats.filter(c=>canWriteCat(c.name)).map(c =>
+    `<option value="${c.id}"${c.id===(ex?ex.category_id:currentCatId)?' selected':''}>${c.name}</option>`
+  ).join('');
+
   area.innerHTML = `
-    <div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage('board')"><i class="ti ti-arrow-left"></i> 취소</button></div>
+    <div style="margin-bottom:10px">
+      <button class="btn-cancel-sm" onclick="goPage('board')"><i class="ti ti-arrow-left"></i> 취소</button>
+    </div>
     <div class="form-section">
-      <div class="page-title" style="margin-bottom:18px">새 공지 작성</div>
-      <div class="form-row"><label class="form-label">카테고리</label><select class="form-input" id="nCat">${catOpts}</select></div>
-      <div class="form-row"><label class="form-label">제목</label><input class="form-input" id="nTitle" placeholder="공지 제목을 입력하세요" /></div>
-      <div class="form-row"><label class="form-label">내용</label><textarea class="form-input" id="nBody" placeholder="공지 내용을 입력하세요"></textarea></div>
-      <div class="form-row">
-        <label class="form-label">열람 권한</label>
+      <div class="page-title" style="margin-bottom:18px">${ex?'공지 수정':'새 공지 작성'}</div>
+      <div class="form-row"><label class="form-label">카테고리</label>
+        <select class="form-input" id="nCat">${catOpts}</select>
+      </div>
+      <div class="form-row"><label class="form-label">제목</label>
+        <input class="form-input" id="nTitle" value="${ex?ex.title:''}" placeholder="공지 제목을 입력하세요"/>
+      </div>
+      <div class="form-row"><label class="form-label">내용</label>
+        <div id="nQuillBox"></div>
+      </div>
+      <div class="form-row"><label class="form-label">열람 권한</label>
         <div class="form-access-row">
-          <div class="access-opt selected" id="acc-all" onclick="setAccess('all')"><i class="ti ti-users"></i><br>전 직원</div>
-          <div class="access-opt" id="acc-manager" onclick="setAccess('manager')"><i class="ti ti-user-check"></i><br>매니저 이상</div>
+          <div class="access-opt${selectedAccess==='all'?' selected':''}" id="acc-all" onclick="setAccess('all')"><i class="ti ti-users"></i><br>전 직원</div>
+          <div class="access-opt${selectedAccess==='manager'?' selected':''}" id="acc-manager" onclick="setAccess('manager')"><i class="ti ti-user-check"></i><br>매니저 이상</div>
         </div>
       </div>
       <div class="form-row">
         <div class="toggle-row">
-          <div><div class="toggle-label">댓글 허용</div><div class="toggle-sub">직원들이 이 공지에 댓글을 남길 수 있습니다</div></div>
-          <button class="toggle-switch" id="cmtToggle" onclick="this.classList.toggle('on')" aria-label="댓글 허용"></button>
+          <div><div class="toggle-label">댓글 허용</div><div class="toggle-sub">직원들이 댓글을 남길 수 있습니다</div></div>
+          <button class="toggle-switch${ex&&ex.comments_on?' on':''}" id="cmtToggle" onclick="this.classList.toggle('on')"></button>
         </div>
       </div>
       <div class="form-row">
-        <label class="form-label">첨부파일 URL (선택)</label>
-        <input class="form-input" id="nFileUrl" placeholder="파일 URL 입력 (Google Drive, Dropbox 등 공유 링크)" />
-        <input class="form-input" id="nFileName" placeholder="파일 표시 이름" style="margin-top:6px" />
-        <p style="font-size:11px;color:var(--th);margin-top:4px">* 파일은 Google Drive 등 외부 링크로 첨부 가능합니다</p>
+        <label class="form-label">첨부파일</label>
+        <div id="existingAtts"></div>
+        <div style="border:0.5px dashed var(--crd);border-radius:8px;padding:16px;background:var(--cr);text-align:center;cursor:pointer" onclick="document.getElementById('nFileInput').click()">
+          <i class="ti ti-upload" style="font-size:20px;color:var(--th)"></i>
+          <div style="font-size:13px;color:var(--th);margin-top:4px">클릭하여 파일 선택</div>
+          <div style="font-size:11px;color:var(--th)">PDF, 이미지, Word, Excel 등 · 여러 파일 가능</div>
+          <input type="file" id="nFileInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.hwp" style="display:none" onchange="nAddFiles(this.files)"/>
+        </div>
+        <div id="nFileList" style="margin-top:8px"></div>
+        <div style="height:3px;background:var(--crd);border-radius:3px;margin-top:4px;overflow:hidden">
+          <div id="nFileProg" style="height:100%;background:var(--gn);width:0;transition:width .3s"></div>
+        </div>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">
         <button class="btn-cancel-sm" onclick="goPage('board')">취소</button>
         <button class="btn-submit" onclick="submitPost()">공지 등록</button>
       </div>
     </div>`;
-  selectedAccess = 'all';
+
+  // 기존 첨부파일 표시 (수정 모드)
+  if(ex && ex.id) {
+    sb.from('attachments').select('*').eq('post_id', ex.id).then(({data:atts}) => {
+      const box = document.getElementById('existingAtts');
+      if(!box || !atts?.length) return;
+      box.innerHTML = '<div style="font-size:11px;font-weight:700;color:var(--th);margin-bottom:6px">기존 첨부파일</div>' +
+        atts.map(a => `<div id="eatt-${a.id}" style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:4px">
+          <i class="ti ti-paperclip" style="color:var(--bl)"></i>
+          <span style="flex:1;font-size:13px;color:var(--bl)">${a.file_name}</span>
+          <button onclick="nDelExistAtt(${a.id})" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-trash"></i></button>
+        </div>`).join('');
+    });
+  }
+
+  // Quill 초기화
+  function tryInitQ(){
+    if(typeof Quill==='undefined'){setTimeout(tryInitQ,200);return;}
+    const el = document.getElementById('nQuillBox');
+    if(!el || el.classList.contains('ql-container')) return;
+    nQuill = new Quill('#nQuillBox', {
+      theme:'snow',
+      modules:{toolbar:{
+        container:[[{header:[1,2,3,false]}],['bold','italic','underline','strike'],
+          [{color:[]},{background:[]}],[{list:'ordered'},{list:'bullet'}],
+          ['link','image'],['clean']],
+        handlers:{image:()=>{
+          const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.click();
+          inp.onchange=async()=>{
+            const f=inp.files[0];if(!f)return;
+            const url=await nUploadFile(f,'images');
+            if(url){const r=nQuill.getSelection()||{index:0};nQuill.insertEmbed(r.index,'image',url);}
+          };
+        }}
+      }},
+      placeholder:'공지 내용을 입력하세요...'
+    });
+    if(ex && ex.body) nQuill.root.innerHTML = ex.body;
+  }
+  setTimeout(tryInitQ, 150);
+}
+
+function nAddFiles(files){
+  Array.from(files).forEach(f => nPendingFiles.push(f));
+  nRenderFileList();
+}
+function nRenderFileList(){
+  const fl = document.getElementById('nFileList');
+  if(!fl) return;
+  fl.innerHTML = nPendingFiles.map((f,i) =>
+    `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:4px">
+      <i class="ti ti-file" style="color:var(--th)"></i>
+      <span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.name}</span>
+      <span style="font-size:11px;color:var(--th)">${(f.size/1024/1024).toFixed(1)}MB</span>
+      <button onclick="nPendingFiles.splice(${i},1);nRenderFileList()" style="background:none;border:none;color:var(--th);cursor:pointer"><i class="ti ti-x"></i></button>
+    </div>`
+  ).join('');
+}
+async function nUploadFile(file, folder){
+  const ext = file.name.split('.').pop().toLowerCase();
+  const fname = folder+'/'+Date.now()+'_'+Math.random().toString(36).slice(2)+'.'+ext;
+  const {error} = await sb.storage.from('attachments').upload(fname, file, {upsert:true});
+  if(error){console.error('upload error:', error);return null;}
+  return SUPABASE_URL+'/storage/v1/object/public/attachments/'+fname;
+}
+async function nDelExistAtt(id){
+  await sb.from('attachments').delete().eq('id',id);
+  document.getElementById('eatt-'+id)?.remove();
 }
 
 async function openEditPost(id){
@@ -797,28 +905,44 @@ function setAccess(v) {
 }
 
 async function submitPost() {
-  const title = document.getElementById('nTitle').value.trim();
-  const body = document.getElementById('nBody').value.trim();
-  const catId = parseInt(document.getElementById('nCat').value);
-  const commentsOn = document.getElementById('cmtToggle').classList.contains('on');
-  const fileUrl = document.getElementById('nFileUrl').value.trim();
-  const fileName = document.getElementById('nFileName').value.trim();
-  if (!title || !body) { alert('제목과 내용을 입력해주세요.'); return; }
+  const title = document.getElementById('nTitle')?.value.trim();
+  const body = nQuill ? nQuill.root.innerHTML : '';
+  const catId = parseInt(document.getElementById('nCat')?.value);
+  const commentsOn = document.getElementById('cmtToggle')?.classList.contains('on');
+  if(!title){alert('제목을 입력해주세요.');return;}
+  if(!body||body==='<p><br></p>'){alert('내용을 입력해주세요.');return;}
 
-  const { data: post, error } = await sb.from('posts').insert({
-    category_id: catId,
-    title, body,
-    access: selectedAccess,
-    comments_on: commentsOn,
-    author_id: currentUser.id
-  }).select().single();
+  const payload = {category_id:catId, title, body, access:selectedAccess,
+    comments_on:commentsOn, author_id:currentUser.id, status:'published',
+    updated_at:new Date().toISOString()};
 
-  if (error) { alert('등록 오류: ' + error.message); return; }
-
-  if (fileUrl && fileName) {
-    await sb.from('attachments').insert({post_id: post.id, file_name: fileName, file_url: fileUrl});
+  let postId = nEditingId;
+  if(nEditingId){
+    const {error} = await sb.from('posts').update(payload).eq('id',nEditingId);
+    if(error){alert('수정 오류: '+error.message);return;}
+  } else {
+    const {data:post,error} = await sb.from('posts').insert(payload).select().single();
+    if(error){alert('등록 오류: '+error.message);return;}
+    postId = post.id;
   }
 
+  // 파일 업로드
+  if(nPendingFiles && nPendingFiles.length > 0){
+    const prog = document.getElementById('nFileProg');
+    for(let i=0; i<nPendingFiles.length; i++){
+      const url = await nUploadFile(nPendingFiles[i], 'files');
+      if(url){
+        await sb.from('attachments').insert({
+          post_id: postId,
+          file_name: nPendingFiles[i].name,
+          file_url: url
+        });
+      }
+      if(prog) prog.style.width = ((i+1)/nPendingFiles.length*100)+'%';
+    }
+  }
+
+  nEditingId = null; nPendingFiles = [];
   currentCatId = catId;
   currentCatName = allCats.find(c=>c.id===catId)?.name || '';
   updateNotifDot();
@@ -827,56 +951,128 @@ async function submitPost() {
 
 // ── STAFF ─────────────────────────────────────────
 async function renderStaff(area) {
-  area.innerHTML = `<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>`;
-  const { data: users } = await sb.from('users').select('*').order('created_at');
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const [{data:users},{data:stores}] = await Promise.all([
+    sb.from('users').select('*').order('code'),
+    sb.from('store_options').select('*').order('sort_order')
+  ]);
+  const today = new Date().toISOString().slice(0,10);
 
-  const cards = (users||[]).map(u => `
-    <div class="staff-card${u.active?'':' inactive'}">
-      ${u.active?'<div class="active-dot"></div>':'<div class="inactive-tag">퇴사</div>'}
-      <div class="staff-avatar">${u.name.slice(0,2)}</div>
-      <div class="staff-name">${u.name}</div>
-      <div class="staff-store">${u.store}</div>
-      <span class="staff-role ${roleCls[u.role]||''}">${roleLbl[u.role]||u.role}</span>
-      <div class="staff-code">${u.code}</div>
-      ${u.hire_date?`<div style="font-size:10px;color:var(--th);margin-top:3px">입사 ${u.hire_date}</div>`:''}
-    </div>`).join('');
+  // 퇴사일 지난 직원 자동 비활성화
+  for(const u of (users||[])){
+    if(u.active && u.retire_date && u.retire_date < today){
+      await sb.from('users').update({active:false}).eq('id',u.id);
+      u.active = false;
+    }
+  }
 
-  const active = (users||[]).filter(u=>u.active).length;
-  const inactive = (users||[]).filter(u=>!u.active).length;
+  const active = (users||[]).filter(u=>u.active);
+  const inactive = (users||[]).filter(u=>!u.active);
+
+  const renderTab = (list) => list.map(u => `
+    <tr id="urow-${u.id}">
+      <td><input type="checkbox" class="uchk" data-id="${u.id}" onclick="toggleUserSel('${u.id}',this.checked)"></td>
+      <td><span class="staff-role ${roleCls[u.role]||''}" style="font-size:10px">${roleLbl[u.role]||u.role}</span></td>
+      <td style="font-weight:600">${u.name}</td>
+      <td>${u.store}</td>
+      <td style="font-family:monospace;font-size:11px;color:var(--th)">${u.code}</td>
+      <td style="color:var(--th)">${u.phone||'-'}</td>
+      <td style="font-size:12px;color:var(--th)">${u.email||'-'}</td>
+      <td>${u.hire_date||'-'}</td>
+      <td>${u.retire_date||'-'}</td>
+      <td>
+        <button class="btn-cancel-sm" style="padding:3px 9px;font-size:11px" onclick="openEditUser('${u.id}')"><i class="ti ti-edit"></i></button>
+        <button class="btn-cancel-sm" style="padding:3px 9px;font-size:11px;color:var(--${u.active?'rd':'gn'});border-color:var(--${u.active?'rd':'gn'});margin-left:4px" onclick="toggleActive('${u.id}',${u.active})">${u.active?'비활성':'활성'}</button>
+      </td>
+    </tr>`).join('');
+
+  let selStaff = new Set();
+  const storeOpts = (stores||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join('');
+  const storeList = (stores||[]).map(s=>
+    `<div id="sopt-${s.id}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)">
+      <span style="flex:1;font-size:13px">${s.name}</span>
+      <button onclick="delStore(${s.id},'sopt-${s.id}')" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-trash"></i></button>
+    </div>`
+  ).join('');
 
   area.innerHTML = `
-    <div class="page-header"><div class="page-title">인원 현황</div><div class="page-sub">재직 ${active}명 · 퇴사 ${inactive}명</div></div>
-    <div class="add-user-form" id="addUserForm">
-      <div class="page-title" style="font-size:15px;margin-bottom:14px">신규 직원 등록</div>
-      <div class="form-grid">
-        <div><label class="form-label">직원 코드</label><input class="form-input" id="uCode" placeholder="BCK-xxx" /></div>
-        <div><label class="form-label">이름</label><input class="form-input" id="uName" placeholder="홍길동" /></div>
-        <div><label class="form-label">소속 매장</label><input class="form-input" id="uStore" placeholder="강남점" /></div>
-        <div><label class="form-label">역할</label>
-          <select class="form-input" id="uRole">
-            <option value="manager">매니저</option>
-            <option value="barista">바리스타</option>
-            <option value="pastry">파티쉐</option>
-            <option value="purchase">구매팀</option>
-            <option value="hr">인사팀</option>
-            <option value="admin">운영팀(관리자)</option>
-          </select>
-        </div>
-        <div><label class="form-label">초기 비밀번호</label><input class="form-input" id="uPw" placeholder="초기 비밀번호" /></div>
-        <div><label class="form-label">이메일</label><input class="form-input" id="uEmail" placeholder="email@bonanza.kr" /></div>
-        <div><label class="form-label">입사일</label><input class="form-input" type="date" id="uHire" /></div>
+    <div class="page-header"><div class="page-title">인원 현황</div>
+      <div class="page-sub">재직 ${active.length}명 · 퇴사/비활성 ${inactive.length}명</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <button class="staff-tab active" id="stab-active" onclick="switchStaffTab('active')">재직 ${active.length}</button>
+      <button class="staff-tab" id="stab-inactive" onclick="switchStaffTab('inactive')">퇴사/비활성 ${inactive.length}</button>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div id="bulkBar" style="display:none;align-items:center;gap:8px">
+        <span id="selCount" style="font-size:13px;color:var(--bl);font-weight:600">0명 선택</span>
+        <button class="btn-cancel-sm" style="font-size:12px" onclick="bulkToggleActive(true)">비활성화</button>
+        <button class="btn-cancel-sm" style="font-size:12px" onclick="bulkToggleActive(false)">활성화</button>
       </div>
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
-        <button class="btn-cancel-sm" onclick="document.getElementById('addUserForm').classList.remove('open')">취소</button>
-        <button class="btn-submit" onclick="addUser()">등록</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-left:auto">
+        <button class="btn-new" style="background:var(--brm)" onclick="openEditUser(null)"><i class="ti ti-user-plus"></i> 직원 추가</button>
+        <button class="btn-new" style="background:var(--gn)" onclick="openStoreManager()"><i class="ti ti-building"></i> 매장 관리</button>
+        <button class="btn-new" onclick="openBulkImport()"><i class="ti ti-table-import"></i> 일괄 등록</button>
       </div>
     </div>
-    <div style="margin-bottom:14px">
-      <button class="btn-new" onclick="document.getElementById('addUserForm').classList.toggle('open')"><i class="ti ti-user-plus"></i> 직원 추가</button>
-    </div>
-    <div class="staff-grid">${cards}</div>`;
-}
 
+    <!-- 매장 관리 패널 -->
+    <div id="storeMgrPanel" style="display:none;background:#fff;border:0.5px solid var(--crd);border-radius:12px;padding:16px;margin-bottom:14px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px;display:flex;justify-content:space-between">
+        매장 목록 관리
+        <button onclick="document.getElementById('storeMgrPanel').style.display='none'" style="background:none;border:none;cursor:pointer;color:var(--th)"><i class="ti ti-x"></i></button>
+      </div>
+      <div id="storeListBox">${storeList||'<div style="color:var(--th);font-size:13px">등록된 매장 없음</div>'}</div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <input class="form-input" id="newStoreInp" placeholder="새 매장명 입력" onkeydown="if(event.key==='Enter')addStore()"/>
+        <button class="btn-submit" style="padding:8px 16px;font-size:13px;white-space:nowrap" onclick="addStore()">추가</button>
+      </div>
+    </div>
+
+    <!-- 직원 테이블 -->
+    <div id="staffTableWrap" style="overflow-x:auto">
+      <table class="staff-list-table" id="staffTable">
+        <thead><tr>
+          <th><input type="checkbox" onclick="selAllUsers(this)"></th>
+          <th>직급</th><th>이름</th><th>매장</th><th>코드</th>
+          <th>연락처</th><th>이메일</th><th>입사일</th><th>퇴사일</th><th>관리</th>
+        </tr></thead>
+        <tbody id="staffTbody">${renderTab(active)}</tbody>
+      </table>
+    </div>`;
+
+  // 탭 전환
+  window.switchStaffTab = function(tab){
+    document.getElementById('stab-active').className = 'staff-tab'+(tab==='active'?' active':'');
+    document.getElementById('stab-inactive').className = 'staff-tab'+(tab==='inactive'?' active':'');
+    document.getElementById('staffTbody').innerHTML = renderTab(tab==='active'?active:inactive);
+    selStaff = new Set();
+    updateBulkBar();
+  };
+  window.toggleUserSel = function(id, checked){
+    checked ? selStaff.add(id) : selStaff.delete(id);
+    updateBulkBar();
+  };
+  window.selAllUsers = function(chk){
+    document.querySelectorAll('.uchk').forEach(c=>{c.checked=chk.checked;toggleUserSel(c.dataset.id,chk.checked);});
+  };
+  function updateBulkBar(){
+    const bar = document.getElementById('bulkBar');
+    const cnt = document.getElementById('selCount');
+    if(bar) bar.style.display = selStaff.size?'flex':'none';
+    if(cnt) cnt.textContent = selStaff.size+'명 선택';
+  }
+  window.bulkToggleActive = async function(deactivate){
+    if(!selStaff.size) return;
+    if(!confirm(deactivate?'선택 비활성화할까요?':'선택 활성화할까요?')) return;
+    await sb.from('users').update({active:!deactivate}).in('id',Array.from(selStaff));
+    renderStaff(area);
+  };
+  window.openStoreManager = function(){
+    const p = document.getElementById('storeMgrPanel');
+    p.style.display = p.style.display==='none' ? 'block' : 'none';
+  };
+}
 async function addUser() {
   const code = document.getElementById('uCode').value.trim().toUpperCase();
   const name = document.getElementById('uName').value.trim();
@@ -891,6 +1087,238 @@ async function addUser() {
   renderStaff(document.getElementById('contentArea'));
 }
 
+async function getNextCode(){
+  const {data} = await sb.from('users').select('code');
+  let max=0;
+  (data||[]).forEach(u=>{const m=u.code?.match(/BCK-(\d+)/);if(m)max=Math.max(max,parseInt(m[1]));});
+  return 'BCK-'+String(max+1).padStart(3,'0');
+}
+
+let editingUserId = null;
+async function openEditUser(userId){
+  editingUserId = userId;
+  const [{data:u},{data:stores}] = await Promise.all([
+    userId ? sb.from('users').select('*').eq('id',userId).single() : Promise.resolve({data:null}),
+    sb.from('store_options').select('*').order('sort_order')
+  ]);
+  const storeOpts = (stores||[]).map(s=>
+    `<option value="${s.name}"${u?.store===s.name?' selected':''}>${s.name}</option>`
+  ).join('');
+  
+  // 모달 재사용 (catModal)
+  document.getElementById('catModal').querySelector('.modal-title').textContent = userId?'직원 정보 수정':'직원 추가';
+  document.getElementById('catList').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label class="form-label">이름 *</label><input class="form-input" id="eu_name" value="${u?.name||''}" placeholder="홍길동"/></div>
+      <div><label class="form-label">직급 *</label>
+        <select class="form-input" id="eu_role">
+          ${['manager','barista','pastry','purchase','hr','admin'].map(r=>`<option value="${r}"${u?.role===r?' selected':''}>${roleLbl[r]}</option>`).join('')}
+        </select>
+      </div>
+      <div><label class="form-label">소속 매장 *</label>
+        <select class="form-input" id="eu_store">
+          ${storeOpts||`<option value="${u?.store||''}">${u?.store||''}</option>`}
+          <option value="__custom">직접 입력...</option>
+        </select>
+      </div>
+      <div id="eu_custom_wrap" style="display:none">
+        <label class="form-label">매장명 직접 입력</label>
+        <input class="form-input" id="eu_store_custom" placeholder="매장명"/>
+      </div>
+      <div><label class="form-label">연락처</label><input class="form-input" id="eu_phone" value="${u?.phone||''}" placeholder="010-0000-0000"/></div>
+      <div><label class="form-label">이메일</label><input class="form-input" id="eu_email" value="${u?.email||''}" placeholder="email@bonanza.kr"/></div>
+      <div><label class="form-label">입사일</label><input class="form-input" type="date" id="eu_hire" value="${u?.hire_date||''}"/></div>
+      <div><label class="form-label">퇴사일 <span style="font-size:10px;color:var(--th)">(익일 자동 비활성)</span></label>
+        <input class="form-input" type="date" id="eu_retire" value="${u?.retire_date||''}"/>
+      </div>
+    </div>
+    ${userId?`<div style="margin-top:12px;padding-top:12px;border-top:0.5px solid var(--crd)">
+      <label class="form-label">비밀번호 초기화 (변경 시만 입력)</label>
+      <input class="form-input" id="eu_pw" placeholder="새 비밀번호"/>
+      <p style="font-size:11px;color:var(--th);margin-top:4px">현재 비밀번호: <strong>${u?.password_hash||''}</strong></p>
+    </div>`:`<p style="font-size:11px;color:var(--th);margin-top:8px">직원 코드 자동 부여 · 초기 비밀번호: <strong>bonanza1234</strong></p>`}`;
+  
+  document.getElementById('catModalAddBtn').style.display = 'none';
+  document.getElementById('catModalOkBtn').textContent = userId?'수정 완료':'등록';
+  document.getElementById('catModalOkBtn').onclick = submitEditUser;
+  
+  setTimeout(()=>{
+    const sel = document.getElementById('eu_store');
+    if(sel) sel.onchange = ()=>{
+      document.getElementById('eu_custom_wrap').style.display = sel.value==='__custom'?'block':'none';
+    };
+  },50);
+  document.getElementById('catModal').classList.add('open');
+}
+
+async function submitEditUser(){
+  const name = document.getElementById('eu_name')?.value.trim();
+  const role = document.getElementById('eu_role')?.value;
+  const storeSel = document.getElementById('eu_store')?.value;
+  const store = storeSel==='__custom' ? document.getElementById('eu_store_custom')?.value.trim() : storeSel;
+  const phone = document.getElementById('eu_phone')?.value.trim();
+  const email = document.getElementById('eu_email')?.value.trim();
+  const hire = document.getElementById('eu_hire')?.value||null;
+  const retire = document.getElementById('eu_retire')?.value||null;
+  const pw = document.getElementById('eu_pw')?.value.trim();
+  if(!name||!store){alert('이름과 소속매장은 필수입니다.');return;}
+  const today = new Date().toISOString().slice(0,10);
+  const active = !retire || (retire >= today);
+  const payload = {name,role,store,phone:phone||null,email:email||null,hire_date:hire,retire_date:retire,active};
+  if(pw) payload.password_hash = pw;
+  let error;
+  if(editingUserId){
+    ({error} = await sb.from('users').update(payload).eq('id',editingUserId));
+  } else {
+    const code = await getNextCode();
+    ({error} = await sb.from('users').insert({...payload,code,password_hash:pw||'bonanza1234'}));
+  }
+  if(error){alert('오류: '+error.message);return;}
+  document.getElementById('catModal').classList.remove('open');
+  renderStaff(document.getElementById('contentArea'));
+}
+
+async function toggleActive(id, cur){
+  if(!confirm(cur?'비활성화(퇴사 처리)할까요?':'다시 활성화할까요?')) return;
+  await sb.from('users').update({active:!cur}).eq('id',id);
+  renderStaff(document.getElementById('contentArea'));
+}
+
+async function addStore(){
+  const inp = document.getElementById('newStoreInp');
+  const name = inp?.value.trim();
+  if(!name) return;
+  const {data:all} = await sb.from('store_options').select('sort_order').order('sort_order',{ascending:false}).limit(1);
+  const {data,error} = await sb.from('store_options').insert({name,sort_order:(all?.[0]?.sort_order||0)+1}).select().single();
+  if(error){alert(error.message.includes('unique')?'이미 존재합니다.':error.message);return;}
+  if(inp) inp.value='';
+  const box = document.getElementById('storeListBox');
+  if(box){
+    const d=document.createElement('div');
+    d.id='sopt-'+data.id;
+    d.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)';
+    d.innerHTML=`<span style="flex:1;font-size:13px">${name}</span><button onclick="delStore(${data.id},'sopt-${data.id}')" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-trash"></i></button>`;
+    box.appendChild(d);
+  }
+}
+async function delStore(id, elemId){
+  if(!confirm('매장을 삭제할까요?')) return;
+  await sb.from('store_options').delete().eq('id',id);
+  document.getElementById(elemId)?.remove();
+}
+
+async function openBulkImport(){
+  // 일괄 등록 모달 열기
+  document.getElementById('catModal').querySelector('.modal-title').textContent='직원 일괄 등록';
+  document.getElementById('catList').innerHTML=`
+    <div class="hint-box" style="background:var(--gnb);border:0.5px solid var(--gn);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--gn);margin-bottom:12px">
+      아래 표에 직접 입력하거나, Google Sheets/Excel에서 복사 후 이름 첫 셀 클릭 → Cmd+V 붙여넣기<br>
+      직급: <strong>매니저/바리스타/파티쉐/구매팀/인사팀</strong> | 날짜: YYYY-MM-DD | 초기 비밀번호: bonanza1234
+    </div>
+    <div style="overflow-x:auto;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:8px">
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:var(--crm)">
+          <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd)">이름*</th>
+          <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd)">소속매장*</th>
+          <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd)">직급*</th>
+          <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd)">입사일</th>
+          <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts)">퇴사일</th>
+          <th style="width:30px"></th>
+        </tr></thead>
+        <tbody id="bulkTbody"></tbody>
+      </table>
+    </div>
+    <button onclick="addBulkRow()" style="background:none;border:0.5px dashed var(--crd);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--ts);cursor:pointer;margin-bottom:8px"><i class="ti ti-plus"></i> 행 추가</button>
+    <div id="bulkErr" style="font-size:12px;color:var(--rd);min-height:16px"></div>`;
+  
+  document.getElementById('catModalAddBtn').style.display='none';
+  document.getElementById('catModalOkBtn').textContent='등록하기';
+  document.getElementById('catModalOkBtn').onclick=submitBulk;
+  document.getElementById('catModal').classList.add('open');
+  
+  // 기본 5행
+  for(let i=0;i<5;i++) addBulkRow();
+}
+
+let bulkRowCnt=0;
+function addBulkRow(){
+  const tbody=document.getElementById('bulkTbody');if(!tbody)return;
+  const i=bulkRowCnt++;
+  const cs='border:none;padding:7px 8px;font-size:13px;width:100%;background:transparent;outline:none;font-family:inherit';
+  const tr=document.createElement('tr');
+  tr.innerHTML=`
+    <td style="border-right:0.5px solid var(--crd);border-bottom:0.5px solid var(--crd)"><input class="bcell" data-col="name" data-row="${i}" style="${cs}" placeholder="홍길동" onpaste="handleBulkPaste(event,${i},'name')"/></td>
+    <td style="border-right:0.5px solid var(--crd);border-bottom:0.5px solid var(--crd)"><input class="bcell" data-col="store" data-row="${i}" style="${cs}" placeholder="강남점"/></td>
+    <td style="border-right:0.5px solid var(--crd);border-bottom:0.5px solid var(--crd)">
+      <select class="bcell" data-col="role" data-row="${i}" style="${cs};cursor:pointer">
+        <option value="">선택</option>
+        <option>매니저</option><option>바리스타</option><option>파티쉐</option>
+        <option>구매팀</option><option>인사팀</option>
+      </select>
+    </td>
+    <td style="border-right:0.5px solid var(--crd);border-bottom:0.5px solid var(--crd)"><input class="bcell" data-col="hire" data-row="${i}" style="${cs}" placeholder="2024-01-01"/></td>
+    <td style="border-bottom:0.5px solid var(--crd)"><input class="bcell" data-col="retire" data-row="${i}" style="${cs}" placeholder="(없으면 빈칸)"/></td>
+    <td style="border-bottom:0.5px solid var(--crd);text-align:center"><button onclick="this.closest('tr').remove()" style="background:none;border:none;color:var(--th);cursor:pointer"><i class="ti ti-x"></i></button></td>`;
+  tbody.appendChild(tr);
+}
+
+function handleBulkPaste(e,startRow,startCol){
+  const text=e.clipboardData?.getData('text');
+  if(!text||(!text.includes('\t')&&!text.includes('\n')))return;
+  e.preventDefault();
+  const cols=['name','store','role','hire','retire'];
+  const startIdx=cols.indexOf(startCol);
+  const tbody=document.getElementById('bulkTbody');
+  const rows=Array.from(tbody.querySelectorAll('tr'));
+  const curRowEl=tbody.querySelector('[data-row="'+startRow+'"]')?.closest('tr');
+  const curRowIdx=rows.indexOf(curRowEl);
+  text.trim().split('\n').forEach((line,li)=>{
+    const cells=line.split('\t');
+    let rowEl=curRowIdx+li<rows.length?rows[curRowIdx+li]:null;
+    if(!rowEl){addBulkRow();rowEl=tbody.querySelectorAll('tr')[curRowIdx+li];}
+    cells.forEach((val,ci)=>{
+      const colIdx=startIdx+ci;if(colIdx>=cols.length)return;
+      const inp=rowEl?.querySelector('[data-col="'+cols[colIdx]+'"]');
+      if(inp)inp.value=val.trim();
+    });
+  });
+}
+
+const roleMap={'매니저':'manager','바리스타':'barista','파티쉐':'pastry','구매팀':'purchase','인사팀':'hr','운영팀':'admin'};
+async function submitBulk(){
+  const tbody=document.getElementById('bulkTbody');
+  const rows=Array.from(tbody.querySelectorAll('tr'));
+  const today=new Date().toISOString().slice(0,10);
+  const valid=[],errors=[];
+  rows.forEach((row,i)=>{
+    const name=row.querySelector('[data-col="name"]')?.value.trim();
+    const store=row.querySelector('[data-col="store"]')?.value.trim();
+    const roleKor=row.querySelector('[data-col="role"]')?.value.trim();
+    const hire=row.querySelector('[data-col="hire"]')?.value.trim()||null;
+    const retire=row.querySelector('[data-col="retire"]')?.value.trim()||null;
+    if(!name&&!store&&!roleKor)return;
+    if(!name){errors.push((i+1)+'행: 이름 없음');return;}
+    if(!store){errors.push((i+1)+'행: 매장 없음');return;}
+    const role=roleMap[roleKor];
+    if(!role){errors.push((i+1)+'행: 직급 오류('+roleKor+')');return;}
+    valid.push({name,store,role,hire,retire,active:!retire||(retire>=today)});
+  });
+  const errEl=document.getElementById('bulkErr');
+  if(errors.length){if(errEl)errEl.textContent='오류: '+errors.join(' / ');return;}
+  if(!valid.length){if(errEl)errEl.textContent='등록할 내용이 없습니다.';return;}
+  const btn=document.getElementById('catModalOkBtn');
+  btn.textContent='등록 중...';btn.disabled=true;
+  let ok=0,fail=0;
+  for(const r of valid){
+    const code=await getNextCode();
+    const{error}=await sb.from('users').insert({code,name:r.name,store:r.store,role:r.role,password_hash:'bonanza1234',hire_date:r.hire||null,retire_date:r.retire||null,active:r.active});
+    if(error)fail++;else ok++;
+  }
+  btn.textContent='등록하기';btn.disabled=false;
+  document.getElementById('catModal').classList.remove('open');
+  alert('완료: '+ok+'명 성공'+(fail?', '+fail+'명 실패':''));
+  renderStaff(document.getElementById('contentArea'));
+}
 // ── STATS ─────────────────────────────────────────
 async function renderStats(area) {
   area.innerHTML = `<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>`;
@@ -1268,6 +1696,16 @@ let APP = {app_name:'보난자 커피 — 운영 매뉴얼',logo_text:'Bonanza C
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
   if(data) data.forEach(r=>{APP[r.key]=r.value;});
+  // 저장된 설정 즉시 반영
+  if(APP.app_name){
+    const logo = document.querySelector('.logo');
+    if(logo) logo.textContent = APP.app_name;
+    document.title = APP.app_name;
+  }
+  if(APP.primary_color){
+    document.documentElement.style.setProperty('--br', APP.primary_color);
+    // 연관 색상도 조정
+  }
 }
 async function saveAppSetting(key,value){
   await sb.from('app_settings').upsert({key,value,updated_at:new Date().toISOString()},{onConflict:'key'});
@@ -1311,12 +1749,18 @@ async function renderAppSettings(area){
 }
 async function saveUISettings(){
   const ver = new Date().toISOString().slice(0,10);
+  const name = document.getElementById('cfg-name')?.value.trim()||APP.app_name;
+  const color = document.getElementById('cfg-color')?.value.trim()||APP.primary_color;
   await Promise.all([
-    saveAppSetting('app_name', document.getElementById('cfg-name')?.value.trim()||APP.app_name),
-    saveAppSetting('primary_color', document.getElementById('cfg-color')?.value.trim()||APP.primary_color),
+    saveAppSetting('app_name', name),
+    saveAppSetting('primary_color', color),
     saveAppSetting('app_version', ver),
   ]);
-  alert('저장됨');
+  // 즉시 화면 반영
+  const logo = document.querySelector('.logo');
+  if(logo) logo.textContent = name;
+  document.documentElement.style.setProperty('--br', color);
+  alert('저장됐습니다! (색상은 다음 로그인부터 완전 적용)');
   renderAppSettings(document.getElementById('contentArea'));
 }
 async function saveFeatSettings(){
