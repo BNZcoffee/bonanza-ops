@@ -818,48 +818,98 @@ async function openEditPost(id){
   editingPostId=id; currentCatId=data.category_id;
   renderNewPost(document.getElementById('contentArea'),data);
 }
+
 function renderNewPost(area, ex) {
-  editingPostId = ex?.id || null;
+  editingPostId = ex ? ex.id : null;
   pendingFiles = [];
-  const isEdit = !!ex;
-  const writableCats = allCats.filter(c=>canWriteCat(c.name));
-  const catOpts = writableCats.map(c=>'<option value="'+c.id+'"'+(c.id===(ex?.category_id||currentCatId)?' selected':'')+'>'+c.name+'</option>').join('');
-  const hasSchedule = !!ex?.scheduled_at;
-  selectedAccess = ex?.access || 'all';
-  area.innerHTML = '<div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage('board')"><i class="ti ti-arrow-left"></i> 취소</button></div>'
-    +'<div class="form-section">'
-    +'<div class="page-title" style="margin-bottom:18px">'+(isEdit?'공지 수정':'새 공지 작성')+'</div>'
-    +'<div class="form-row"><label class="form-label">카테고리</label><select class="form-input" id="nCat">'+catOpts+'</select></div>'
-    +'<div class="form-row"><label class="form-label">제목</label><input class="form-input" id="nTitle" value="'+(ex?.title||'')+'" placeholder="공지 제목을 입력하세요"/></div>'
-    +'<div class="form-row"><label class="form-label">내용</label><div id="qEditor" style="min-height:200px"></div></div>'
-    +'<div class="form-row"><label class="form-label">열람 권한</label><div class="form-access-row">'
-    +'<div class="access-opt'+(selectedAccess==='all'?' selected':'')+'" id="acc-all" onclick="setAccess('all')"><i class="ti ti-users"></i><br>전 직원</div>'
-    +'<div class="access-opt'+(selectedAccess==='manager'?' selected':'')+'" id="acc-manager" onclick="setAccess('manager')"><i class="ti ti-user-check"></i><br>매니저 이상</div>'
-    +'</div></div>'
-    +'<div class="form-row"><div class="toggle-row"><div><div class="toggle-label">댓글 허용</div><div class="toggle-sub">직원들이 댓글을 남길 수 있습니다</div></div><button class="toggle-switch'+(ex?.comments_on?' on':'')+'" id="cmtToggle" onclick="this.classList.toggle('on')"></button></div></div>'
-    +'<div class="form-row"><label class="form-label">첨부파일</label>'
-    +'<div class="upload-area" onclick="document.getElementById('fInput').click()" style="cursor:pointer"><i class="ti ti-upload"></i><br>클릭하여 파일 선택 (PDF, 이미지, Word, Excel)<br><span style="font-size:11px">여러 파일 동시 선택 가능</span>'
-    +'<input type="file" id="fInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif" style="display:none" onchange="addFiles(this.files)"/></div>'
-    +'<div id="fList" class="file-list"></div>'
-    +'<div class="upload-progress"><div class="upload-progress-fill" id="fProg"></div></div></div>'
-    +'<div class="form-row"><div class="toggle-row"><div><div class="toggle-label"><i class="ti ti-clock" style="font-size:14px;vertical-align:-1px;margin-right:4px"></i>예약 발행</div><div class="toggle-sub">설정한 시간에 자동 게시</div></div><button class="toggle-switch'+(hasSchedule?' on':'')+'" id="schedToggle" onclick="toggleSched()"></button></div>'
-    +'<div id="schedBox" style="display:'+(hasSchedule?'block':'none')+';background:var(--orb);border:0.5px solid var(--or);border-radius:8px;padding:12px 14px;margin-top:8px"><div style="font-size:12px;font-weight:600;color:var(--or);margin-bottom:8px">발행 예약 시간</div>'
-    +'<input type="datetime-local" id="schedAt" value="'+(ex?.scheduled_at?ex.scheduled_at.slice(0,16):'')+'" style="width:100%;border:0.5px solid var(--crd);border-radius:8px;padding:8px 12px;font-size:13px;outline:none;background:#fff"/></div></div>'
-    +'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">'
-    +'<button class="btn-cancel-sm" onclick="saveDraft()">임시저장</button>'
-    +'<button class="btn-submit" onclick="submitPost()">'+(isEdit?'수정 완료':'공지 등록')+'</button>'
-    +'</div></div>';
+  var isEdit = !!ex;
+  var writableCats = allCats.filter(function(c){return canWriteCat(c.name);});
+  var catOpts = writableCats.map(function(c){
+    return '<option value="'+c.id+'"'+(c.id===(ex ? ex.category_id : currentCatId)?' selected':'')+'>'+c.name+'</option>';
+  }).join('');
+  var hasSchedule = !!(ex && ex.scheduled_at);
+  selectedAccess = ex ? (ex.access || 'all') : 'all';
+
+  var html = '';
+  html += '<div style="margin-bottom:10px">';
+  html += '<button class="btn-cancel-sm" onclick="goPage(&quot;board&quot;)"><i class="ti ti-arrow-left"></i> 취소</button>';
+  html += '</div>';
+  html += '<div class="form-section">';
+  html += '<div class="page-title" style="margin-bottom:18px">'+(isEdit?'공지 수정':'새 공지 작성')+'</div>';
+  html += '<div class="form-row"><label class="form-label">카테고리</label><select class="form-input" id="nCat">'+catOpts+'</select></div>';
+  html += '<div class="form-row"><label class="form-label">제목</label><input class="form-input" id="nTitle" value="'+(ex ? (ex.title||'') : '')+'" placeholder="공지 제목을 입력하세요"/></div>';
+  html += '<div class="form-row"><label class="form-label">내용</label><div id="qEditor" style="min-height:200px"></div></div>';
+  html += '<div class="form-row"><label class="form-label">열람 권한</label><div class="form-access-row">';
+  html += '<div class="access-opt'+(selectedAccess==='all'?' selected':'')+'" id="acc-all" onclick="setAccess(&quot;all&quot;)"><i class="ti ti-users"></i><br>전 직원</div>';
+  html += '<div class="access-opt'+(selectedAccess==='manager'?' selected':'')+'" id="acc-manager" onclick="setAccess(&quot;manager&quot;)"><i class="ti ti-user-check"></i><br>매니저 이상</div>';
+  html += '</div></div>';
+  html += '<div class="form-row"><div class="toggle-row"><div><div class="toggle-label">댓글 허용</div><div class="toggle-sub">직원들이 댓글을 남길 수 있습니다</div></div>';
+  html += '<button class="toggle-switch'+(ex && ex.comments_on?' on':'')+'" id="cmtToggle" onclick="this.classList.toggle(&quot;on&quot;)"></button>';
+  html += '</div></div>';
+  html += '<div class="form-row"><label class="form-label">첨부파일</label>';
+  html += '<div class="upload-area" onclick="document.getElementById(&quot;fInput&quot;).click()" style="cursor:pointer">';
+  html += '<i class="ti ti-upload"></i><br>클릭하여 파일 선택 (PDF, 이미지, Word, Excel)<br>';
+  html += '<span style="font-size:11px">여러 파일 동시 선택 가능</span>';
+  html += '<input type="file" id="fInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif" style="display:none" onchange="addFiles(this.files)"/>';
+  html += '</div><div id="fList" class="file-list"></div>';
+  html += '<div class="upload-progress"><div class="upload-progress-fill" id="fProg"></div></div></div>';
+  html += '<div class="form-row"><div class="toggle-row"><div><div class="toggle-label"><i class="ti ti-clock" style="font-size:14px;vertical-align:-1px;margin-right:4px"></i>예약 발행</div>';
+  html += '<div class="toggle-sub">설정한 시간에 자동 게시</div></div>';
+  html += '<button class="toggle-switch'+(hasSchedule?' on':'')+'" id="schedToggle" onclick="toggleSched()"></button></div>';
+  html += '<div id="schedBox" style="display:'+(hasSchedule?'block':'none')+';background:var(--orb);border:0.5px solid var(--or);border-radius:8px;padding:12px 14px;margin-top:8px">';
+  html += '<div style="font-size:12px;font-weight:600;color:var(--or);margin-bottom:8px">발행 예약 시간</div>';
+  html += '<input type="datetime-local" id="schedAt" value="'+(ex && ex.scheduled_at ? ex.scheduled_at.slice(0,16) : '')+'" style="width:100%;border:0.5px solid var(--crd);border-radius:8px;padding:8px 12px;font-size:13px;outline:none;background:#fff"/>';
+  html += '</div></div>';
+  html += '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">';
+  html += '<button class="btn-cancel-sm" onclick="saveDraft()">임시저장</button>';
+  html += '<button class="btn-submit" onclick="submitPost()">'+(isEdit?'수정 완료':'공지 등록')+'</button>';
+  html += '</div></div>';
+
+  area.innerHTML = html;
+
   // 기존 첨부파일 로드
-  if(ex?.id){sb.from('attachments').select('*').eq('post_id',ex.id).then(({data})=>{if(!data?.length)return;const fl=document.getElementById('fList');data.forEach(a=>{const d=document.createElement('div');d.className='file-item';d.id='eat-'+a.id;d.innerHTML='<i class="ti ti-paperclip" style="color:var(--bl)"></i><span class="file-item-name" style="color:var(--bl)">'+a.file_name+'</span><span style="font-size:10px;color:var(--gn)">업로드됨</span><button onclick="delExistAtt('+a.id+','eat-'+a.id+'')" style="background:none;border:none;color:var(--th);cursor:pointer"><i class="ti ti-x"></i></button>';fl?.appendChild(d);});});}
+  if(ex && ex.id){
+    sb.from('attachments').select('*').eq('post_id',ex.id).then(function(res){
+      if(!res.data || !res.data.length) return;
+      var fl = document.getElementById('fList');
+      res.data.forEach(function(a){
+        var d = document.createElement('div');
+        d.className = 'file-item';
+        d.id = 'eat-'+a.id;
+        d.innerHTML = '<i class="ti ti-paperclip" style="color:var(--bl)"></i><span class="file-item-name" style="color:var(--bl)">'+a.file_name+'</span><span style="font-size:10px;color:var(--gn)">업로드됨</span><button onclick="delExistAtt('+a.id+',\'eat-'+a.id+'\')" style="background:none;border:none;color:var(--th);cursor:pointer"><i class="ti ti-x"></i></button>';
+        if(fl) fl.appendChild(d);
+      });
+    });
+  }
+
   // Quill 초기화
   function tryInitQuill(){
-    if(typeof Quill==='undefined'){setTimeout(tryInitQuill,200);return;}
-    const el=document.getElementById('qEditor');
-    if(!el||el.classList.contains('ql-container')) return;
-    currentQuill=new Quill('#qEditor',{theme:'snow',modules:{toolbar:{container:[[{header:[1,2,3,false]}],['bold','italic','underline','strike'],[{color:[]},{background:[]}],[{list:'ordered'},{list:'bullet'}],['link','image'],['clean']],handlers:{image:()=>{const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.click();inp.onchange=async()=>{const f=inp.files[0];if(!f)return;const url=await uploadFile(f,'images');if(url){const r=currentQuill.getSelection()||{index:0};currentQuill.insertEmbed(r.index,'image',url);}};}}}}},placeholder:'공지 내용을 입력하세요...'});
-    if(ex?.body) currentQuill.root.innerHTML=ex.body;
+    if(typeof Quill === 'undefined'){setTimeout(tryInitQuill, 200);return;}
+    var el = document.getElementById('qEditor');
+    if(!el || el.classList.contains('ql-container')) return;
+    currentQuill = new Quill('#qEditor', {
+      theme: 'snow',
+      modules: {
+        toolbar: {
+          container: [[{header:[1,2,3,false]}],['bold','italic','underline','strike'],[{color:[]},{background:[]}],[{list:'ordered'},{list:'bullet'}],['link','image'],['clean']],
+          handlers: {
+            image: function(){
+              var inp = document.createElement('input');
+              inp.type = 'file'; inp.accept = 'image/*'; inp.click();
+              inp.onchange = async function(){
+                var f = inp.files[0]; if(!f) return;
+                var url = await uploadFile(f,'images');
+                if(url){var r=currentQuill.getSelection()||{index:0};currentQuill.insertEmbed(r.index,'image',url);}
+              };
+            }
+          }
+        }
+      },
+      placeholder: '공지 내용을 입력하세요...'
+    });
+    if(ex && ex.body) currentQuill.root.innerHTML = ex.body;
   }
-  setTimeout(tryInitQuill,150);
+  setTimeout(tryInitQuill, 150);
 }
 function toggleSched(){const t=document.getElementById('schedToggle');t.classList.toggle('on');document.getElementById('schedBox').style.display=t.classList.contains('on')?'block':'none';}
 function addFiles(files){Array.from(files).forEach(f=>pendingFiles.push(f));renderFileList();}
