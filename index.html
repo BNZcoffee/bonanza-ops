@@ -1135,21 +1135,22 @@ const CAT_ICONS=[
 ];
 function renderCatModalList(){
   const list=document.getElementById('catList');
-  list.innerHTML=CATS.map((c,i)=>`
-    <div class="tag-item" id="catrow-${c.id}" style="align-items:center;gap:8px">
-      <select id="ci-${i}" data-id="${c.id}" style="border:0.5px solid var(--crd);border-radius:6px;padding:4px 6px;font-size:12px;background:var(--cr);cursor:pointer;flex-shrink:0" title="아이콘">
-        ${CAT_ICONS.map(ic=>`<option value="${ic.v}"${(c.icon||'ti-folder')===ic.v?' selected':''}>${ic.l}</option>`).join('')}
-      </select>
-      <i class="ti ${c.icon||'ti-folder'}" id="ci-preview-${i}" style="font-size:16px;color:var(--br);flex-shrink:0"></i>
-      <input value="${c.name}" id="cf-${i}" data-id="${c.id}" style="flex:1;border:0.5px solid var(--crd);border-radius:6px;padding:6px 10px;font-size:13px;outline:none"/>
-      <button onclick="deleteCat(${c.id},'${c.name.replace(/'/g,"\\'")}',this)" style="background:none;border:none;color:var(--rd);cursor:pointer;padding:4px 6px;font-size:14px;flex-shrink:0" title="삭제"><i class="ti ti-trash"></i></button>
-    </div>`).join('');
-  // 아이콘 선택 시 미리보기
+  list.innerHTML=CATS.map((c,i)=>{
+    const iconOpts=CAT_ICONS.map(ic=>'<option value="'+ic.v+'"'+(((c.icon||'ti-folder')===ic.v)?' selected':'')+'>'+ic.l+'</option>').join('');
+    const safeName=c.name.replace(/'/g,"\'");
+    return '<div class="tag-item" id="catrow-'+c.id+'" style="align-items:center;gap:8px">'
+      +'<select id="ci-'+i+'" data-id="'+c.id+'" style="border:0.5px solid var(--crd);border-radius:6px;padding:4px 6px;font-size:12px;background:var(--cr);cursor:pointer;flex-shrink:0" title="아이콘">'+iconOpts+'</select>'
+      +'<i class="ti '+(c.icon||'ti-folder')+'" id="ci-preview-'+i+'" style="font-size:16px;color:var(--br);flex-shrink:0"></i>'
+      +'<input value="'+c.name+'" id="cf-'+i+'" data-id="'+c.id+'" style="flex:1;border:0.5px solid var(--crd);border-radius:6px;padding:6px 10px;font-size:13px;outline:none"/>'
+      +'<button onclick="deleteCat('+c.id+',''+safeName+'',this)" style="background:none;border:none;color:var(--rd);cursor:pointer;padding:4px 6px;font-size:14px;flex-shrink:0" title="삭제"><i class="ti ti-trash"></i></button>'
+      +'</div>';
+  }).join('');
   CATS.forEach((c,i)=>{
     const sel=document.getElementById('ci-'+i);
-    if(sel)sel.onchange=()=>{const prev=document.getElementById('ci-preview-'+i);if(prev){prev.className='ti '+sel.value+' '+prev.className.split(' ').slice(2).join(' ');prev.className='ti '+sel.value;prev.style.cssText='font-size:16px;color:var(--br);flex-shrink:0';}};
+    if(sel)sel.onchange=()=>{const prev=document.getElementById('ci-preview-'+i);if(prev){prev.className='ti '+sel.value;prev.style.cssText='font-size:16px;color:var(--br);flex-shrink:0';}};
   });
 }
+
 function addCatRow(){
   const list=document.getElementById('catList');
   const i=list.children.length;
