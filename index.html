@@ -211,34 +211,15 @@ textarea.form-input{min-height:120px;resize:vertical}
 .add-user-form.open{display:block}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 
-.attach-file-dl{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;text-decoration:none;margin-bottom:6px}
-.attach-file-dl:hover{border-color:var(--bl);background:var(--blb)}
-.upload-area{border:0.5px dashed var(--crd);border-radius:8px;padding:16px;background:var(--cr);text-align:center;font-size:13px;color:var(--th)}
-.upload-area:hover{border-color:var(--brl)}
-.file-list{display:flex;flex-direction:column;gap:4px;margin-top:8px}
-.file-item{display:flex;align-items:center;gap:8px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;padding:6px 10px;font-size:12px;color:var(--ts)}
-.file-item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.upload-progress{height:3px;background:var(--crd);border-radius:3px;margin-top:4px;overflow:hidden}
-.upload-progress-fill{height:100%;background:var(--gn);width:0;transition:width .3s}
-.ql-container{font-family:'Segoe UI',system-ui,sans-serif;font-size:15px;border-radius:0 0 8px 8px;border-color:var(--crd);background:#fff;min-height:220px}
-.ql-toolbar{border-radius:8px 8px 0 0;border-color:var(--crd);background:var(--cr)}
-.ql-editor{min-height:200px;line-height:1.9}
-.ql-editor img{max-width:100%;border-radius:8px}
-.ql-editor table td,.ql-editor table th{border:1px solid var(--crd);padding:6px 10px}
-.detail-body img{max-width:100%;height:auto;border-radius:8px;margin:8px 0;display:block}
-.detail-body table{border-collapse:collapse;width:100%;margin:10px 0;overflow-x:auto;display:block}
-.detail-body table td,.detail-body table th{border:1px solid var(--crd);padding:8px 12px;font-size:14px}
-.detail-body table th{background:var(--crm);font-weight:600}
-.notif-card{background:#fff;border:0.5px solid var(--crd);border-radius:12px;padding:18px;margin-bottom:12px}
 .setting-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:0.5px solid var(--crd)}
 .setting-row:last-child{border-bottom:none}
 .setting-title{font-size:13px;color:var(--tm);font-weight:500}
 .setting-sub{font-size:11px;color:var(--th);margin-top:2px}
-.badge-free{background:var(--gnb);color:var(--gn);font-size:9px;font-weight:700;border-radius:8px;padding:2px 6px;margin-left:6px}
+.notif-card{background:#fff;border:0.5px solid var(--crd);border-radius:12px;padding:18px;margin-bottom:12px}
 @media(max-width:768px){
   #mainScreen{flex-direction:column}
   .sidebar{width:100%;min-height:auto;flex-direction:row;padding:0;border-right:none;border-bottom:0.5px solid var(--crd);overflow-x:auto;flex-shrink:0}
-  .sidebar-section{display:flex;flex-direction:row;padding:0;margin-bottom:0;gap:0;align-items:center}
+  .sidebar-section{display:flex;flex-direction:row;padding:0;margin-bottom:0;align-items:center}
   .sidebar-label{display:none}
   .nav-btn{padding:10px 8px;border-radius:0;font-size:12px;white-space:nowrap;border-bottom:2px solid transparent;flex-shrink:0}
   .nav-btn.active{background:none;border-bottom-color:var(--br);color:var(--br)}
@@ -248,9 +229,6 @@ textarea.form-input{min-height:120px;resize:vertical}
   .content{padding:14px}
   .board-tabs{flex-wrap:nowrap;overflow-x:auto}
   .tab-btn{white-space:nowrap;flex-shrink:0}
-  .modal-inner{width:95vw!important}
-  .topbar{padding:0 12px}
-  .user-badge{display:none}
 }
 </style>
 </head>
@@ -303,7 +281,7 @@ textarea.form-input{min-height:120px;resize:vertical}
     </div>
     <div class="sidebar-footer" id="sidebarInfo" onclick="goPage('profile')" style="cursor:pointer;display:flex;align-items:center;gap:6px">
       <i class="ti ti-user-circle" style="font-size:16px;color:var(--th)"></i>
-      <span id="sidebarInfoText"></span>
+      <span id="sidebarInfoTxt"></span>
       <i class="ti ti-chevron-right" style="font-size:12px;color:var(--th);margin-left:auto"></i>
     </div>
   </nav>
@@ -349,21 +327,9 @@ textarea.form-input{min-height:120px;resize:vertical}
 const SUPABASE_URL = 'https://fhwiihbtlspeckmgnlax.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZod2lpaGJ0bHNwZWNrbWdubGF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MzQxMjcsImV4cCI6MjA5NjMxMDEyN30.izRHlmKaKLBSY78eSNMpyt-mGw0Whlt6XIAoNjp5Aqo';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const ST_URL = SUPABASE_URL + '/storage/v1/object/public/attachments/';
 
 const roleLbl = {admin:'운영팀',manager:'매니저',barista:'바리스타',pastry:'파티쉐',purchase:'구매팀',hr:'인사팀'};
 const roleCls = {admin:'role-admin',manager:'role-manager',barista:'role-barista',pastry:'role-pastry',purchase:'role-purchase',hr:'role-hr'};
-const roleMap = {'매니저':'manager','바리스타':'barista','파티쉐':'pastry','구매팀':'purchase','인사팀':'hr','운영팀':'admin'};
-const CAT_ICONS = [
-  {v:'ti-clipboard-list',l:'체크리스트'},{v:'ti-coffee',l:'커피'},{v:'ti-notes',l:'메모'},
-  {v:'ti-shopping-cart',l:'장바구니'},{v:'ti-id-badge',l:'배지'},{v:'ti-folder',l:'폴더'},
-  {v:'ti-star',l:'별'},{v:'ti-heart',l:'하트'},{v:'ti-bell',l:'벨'},{v:'ti-book',l:'책'},
-  {v:'ti-camera',l:'카메라'},{v:'ti-chart-bar',l:'차트'},{v:'ti-flag',l:'깃발'},
-  {v:'ti-gift',l:'선물'},{v:'ti-home',l:'홈'},{v:'ti-tool',l:'도구'}
-];
-let APP = {app_name:'보난자 커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',
-  primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',
-  read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'-'};
 
 let currentUser = null;
 let currentPage = 'board';
@@ -375,10 +341,9 @@ let selectedAccess = 'all';
 let commentsOnNew = false;
 
 function toKST(s){if(!s)return '';return new Date(new Date(s).getTime()+9*3600000).toISOString();}
-function nowStr(){return new Date(Date.now()+9*3600000).toISOString().slice(0,16).replace('T',' ');}
-function daysAgo(dateStr){return Math.floor((new Date()-new Date(dateStr))/(864e5));}
-function fmtDate(str){if(!str)return '';return toKST(str).slice(0,10);}
-function fmtDateTime(str){if(!str)return '';return toKST(str).slice(0,16).replace('T',' ');}
+function fmtDate(s){if(!s)return '';return toKST(s).slice(0,10);}
+function fmtDateTime(s){if(!s)return '';return toKST(s).slice(0,16).replace('T',' ');}
+function daysAgo(s){return Math.floor((new Date()-new Date(s))/864e5);}
 
 // ── AUTH ──────────────────────────────────────────
 async function doLogin() {
@@ -414,9 +379,8 @@ function loginAs(user) {
   document.getElementById('mainScreen').style.display = 'flex';
   document.getElementById('topbar').style.display = 'flex';
   document.getElementById('adminNav').style.display = (user.role === 'admin') ? '' : 'none';
-  document.getElementById('sidebarInfoText').textContent = user.store + ' · ' + user.name;
-  document.getElementById('userBadgeEl').innerHTML = '<span class="role-tag">'+(roleLbl[user.role]||user.role)+'</span>'+user.store+' '+user.name;
-  loadAppSettings();
+  document.getElementById('sidebarInfoTxt').textContent = user.store + ' · ' + user.name;
+  document.getElementById('userBadgeEl').innerHTML = `<span class="role-tag">${roleLbl[user.role]||user.role}</span>${user.store} ${user.name}`;
   loadCats();
   setInterval(checkScheduled, 60000);
 
@@ -444,7 +408,6 @@ async function loadCats() {
   renderCatNav();
   goPage('all');
   updateNotifDot();
-  updateDraftBadge();
 }
 
 function renderCatNav() {
@@ -475,15 +438,19 @@ async function updateNotifDot() {
   });
 }
 async function updateDraftBadge(){
-  const b = document.getElementById('draftBadge'); if(!b||!currentUser) return;
+  const b = document.getElementById('draftBadge');
+  if (!b||!currentUser) return;
   const {data} = await sb.from('posts').select('id').in('status',['draft','scheduled']).eq('author_id',currentUser.id);
   b.style.display = (data&&data.length) ? '' : 'none';
 }
 async function checkScheduled(){
-  if(!currentUser||currentUser.role!=='admin') return;
+  if (!currentUser||currentUser.role!=='admin') return;
   const now = new Date().toISOString();
   const {data} = await sb.from('posts').select('id').eq('status','scheduled').lte('scheduled_at',now);
-  if(data&&data.length){for(const p of data)await sb.from('posts').update({status:'published',created_at:now}).eq('id',p.id);updateNotifDot();}
+  if (data&&data.length) {
+    for (const p of data) await sb.from('posts').update({status:'published',created_at:now}).eq('id',p.id);
+    updateNotifDot();
+  }
 }
 
 function switchCat(id, name) {
@@ -495,7 +462,7 @@ function switchCat(id, name) {
 function canSee(post) {
   if (!currentUser) return false;
   if (currentUser.role === 'admin') return true;
-  if (post.status === 'draft' || post.status === 'scheduled') return false;
+  if (post.status && post.status !== 'published') return false;
   const cat = allCats.find(c => c.id === post.category_id);
   if (cat) {
     if (cat.name === '구매팀' && currentUser.role !== 'purchase') return false;
@@ -515,15 +482,6 @@ function canWrite() {
   if (cat.name === '인사팀' && currentUser.role === 'hr') return true;
   return false;
 }
-function canWriteCat(catName) {
-  if (!currentUser) return false;
-  if (currentUser.role === 'admin') return true;
-  if (catName === '구매팀' && currentUser.role === 'purchase') return true;
-  if (catName === '인사팀' && currentUser.role === 'hr') return true;
-  return false;
-}
-function isWriter(){return currentUser && ['admin','purchase','hr'].includes(currentUser.role);}
-function canStats(){return currentUser && ['admin','purchase','hr'].includes(currentUser.role);}
 
 // ── PAGES ─────────────────────────────────────────
 function goPage(page) {
@@ -550,18 +508,20 @@ function goPage(page) {
     renderNotifSettings(area);
   } else if (page === 'all') {
     const nb = document.getElementById('nav-all');
-    if(nb) nb.classList.add('active');
+    if (nb) nb.classList.add('active');
     renderAll(area);
   } else if (page === 'drafts') {
     const nb = document.getElementById('nav-drafts');
-    if(nb) nb.classList.add('active');
+    if (nb) nb.classList.add('active');
     renderDrafts(area);
   } else if (page === 'appsettings') {
     const nb = document.getElementById('nav-app');
-    if(nb) nb.classList.add('active');
+    if (nb) nb.classList.add('active');
     renderAppSettings(area);
   } else if (page === 'profile') {
     renderProfile(area);
+  } else if (page === 'editpost') {
+    renderEditPost(area);
   }
 }
 
@@ -657,7 +617,7 @@ async function renderPostDetail(area) {
   // load reads, comments, attachments
   const [readsRes, cmtsRes, attRes] = await Promise.all([
     sb.from('post_reads').select('*, users(name,store)').eq('post_id', p.id),
-    sb.from('comments').select('*, users(name,store,role)').eq('post_id', p.id).order('created_at'),
+    sb.from('comments').select('*, users(name,store,nickname,avatar_url)').eq('post_id', p.id).order('created_at'),
     sb.from('attachments').select('*').eq('post_id', p.id)
   ]);
   const reads = readsRes.data || [];
@@ -695,42 +655,42 @@ async function renderPostDetail(area) {
     </div>`;
   }
 
+  const iconMap2 = {pdf:'ti-file-type-pdf',doc:'ti-file-type-doc',docx:'ti-file-type-doc',xls:'ti-file-type-xls',xlsx:'ti-file-type-xls',jpg:'ti-photo',jpeg:'ti-photo',png:'ti-photo',gif:'ti-photo'};
   let attachHtml = '';
   if (attachments.length) {
-    const iconMap={'pdf':'ti-file-type-pdf','doc':'ti-file-type-doc','docx':'ti-file-type-doc','xls':'ti-file-type-xls','xlsx':'ti-file-type-xls','jpg':'ti-photo','jpeg':'ti-photo','png':'ti-photo','gif':'ti-photo'};
-    const links = attachments.map(a=>{
-      const ext=(a.file_name||'').split('.').pop().toLowerCase();
-      const icon=iconMap[ext]||'ti-paperclip';
-      return '<a href="'+a.file_url+'" target="_blank" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;text-decoration:none;margin-bottom:6px">'
-        +'<i class="ti '+icon+'" style="font-size:20px;color:var(--bl);flex-shrink:0"></i>'
-        +'<span style="flex:1;font-size:13px;color:var(--bl);text-decoration:underline;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+a.file_name+'</span>'
-        +'<span style="font-size:10px;font-weight:700;color:var(--bl);background:var(--blb);border-radius:4px;padding:2px 6px;flex-shrink:0">'+ext.toUpperCase()+'</span>'
-        +'<i class="ti ti-download" style="font-size:14px;color:var(--th);flex-shrink:0"></i>'
-        +'</a>';
+    const attLinks = attachments.map(a => {
+      const ext = (a.file_name||'').split('.').pop().toLowerCase();
+      const ico = iconMap2[ext] || 'ti-paperclip';
+      return `<a href="${a.file_url}" target="_blank" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;text-decoration:none;margin-bottom:6px;color:var(--bl)">
+        <i class="ti ${ico}" style="font-size:20px;flex-shrink:0"></i>
+        <span style="flex:1;font-size:13px;text-decoration:underline;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.file_name}</span>
+        <span style="font-size:10px;font-weight:700;background:var(--blb);border-radius:4px;padding:2px 6px;flex-shrink:0">${ext.toUpperCase()}</span>
+        <i class="ti ti-download" style="font-size:14px;color:var(--th);flex-shrink:0"></i>
+      </a>`;
     }).join('');
-    attachHtml = '<div style="margin-bottom:16px"><div class="attach-label">첨부파일 ('+attachments.length+'개)</div><div style="margin-top:8px">'+links+'</div></div>';
+    attachHtml = `<div style="margin-bottom:16px"><div class="attach-label">첨부파일 (${attachments.length}개)</div><div style="margin-top:8px">${attLinks}</div></div>`;
   }
 
   let cmtHtml = '';
   if (p.comments_on) {
     const cmtItems = comments.map(c => {
       const isMine = c.author_id === currentUser.id;
-      const isAdmin2 = currentUser.role === 'admin';
+      const isAdminUser = currentUser.role === 'admin';
       const dispName = c.users?.nickname || c.users?.name || '?';
       const avatarContent = c.users?.avatar_url
-        ? '<img src="'+c.users.avatar_url+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%">'
+        ? `<img src="${c.users.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
         : dispName.slice(0,2);
-      return '<div class="comment-item" id="cmt-'+c.id+'">'
-        +'<div class="comment-head">'
-        +'<div class="comment-avatar" style="overflow:hidden">'+avatarContent+'</div>'
-        +'<span style="font-size:12px;font-weight:600;color:var(--tm)">'+dispName+'</span>'
-        +'<span style="font-size:11px;color:var(--th);margin-left:4px">'+(c.users?.store||'')+'</span>'
-        +'<span style="font-size:11px;color:var(--th);margin-left:auto">'+fmtDateTime(c.created_at)+'</span>'
-        +(isMine?'<button onclick="editComment('+c.id+')" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:6px"><i class="ti ti-edit"></i></button>':'')
-        +(isMine||isAdmin2?'<button onclick="deleteComment('+c.id+','+p.id+')" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:2px"><i class="ti ti-trash"></i></button>':'')
-        +'</div>'
-        +'<div class="comment-body" id="cbody-'+c.id+'">'+c.body+'</div>'
-        +'</div>';
+      return `<div class="comment-item" id="cmt-${c.id}">
+        <div class="comment-head">
+          <div class="comment-avatar" style="overflow:hidden">${avatarContent}</div>
+          <span style="font-size:12px;font-weight:600;color:var(--tm)">${dispName}</span>
+          <span style="font-size:11px;color:var(--th);margin-left:4px">${c.users?.store||''}</span>
+          <span style="font-size:11px;color:var(--th);margin-left:auto">${fmtDateTime(c.created_at)}</span>
+          ${isMine ? `<button onclick="editCmt(${c.id})" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:6px"><i class="ti ti-edit"></i></button>` : ''}
+          ${(isMine||isAdminUser) ? `<button onclick="delCmt(${c.id},${p.id})" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:2px"><i class="ti ti-trash"></i></button>` : ''}
+        </div>
+        <div class="comment-body" id="cbody-${c.id}">${c.body}</div>
+      </div>`;
     }).join('');
     cmtHtml = `<div class="comment-section">
       <div class="section-label">댓글 ${comments.length}개</div>
@@ -742,8 +702,8 @@ async function renderPostDetail(area) {
     </div>`;
   }
 
-  const catName2 = allCats.find(c=>c.id===p.category_id)?.name||'';
-  const editBtn = canWriteCat(catName2) ? '<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openEditPost('+p.id+')"><i class="ti ti-edit"></i> 수정</button>' : '';
+  const catNameForEdit = allCats.find(c=>c.id===p.category_id)?.name||'';
+  const editBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openEditPost(${p.id})"><i class="ti ti-edit"></i> 수정</button>` : '';
 
   area.innerHTML = `
     <div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage('board')"><i class="ti ti-arrow-left"></i> 목록</button></div>
@@ -776,30 +736,6 @@ async function confirmRead(postId) {
   updateNotifDot();
   openPostById(postId);
 }
-async function deleteComment(cmtId, postId){
-  if(!confirm('댓글을 삭제할까요?')) return;
-  await sb.from('comments').delete().eq('id', cmtId);
-  openPostById(postId);
-}
-function editComment(cmtId){
-  const bodyEl = document.getElementById('cbody-'+cmtId);
-  if(!bodyEl) return;
-  const cur = bodyEl.textContent;
-  bodyEl.innerHTML = '<div style="display:flex;gap:6px;margin-top:4px"><textarea id="cedit-'+cmtId+'" style="flex:1;border:0.5px solid var(--crd);border-radius:8px;padding:8px;font-size:13px;font-family:inherit;resize:none;min-height:60px;outline:none">'+cur+'</textarea><div style="display:flex;flex-direction:column;gap:4px"><button onclick="saveEditComment('+cmtId+')" class="btn-comment-submit" style="padding:6px 10px;font-size:12px">저장</button><button onclick="cancelEditComment('+cmtId+',this)" class="btn-cancel-sm" style="padding:6px 10px;font-size:12px" data-orig="'+encodeURIComponent(cur)+'">취소</button></div></div>';
-}
-async function saveEditComment(cmtId){
-  const inp = document.getElementById('cedit-'+cmtId);
-  const body = inp ? inp.value.trim() : '';
-  if(!body) return;
-  await sb.from('comments').update({body}).eq('id', cmtId);
-  const bodyEl = document.getElementById('cbody-'+cmtId);
-  if(bodyEl) bodyEl.innerHTML = body;
-}
-function cancelEditComment(cmtId, btn){
-  const orig = decodeURIComponent(btn.dataset.orig||'');
-  const bodyEl = document.getElementById('cbody-'+cmtId);
-  if(bodyEl) bodyEl.innerHTML = orig;
-}
 
 async function submitComment(postId) {
   const inp = document.getElementById('cmtInput');
@@ -810,111 +746,49 @@ async function submitComment(postId) {
 }
 
 // ── NEW POST ──────────────────────────────────────
-let currentQuill = null, editingPostId = null, pendingFiles = [];
+function renderNewPost(area) {
+  const catOpts = allCats.map(c => `<option value="${c.id}"${c.id===currentCatId?' selected':''}>${c.name}</option>`).join('');
+  area.innerHTML = `
+    <div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage('board')"><i class="ti ti-arrow-left"></i> 취소</button></div>
+    <div class="form-section">
+      <div class="page-title" style="margin-bottom:18px">새 공지 작성</div>
+      <div class="form-row"><label class="form-label">카테고리</label><select class="form-input" id="nCat">${catOpts}</select></div>
+      <div class="form-row"><label class="form-label">제목</label><input class="form-input" id="nTitle" placeholder="공지 제목을 입력하세요" /></div>
+      <div class="form-row"><label class="form-label">내용</label><textarea class="form-input" id="nBody" placeholder="공지 내용을 입력하세요"></textarea></div>
+      <div class="form-row">
+        <label class="form-label">열람 권한</label>
+        <div class="form-access-row">
+          <div class="access-opt selected" id="acc-all" onclick="setAccess('all')"><i class="ti ti-users"></i><br>전 직원</div>
+          <div class="access-opt" id="acc-manager" onclick="setAccess('manager')"><i class="ti ti-user-check"></i><br>매니저 이상</div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="toggle-row">
+          <div><div class="toggle-label">댓글 허용</div><div class="toggle-sub">직원들이 이 공지에 댓글을 남길 수 있습니다</div></div>
+          <button class="toggle-switch" id="cmtToggle" onclick="this.classList.toggle('on')" aria-label="댓글 허용"></button>
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">첨부파일 URL (선택)</label>
+        <input class="form-input" id="nFileUrl" placeholder="파일 URL 입력 (Google Drive, Dropbox 등 공유 링크)" />
+        <input class="form-input" id="nFileName" placeholder="파일 표시 이름" style="margin-top:6px" />
+        <p style="font-size:11px;color:var(--th);margin-top:4px">* 파일은 Google Drive 등 외부 링크로 첨부 가능합니다</p>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">
+        <button class="btn-cancel-sm" onclick="goPage('board')">취소</button>
+        <button class="btn-submit" onclick="submitPost()">공지 등록</button>
+      </div>
+    </div>`;
+  selectedAccess = 'all';
+}
 
 async function openEditPost(id){
-  const{data}=await sb.from('posts').select('*').eq('id',id).single();
+  const {data} = await sb.from('posts').select('*').eq('id',id).single();
   if(!data) return;
-  editingPostId=id; currentCatId=data.category_id;
-  renderNewPost(document.getElementById('contentArea'),data);
+  currentPost = data;
+  currentCatId = data.category_id;
+  goPage('editpost');
 }
-
-function renderNewPost(area, ex) {
-  editingPostId = ex ? ex.id : null;
-  pendingFiles = [];
-  var isEdit = !!ex;
-  var writableCats = allCats.filter(function(c){return canWriteCat(c.name);});
-  var catOpts = writableCats.map(function(c){
-    return '<option value="'+c.id+'"'+(c.id===(ex ? ex.category_id : currentCatId)?' selected':'')+'>'+c.name+'</option>';
-  }).join('');
-  var hasSchedule = !!(ex && ex.scheduled_at);
-  selectedAccess = ex ? (ex.access || 'all') : 'all';
-
-  var html = '';
-  html += '<div style="margin-bottom:10px">';
-  html += '<button class="btn-cancel-sm" onclick="goPage(&quot;board&quot;)"><i class="ti ti-arrow-left"></i> 취소</button>';
-  html += '</div>';
-  html += '<div class="form-section">';
-  html += '<div class="page-title" style="margin-bottom:18px">'+(isEdit?'공지 수정':'새 공지 작성')+'</div>';
-  html += '<div class="form-row"><label class="form-label">카테고리</label><select class="form-input" id="nCat">'+catOpts+'</select></div>';
-  html += '<div class="form-row"><label class="form-label">제목</label><input class="form-input" id="nTitle" value="'+(ex ? (ex.title||'') : '')+'" placeholder="공지 제목을 입력하세요"/></div>';
-  html += '<div class="form-row"><label class="form-label">내용</label><div id="qEditor" style="min-height:200px"></div></div>';
-  html += '<div class="form-row"><label class="form-label">열람 권한</label><div class="form-access-row">';
-  html += '<div class="access-opt'+(selectedAccess==='all'?' selected':'')+'" id="acc-all" onclick="setAccess(&quot;all&quot;)"><i class="ti ti-users"></i><br>전 직원</div>';
-  html += '<div class="access-opt'+(selectedAccess==='manager'?' selected':'')+'" id="acc-manager" onclick="setAccess(&quot;manager&quot;)"><i class="ti ti-user-check"></i><br>매니저 이상</div>';
-  html += '</div></div>';
-  html += '<div class="form-row"><div class="toggle-row"><div><div class="toggle-label">댓글 허용</div><div class="toggle-sub">직원들이 댓글을 남길 수 있습니다</div></div>';
-  html += '<button class="toggle-switch'+(ex && ex.comments_on?' on':'')+'" id="cmtToggle" onclick="this.classList.toggle(&quot;on&quot;)"></button>';
-  html += '</div></div>';
-  html += '<div class="form-row"><label class="form-label">첨부파일</label>';
-  html += '<div class="upload-area" onclick="document.getElementById(&quot;fInput&quot;).click()" style="cursor:pointer">';
-  html += '<i class="ti ti-upload"></i><br>클릭하여 파일 선택 (PDF, 이미지, Word, Excel)<br>';
-  html += '<span style="font-size:11px">여러 파일 동시 선택 가능</span>';
-  html += '<input type="file" id="fInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif" style="display:none" onchange="addFiles(this.files)"/>';
-  html += '</div><div id="fList" class="file-list"></div>';
-  html += '<div class="upload-progress"><div class="upload-progress-fill" id="fProg"></div></div></div>';
-  html += '<div class="form-row"><div class="toggle-row"><div><div class="toggle-label"><i class="ti ti-clock" style="font-size:14px;vertical-align:-1px;margin-right:4px"></i>예약 발행</div>';
-  html += '<div class="toggle-sub">설정한 시간에 자동 게시</div></div>';
-  html += '<button class="toggle-switch'+(hasSchedule?' on':'')+'" id="schedToggle" onclick="toggleSched()"></button></div>';
-  html += '<div id="schedBox" style="display:'+(hasSchedule?'block':'none')+';background:var(--orb);border:0.5px solid var(--or);border-radius:8px;padding:12px 14px;margin-top:8px">';
-  html += '<div style="font-size:12px;font-weight:600;color:var(--or);margin-bottom:8px">발행 예약 시간</div>';
-  html += '<input type="datetime-local" id="schedAt" value="'+(ex && ex.scheduled_at ? ex.scheduled_at.slice(0,16) : '')+'" style="width:100%;border:0.5px solid var(--crd);border-radius:8px;padding:8px 12px;font-size:13px;outline:none;background:#fff"/>';
-  html += '</div></div>';
-  html += '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">';
-  html += '<button class="btn-cancel-sm" onclick="saveDraft()">임시저장</button>';
-  html += '<button class="btn-submit" onclick="submitPost()">'+(isEdit?'수정 완료':'공지 등록')+'</button>';
-  html += '</div></div>';
-
-  area.innerHTML = html;
-
-  // 기존 첨부파일 로드
-  if(ex && ex.id){
-    sb.from('attachments').select('*').eq('post_id',ex.id).then(function(res){
-      if(!res.data || !res.data.length) return;
-      var fl = document.getElementById('fList');
-      res.data.forEach(function(a){
-        var d = document.createElement('div');
-        d.className = 'file-item';
-        d.id = 'eat-'+a.id;
-        d.innerHTML = '<i class="ti ti-paperclip" style="color:var(--bl)"></i><span class="file-item-name" style="color:var(--bl)">'+a.file_name+'</span><span style="font-size:10px;color:var(--gn)">업로드됨</span><button onclick="delExistAtt('+a.id+',\'eat-'+a.id+'\')" style="background:none;border:none;color:var(--th);cursor:pointer"><i class="ti ti-x"></i></button>';
-        if(fl) fl.appendChild(d);
-      });
-    });
-  }
-
-  // Quill 초기화
-  function tryInitQuill(){
-    if(typeof Quill === 'undefined'){setTimeout(tryInitQuill, 200);return;}
-    var el = document.getElementById('qEditor');
-    if(!el || el.classList.contains('ql-container')) return;
-    currentQuill = new Quill('#qEditor', {
-      theme: 'snow',
-      modules: {
-        toolbar: {
-          container: [[{header:[1,2,3,false]}],['bold','italic','underline','strike'],[{color:[]},{background:[]}],[{list:'ordered'},{list:'bullet'}],['link','image'],['clean']],
-          handlers: {
-            image: function(){
-              var inp = document.createElement('input');
-              inp.type = 'file'; inp.accept = 'image/*'; inp.click();
-              inp.onchange = async function(){
-                var f = inp.files[0]; if(!f) return;
-                var url = await uploadFile(f,'images');
-                if(url){var r=currentQuill.getSelection()||{index:0};currentQuill.insertEmbed(r.index,'image',url);}
-              };
-            }
-          }
-        }
-      },
-      placeholder: '공지 내용을 입력하세요...'
-    });
-    if(ex && ex.body) currentQuill.root.innerHTML = ex.body;
-  }
-  setTimeout(tryInitQuill, 150);
-}
-function toggleSched(){const t=document.getElementById('schedToggle');t.classList.toggle('on');document.getElementById('schedBox').style.display=t.classList.contains('on')?'block':'none';}
-function addFiles(files){Array.from(files).forEach(f=>pendingFiles.push(f));renderFileList();}
-function renderFileList(){const fl=document.getElementById('fList');if(!fl)return;fl.innerHTML=pendingFiles.map((f,i)=>'<div class="file-item"><i class="ti ti-file"></i><span class="file-item-name">'+f.name+'</span><span style="font-size:11px;color:var(--th)">'+(f.size/1024/1024).toFixed(1)+'MB</span><button onclick="pendingFiles.splice('+i+',1);renderFileList()" style="background:none;border:none;color:var(--th);cursor:pointer"><i class="ti ti-x"></i></button></div>').join('');}
-async function delExistAtt(id,elemId){await sb.from('attachments').delete().eq('id',id);document.getElementById(elemId)?.remove();}
 
 function setAccess(v) {
   selectedAccess = v;
@@ -922,50 +796,33 @@ function setAccess(v) {
   document.getElementById('acc-manager').className = 'access-opt'+(v==='manager'?' selected':'');
 }
 
-async function submitPost(isDraft=false) {
-  const title = document.getElementById('nTitle')?.value.trim();
-  const catId = parseInt(document.getElementById('nCat')?.value);
-  const commentsOn = document.getElementById('cmtToggle')?.classList.contains('on');
-  const body = currentQuill ? currentQuill.root.innerHTML : '';
-  const schedOn = document.getElementById('schedToggle')?.classList.contains('on');
-  const schedVal = document.getElementById('schedAt')?.value;
-  if(!title){alert('제목을 입력해주세요.');return;}
-  if(!body||body==='<p><br></p>'){alert('내용을 입력해주세요.');return;}
-  let status = 'published', scheduledAt = null;
-  if(isDraft) status = 'draft';
-  else if(schedOn && schedVal && new Date(schedVal) > new Date()){status='scheduled';scheduledAt=new Date(schedVal).toISOString();}
-  const payload = {category_id:catId,title,body,access:selectedAccess,comments_on:commentsOn,author_id:currentUser.id,status,scheduled_at:scheduledAt,updated_at:new Date().toISOString()};
-  let postId = editingPostId;
-  if(editingPostId){
-    const{error}=await sb.from('posts').update(payload).eq('id',editingPostId);
-    if(error){await sb.from('posts').update({status:'draft',scheduled_at:null}).eq('id',editingPostId);alert('오류로 임시저장되었습니다.');updateDraftBadge();goPage('drafts');return;}
-  } else {
-    const{data:post,error}=await sb.from('posts').insert(payload).select().single();
-    if(error){alert('등록 오류: '+error.message);return;}
-    postId = post.id;
+async function submitPost() {
+  const title = document.getElementById('nTitle').value.trim();
+  const body = document.getElementById('nBody').value.trim();
+  const catId = parseInt(document.getElementById('nCat').value);
+  const commentsOn = document.getElementById('cmtToggle').classList.contains('on');
+  const fileUrl = document.getElementById('nFileUrl').value.trim();
+  const fileName = document.getElementById('nFileName').value.trim();
+  if (!title || !body) { alert('제목과 내용을 입력해주세요.'); return; }
+
+  const { data: post, error } = await sb.from('posts').insert({
+    category_id: catId,
+    title, body,
+    access: selectedAccess,
+    comments_on: commentsOn,
+    author_id: currentUser.id
+  }).select().single();
+
+  if (error) { alert('등록 오류: ' + error.message); return; }
+
+  if (fileUrl && fileName) {
+    await sb.from('attachments').insert({post_id: post.id, file_name: fileName, file_url: fileUrl});
   }
-  if(pendingFiles && pendingFiles.length > 0){
-    const prog = document.getElementById('fProg');
-    for(let i=0;i<pendingFiles.length;i++){
-      const url = await uploadFile(pendingFiles[i],'files');
-      if(url) await sb.from('attachments').insert({post_id:postId,file_name:pendingFiles[i].name,file_url:url});
-      if(prog) prog.style.width=((i+1)/pendingFiles.length*100)+'%';
-    }
-  }
-  editingPostId=null; pendingFiles=[];
-  updateNotifDot(); updateDraftBadge();
-  if(isDraft) alert('임시저장 완료!');
-  else if(status==='scheduled') alert('예약 완료! '+schedVal+' 에 자동 발행됩니다.');
+
   currentCatId = catId;
+  currentCatName = allCats.find(c=>c.id===catId)?.name || '';
+  updateNotifDot();
   goPage('board');
-}
-function saveDraft(){submitPost(true);}
-async function uploadFile(file, folder){
-  const ext = file.name.split('.').pop();
-  const fname = folder+'/'+Date.now()+'_'+Math.random().toString(36).slice(2)+'.'+ext;
-  const{error}=await sb.storage.from('attachments').upload(fname,file,{upsert:true});
-  if(error){console.error(error);return null;}
-  return ST_URL+fname;
 }
 
 // ── STAFF ─────────────────────────────────────────
@@ -1124,43 +981,45 @@ async function saveNotifSettings() {
 }
 
 // ── CAT MODAL ─────────────────────────────────────
+const CAT_ICONS = [
+  {v:'ti-clipboard-list',l:'체크리스트'},{v:'ti-coffee',l:'커피'},{v:'ti-notes',l:'메모'},
+  {v:'ti-shopping-cart',l:'장바구니'},{v:'ti-id-badge',l:'배지'},{v:'ti-folder',l:'폴더'},
+  {v:'ti-star',l:'별'},{v:'ti-bell',l:'알림'},{v:'ti-book',l:'책'},{v:'ti-chart-bar',l:'차트'},
+  {v:'ti-home',l:'홈'},{v:'ti-tool',l:'도구'},{v:'ti-truck',l:'배송'},{v:'ti-users',l:'사람들'}
+];
+
 function openCatModal() {
-  renderCatList();
-  document.getElementById('catModal').classList.add('open');
-}
-function renderCatList(){
   const list = document.getElementById('catList');
-  list.innerHTML = allCats.map((c,i)=>{
-    const opts = CAT_ICONS.map(ic=>'<option value="'+ic.v+'"'+(((c.icon||'ti-folder')===ic.v)?' selected':'')+'>'+ic.l+'</option>').join('');
-    return '<div class="tag-item" style="align-items:center;gap:6px">'
-      +'<select id="ci-'+i+'" data-id="'+c.id+'" style="border:0.5px solid var(--crd);border-radius:6px;padding:3px;font-size:12px;background:var(--cr)">'+opts+'</select>'
-      +'<input value="'+c.name+'" id="cat-f-'+i+'" data-id="'+c.id+'" style="flex:1;border:0.5px solid var(--crd);border-radius:6px;padding:6px 10px;font-size:13px;outline:none"/>'
-      +'<button onclick="deleteCat('+c.id+',this)" style="background:none;border:none;color:var(--rd);cursor:pointer;padding:4px"><i class="ti ti-trash"></i></button>'
-      +'</div>';
+  list.innerHTML = allCats.map((c,i) => {
+    const opts = CAT_ICONS.map(ic =>
+      `<option value="${ic.v}"${(c.icon||'ti-folder')===ic.v?' selected':''}>${ic.l}</option>`
+    ).join('');
+    return `<div class="tag-item" style="align-items:center;gap:6px">
+      <select id="ci-${i}" data-id="${c.id}" style="border:0.5px solid var(--crd);border-radius:6px;padding:3px 4px;font-size:12px;background:var(--cr)">${opts}</select>
+      <input value="${c.name}" id="cat-f-${i}" data-id="${c.id}" style="flex:1;border:0.5px solid var(--crd);border-radius:6px;padding:6px 10px;font-size:13px;outline:none"/>
+      <button onclick="deleteCat(${c.id})" style="background:none;border:none;color:var(--rd);cursor:pointer;padding:4px 6px"><i class="ti ti-trash"></i></button>
+    </div>`;
   }).join('');
+  document.getElementById('catModal').classList.add('open');
 }
 function closeCatModal() { document.getElementById('catModal').classList.remove('open'); }
 function addCatField() {
   const list = document.getElementById('catList');
   const i = list.children.length;
-  const opts = CAT_ICONS.map(ic=>'<option value="'+ic.v+'">'+ic.l+'</option>').join('');
+  const opts = CAT_ICONS.map(ic=>`<option value="${ic.v}">${ic.l}</option>`).join('');
   const div = document.createElement('div');
-  div.className='tag-item';
-  div.style.cssText='align-items:center;gap:6px';
-  div.innerHTML='<select id="ci-'+i+'" data-id="" style="border:0.5px solid var(--crd);border-radius:6px;padding:3px;font-size:12px;background:var(--cr)">'+opts+'</select>'
-    +'<input value="" id="cat-f-'+i+'" data-id="" placeholder="새 카테고리명" style="flex:1;border:0.5px solid var(--crd);border-radius:6px;padding:6px 10px;font-size:13px;outline:none"/>'
-    +'<button onclick="this.closest('.tag-item').remove()" style="background:none;border:none;color:var(--th);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>';
+  div.className = 'tag-item';
+  div.style.cssText = 'align-items:center;gap:6px';
+  div.innerHTML = `<select id="ci-${i}" data-id="" style="border:0.5px solid var(--crd);border-radius:6px;padding:3px 4px;font-size:12px;background:var(--cr)">${opts}</select><input value="" id="cat-f-${i}" data-id="" placeholder="새 카테고리명" style="flex:1;border:0.5px solid var(--crd);border-radius:6px;padding:6px 10px;font-size:13px;outline:none"/><button onclick="this.closest('.tag-item').remove()" style="background:none;border:none;color:var(--th);cursor:pointer;padding:4px 6px"><i class="ti ti-x"></i></button>`;
   list.appendChild(div);
 }
-async function deleteCat(id, btn){
-  const{data:posts}=await sb.from('posts').select('id').eq('category_id',id);
-  const msg = posts&&posts.length>0
-    ? posts.length+'개 게시글이 있습니다. 삭제하면 함께 삭제됩니다. 계속할까요?'
-    : '카테고리를 삭제할까요?';
-  if(!confirm(msg)) return;
-  if(posts&&posts.length>0) await sb.from('posts').delete().eq('category_id',id);
+async function deleteCat(id) {
+  const {data:posts} = await sb.from('posts').select('id').eq('category_id',id);
+  const msg = posts&&posts.length>0 ? `게시글 ${posts.length}개가 있습니다. 함께 삭제할까요?` : '카테고리를 삭제할까요?';
+  if (!confirm(msg)) return;
+  if (posts&&posts.length>0) await sb.from('posts').delete().eq('category_id',id);
   await sb.from('categories').delete().eq('id',id);
-  document.getElementById('catModal').classList.remove('open');
+  closeCatModal();
   await loadCats();
 }
 async function saveCats() {
@@ -1196,17 +1055,367 @@ function toggleNotifPanel() {
 }
 function closeNotifPanel() { document.getElementById('notifPanel').classList.remove('open'); }
 async function loadNotifPanel() {
-  const week = new Date(Date.now()-7*24*60*60*1000).toISOString();
-  const { data } = await sb.from('posts').select('id,title,created_at,categories(name)').gte('created_at',week).order('created_at',{ascending:false}).limit(10);
+  const week = new Date(Date.now()-7*864e5).toISOString();
+  const {data:posts} = await sb.from('posts').select('id,title,created_at,categories(name)').eq('status','published').gte('created_at',week).order('created_at',{ascending:false}).limit(10);
+  const {data:myReads} = await sb.from('post_reads').select('post_id').eq('user_id',currentUser.id);
+  const readIds = new Set((myReads||[]).map(r=>r.post_id));
+  const unread = (posts||[]).filter(p=>!readIds.has(p.id));
+  const guide = `<div style="font-size:11px;color:var(--th);padding:8px 0 0;border-top:0.5px solid var(--crd);margin-top:8px;line-height:1.5">✔ 게시글에서 <strong>확인했습니다</strong>를 누르면 알림이 해제됩니다.</div>`;
   const list = document.getElementById('notifList');
-  list.innerHTML = (data||[]).length ? (data||[]).map(p =>
-    `<div class="notif-item" onclick="openPostById(${p.id});closeNotifPanel()">
-      <div class="notif-item-title"><span class="notif-dot-item"></span>${p.title}</div>
-      <div class="notif-item-meta">${p.categories?.name||''} · ${fmtDate(p.created_at)}</div>
-    </div>`).join('')
-    : `<div style="font-size:13px;color:var(--th);padding:10px 0">새 알림이 없습니다.</div>`;
+  list.innerHTML = unread.length
+    ? unread.map(p=>`<div class="notif-item" onclick="openPostById(${p.id});closeNotifPanel()"><div class="notif-item-title"><span class="notif-dot-item"></span>${p.title}</div><div class="notif-item-meta">${p.categories?.name||''} · ${fmtDate(p.created_at)}</div></div>`).join('') + guide
+    : `<div style="font-size:13px;color:var(--th);padding:10px 0">새 알림이 없습니다.</div>` + guide;
 }
 
+
+// ── 게시글 수정 ─────────────────────────────────────────────────
+async function renderEditPost(area) {
+  const p = currentPost;
+  if (!p) { goPage('board'); return; }
+  const catOpts = allCats.filter(c=>canWriteCat(c.name)).map(c =>
+    `<option value="${c.id}"${c.id===p.category_id?' selected':''}>${c.name}</option>`
+  ).join('');
+  const {data:atts} = await sb.from('attachments').select('*').eq('post_id',p.id);
+
+  area.innerHTML = `
+    <div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage('board')"><i class="ti ti-arrow-left"></i> 취소</button></div>
+    <div class="form-section">
+      <div class="page-title" style="margin-bottom:18px">공지 수정</div>
+      <div class="form-row"><label class="form-label">카테고리</label><select class="form-input" id="eCat">${catOpts}</select></div>
+      <div class="form-row"><label class="form-label">제목</label><input class="form-input" id="eTitle" value="${p.title||''}"/></div>
+      <div class="form-row"><label class="form-label">내용</label><div id="eEditor"></div></div>
+      <div class="form-row"><label class="form-label">열람 권한</label>
+        <div class="form-access-row">
+          <div class="access-opt${p.access==='all'?' selected':''}" id="eacc-all" onclick="setEditAccess('all')"><i class="ti ti-users"></i><br>전 직원</div>
+          <div class="access-opt${p.access==='manager'?' selected':''}" id="eacc-mgr" onclick="setEditAccess('manager')"><i class="ti ti-user-check"></i><br>매니저 이상</div>
+        </div>
+      </div>
+      <div class="form-row"><div class="toggle-row"><div><div class="toggle-label">댓글 허용</div></div>
+        <button class="toggle-switch${p.comments_on?' on':''}" id="eCmtToggle" onclick="this.classList.toggle('on')"></button>
+      </div></div>
+      ${atts&&atts.length ? `<div class="form-row"><label class="form-label">기존 첨부파일</label>${atts.map(a=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)"><i class="ti ti-paperclip" style="color:var(--bl)"></i><span style="flex:1;font-size:13px;color:var(--bl)">${a.file_name}</span><button onclick="delAttachment(${a.id},this)" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-trash"></i></button></div>`).join('')}</div>` : ''}
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">
+        <button class="btn-cancel-sm" onclick="goPage('board')">취소</button>
+        <button class="btn-submit" onclick="updatePost(${p.id})">수정 완료</button>
+      </div>
+    </div>`;
+
+  let editAccess = p.access || 'all';
+  window.setEditAccess = function(v){
+    editAccess = v;
+    document.getElementById('eacc-all').className = 'access-opt'+(v==='all'?' selected':'');
+    document.getElementById('eacc-mgr').className = 'access-opt'+(v==='manager'?' selected':'');
+  };
+  window.updatePost = async function(id){
+    const title = document.getElementById('eTitle').value.trim();
+    const body = editQuill ? editQuill.root.innerHTML : '';
+    const catId = parseInt(document.getElementById('eCat').value);
+    const commentsOn = document.getElementById('eCmtToggle').classList.contains('on');
+    if (!title) { alert('제목을 입력해주세요.'); return; }
+    await sb.from('posts').update({title,body,category_id:catId,access:editAccess,comments_on:commentsOn,updated_at:new Date().toISOString()}).eq('id',id);
+    currentCatId = catId;
+    goPage('board');
+  };
+  window.delAttachment = async function(attId, btn){
+    await sb.from('attachments').delete().eq('id',attId);
+    btn.closest('div').remove();
+  };
+
+  let editQuill = null;
+  function initEditQuill(){
+    if (typeof Quill==='undefined'){setTimeout(initEditQuill,200);return;}
+    const el = document.getElementById('eEditor');
+    if(!el||el.classList.contains('ql-container')) return;
+    editQuill = new Quill('#eEditor',{theme:'snow',modules:{toolbar:[[{header:[1,2,3,false]}],['bold','italic','underline'],[{list:'ordered'},{list:'bullet'}],['link','image'],['clean']]},placeholder:'내용을 입력하세요...'});
+    if (p.body) editQuill.root.innerHTML = p.body;
+  }
+  setTimeout(initEditQuill, 150);
+}
+
+// ── 댓글 수정/삭제 ───────────────────────────────────────────────
+async function delCmt(cmtId, postId){
+  if (!confirm('댓글을 삭제할까요?')) return;
+  await sb.from('comments').delete().eq('id',cmtId);
+  openPostById(postId);
+}
+function editCmt(cmtId){
+  const bodyEl = document.getElementById('cbody-'+cmtId);
+  if(!bodyEl) return;
+  const cur = bodyEl.textContent;
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;gap:6px;margin-top:4px';
+  const ta = document.createElement('textarea');
+  ta.id = 'cedit-'+cmtId;
+  ta.value = cur;
+  ta.style.cssText = 'flex:1;border:0.5px solid var(--crd);border-radius:8px;padding:8px;font-size:13px;font-family:inherit;resize:none;min-height:60px;outline:none';
+  const btnWrap = document.createElement('div');
+  btnWrap.style.cssText = 'display:flex;flex-direction:column;gap:4px';
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'btn-comment-submit';
+  saveBtn.style.cssText = 'padding:6px 10px;font-size:12px';
+  saveBtn.textContent = '저장';
+  saveBtn.onclick = async function(){
+    const newBody = ta.value.trim();
+    if(!newBody) return;
+    await sb.from('comments').update({body:newBody}).eq('id',cmtId);
+    bodyEl.innerHTML = newBody;
+    bodyEl.parentNode.replaceChild(bodyEl, bodyEl);
+  };
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn-cancel-sm';
+  cancelBtn.style.cssText = 'padding:6px 10px;font-size:12px';
+  cancelBtn.textContent = '취소';
+  cancelBtn.onclick = function(){ bodyEl.innerHTML = cur; };
+  btnWrap.appendChild(saveBtn);
+  btnWrap.appendChild(cancelBtn);
+  wrap.appendChild(ta);
+  wrap.appendChild(btnWrap);
+  bodyEl.innerHTML = '';
+  bodyEl.appendChild(wrap);
+}
+
+// ── 전체보기 ─────────────────────────────────────────────────────
+const CAT_COLORS = [
+  ['#E8F0FE','#1A4B7A'],['#EAF4EE','#2D6A4F'],['#FFF3E0','#B85C00'],
+  ['#EEEDFE','#534AB7'],['#FAF0EE','#A0291E'],['#EDE4D6','#6B3E2A'],
+  ['#E8F4F0','#1A5C44'],['#FEF3F8','#A0297A']
+];
+async function renderAll(area) {
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  let q = sb.from('posts').select('*,categories(name)').order('created_at',{ascending:false});
+  if (currentUser.role !== 'admin') q = q.eq('status','published');
+  const {data:posts} = await q;
+  const filtered = (posts||[]).filter(p=>canSee(p));
+  const week = new Date(Date.now()-7*864e5).toISOString();
+  const tabs = allCats.map(c =>
+    `<button class="tab-btn" onclick="switchCat(${c.id},'${c.name}')">${c.name}</button>`
+  ).join('');
+  const adminBtn = currentUser.role==='admin' ? `<button class="tab-manage" onclick="openCatModal()"><i class="ti ti-settings"></i> 카테고리 관리</button>` : '';
+  const newBtn = canWrite() ? `<button class="btn-new" onclick="goPage('newpost')"><i class="ti ti-plus"></i> 새 공지</button>` : '';
+  const postHtml = filtered.map(p => {
+    const isNew = new Date(p.created_at) >= new Date(week);
+    const catIdx = allCats.findIndex(c=>c.id===p.category_id);
+    const cc = CAT_COLORS[catIdx>=0 ? catIdx%CAT_COLORS.length : 0];
+    const catName = p.categories?.name || '';
+    return `<div class="post-card" onclick="openPostById(${p.id})">
+      <div class="post-card-top">
+        <span class="post-title-txt">${p.title}</span>
+        ${isNew ? '<span class="badge-new">NEW</span>' : ''}
+        <span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:${cc[0]};color:${cc[1]}">${catName}</span>
+      </div>
+      <div class="post-meta"><span>${fmtDate(p.created_at)}</span></div>
+    </div>`;
+  }).join('') || '<div style="text-align:center;padding:40px;color:var(--th)">등록된 공지가 없습니다.</div>';
+  area.innerHTML = `
+    <div class="page-header"><div class="page-title">전체보기</div><div class="page-sub">모든 게시판 공지 최신순</div></div>
+    <div class="board-tabs"><button class="tab-btn active">전체보기</button>${tabs}${adminBtn}</div>
+    <div class="board-toolbar">
+      <div class="search-box"><i class="ti ti-search" style="color:var(--th)"></i><input id="allSearch" placeholder="제목·본문 검색..." onkeydown="if(event.key==='Enter')doSearchAll()"/>
+      <button onclick="doSearchAll()" style="background:var(--br);color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer">검색</button></div>
+      ${newBtn}
+    </div>
+    <div class="post-list" id="allPostList">${postHtml}</div>`;
+}
+async function doSearchAll(){
+  const q = (document.getElementById('allSearch')?.value||'').trim().toLowerCase();
+  if (!q) { renderAll(document.getElementById('contentArea')); return; }
+  let query = sb.from('posts').select('*,categories(name)').order('created_at',{ascending:false});
+  if (currentUser.role !== 'admin') query = query.eq('status','published');
+  const {data:posts} = await query;
+  const filtered = (posts||[]).filter(p=>canSee(p)&&(p.title?.toLowerCase().includes(q)||p.body?.toLowerCase().includes(q)));
+  const week = new Date(Date.now()-7*864e5).toISOString();
+  const pl = document.getElementById('allPostList');
+  if (pl) pl.innerHTML = filtered.map(p => {
+    const isNew = new Date(p.created_at) >= new Date(week);
+    const catIdx = allCats.findIndex(c=>c.id===p.category_id);
+    const cc = CAT_COLORS[catIdx>=0?catIdx%CAT_COLORS.length:0];
+    return `<div class="post-card" onclick="openPostById(${p.id})">
+      <div class="post-card-top"><span class="post-title-txt">${p.title}</span>
+        ${isNew ? '<span class="badge-new">NEW</span>' : ''}
+        <span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:${cc[0]};color:${cc[1]}">${p.categories?.name||''}</span>
+      </div><div class="post-meta"><span>${fmtDate(p.created_at)}</span></div>
+    </div>`;
+  }).join('') || '<div style="text-align:center;padding:40px;color:var(--th)">검색 결과가 없습니다.</div>';
+}
+
+// ── 임시저장 목록 ─────────────────────────────────────────────────
+async function renderDrafts(area){
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const {data} = await sb.from('posts').select('*,categories(name)').in('status',['draft','scheduled']).eq('author_id',currentUser.id).order('updated_at',{ascending:false});
+  const html = (data||[]).length ? (data||[]).map(p => `<div class="post-card">
+    <div class="post-card-top">
+      <span class="post-title-txt">${p.title||'(제목 없음)'}</span>
+      <span style="background:var(--crm);color:var(--ts);font-size:9px;font-weight:700;border-radius:10px;padding:2px 6px">${p.status==='scheduled'?'예약':'임시저장'}</span>
+      <span class="badge-new" style="background:var(--crm);color:var(--ts)">${p.categories?.name||''}</span>
+    </div>
+    <div class="post-meta"><span>수정: ${fmtDateTime(p.updated_at)}</span></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn-cancel-sm" style="font-size:12px;padding:5px 12px" onclick="openEditPost(${p.id})"><i class="ti ti-edit"></i> 이어서 작성</button>
+      <button class="btn-cancel-sm" style="font-size:12px;padding:5px 12px;color:var(--rd);border-color:var(--rd)" onclick="deleteDraft(${p.id})"><i class="ti ti-trash"></i> 삭제</button>
+    </div>
+  </div>`).join('') : '<div style="text-align:center;padding:40px;color:var(--th)">임시저장된 게시글이 없습니다.</div>';
+  area.innerHTML = `<div class="page-header"><div class="page-title">임시저장</div><div class="page-sub">저장된 초안 및 예약 게시글</div></div><div class="post-list">${html}</div>`;
+}
+async function deleteDraft(id){
+  if(!confirm('삭제할까요?')) return;
+  await sb.from('attachments').delete().eq('post_id',id);
+  await sb.from('posts').delete().eq('id',id);
+  renderDrafts(document.getElementById('contentArea'));
+}
+
+// ── 앱 관리 ─────────────────────────────────────────────────────
+let APP = {app_name:'보난자 커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'-'};
+async function loadAppSettings(){
+  const {data} = await sb.from('app_settings').select('*');
+  if(data) data.forEach(r=>{APP[r.key]=r.value;});
+}
+async function saveAppSetting(key,value){
+  await sb.from('app_settings').upsert({key,value,updated_at:new Date().toISOString()},{onConflict:'key'});
+  APP[key]=value;
+}
+async function renderAppSettings(area){
+  await loadAppSettings();
+  const tog = key => `<button class="toggle-switch${APP[key]==='true'?' on':''}" id="ts-${key}" onclick="this.classList.toggle('on');APP['${key}']=this.classList.contains('on')?'true':'false'"></button>`;
+  area.innerHTML = `
+    <div class="page-header"><div class="page-title">앱 관리</div><div class="page-sub">현재 버전: <strong>${APP.app_version}</strong></div></div>
+    <div class="notif-card" style="margin-bottom:12px">
+      <div class="section-label" style="margin-bottom:12px">UI 설정</div>
+      <div class="form-row"><label class="form-label">앱 이름 (상단 로고)</label><input class="form-input" id="cfg-name" value="${APP.app_name||''}"/></div>
+      <div class="form-row"><label class="form-label">메인 색상</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <input type="color" id="cfg-cpicker" value="${APP.primary_color||'#3B2314'}" style="width:48px;height:36px;border:0.5px solid var(--crd);border-radius:8px;cursor:pointer;padding:2px"/>
+          <input class="form-input" id="cfg-color" value="${APP.primary_color||'#3B2314'}" style="flex:1"/>
+        </div>
+      </div>
+      <div style="text-align:right;margin-top:8px"><button class="btn-submit" style="font-size:13px;padding:8px 18px" onclick="saveUISettings()">UI 저장</button></div>
+    </div>
+    <div class="notif-card" style="margin-bottom:12px">
+      <div class="section-label" style="margin-bottom:12px">기능 ON/OFF</div>
+      <div class="setting-row"><div><div class="setting-title">댓글 기능</div></div>${tog('comments_enabled')}</div>
+      <div class="setting-row"><div><div class="setting-title">워터마크 보안</div></div>${tog('watermark_enabled')}</div>
+      <div class="setting-row"><div><div class="setting-title">확인했습니다 버튼</div></div>${tog('read_confirm_enabled')}</div>
+      <div class="setting-row"><div><div class="setting-title">검색 기능</div></div>${tog('search_enabled')}</div>
+      <div class="setting-row"><div><div class="setting-title">공지 통계</div></div>${tog('stats_enabled')}</div>
+      <div style="text-align:right;margin-top:12px"><button class="btn-submit" style="font-size:13px;padding:8px 18px" onclick="saveFeatSettings()">기능 저장</button></div>
+    </div>
+    <div class="notif-card">
+      <div class="section-label" style="margin-bottom:10px">시스템 정보</div>
+      <div class="setting-row"><div><div class="setting-title">데이터베이스</div><div class="setting-sub">Supabase (한국 리전)</div></div></div>
+      <div class="setting-row"><div><div class="setting-title">호스팅</div><div class="setting-sub">Netlify — bonanzacoffee-ops.netlify.app</div></div></div>
+    </div>`;
+  setTimeout(()=>{
+    const picker=document.getElementById('cfg-cpicker');
+    const hex=document.getElementById('cfg-color');
+    if(picker&&hex){picker.oninput=()=>{hex.value=picker.value;};hex.oninput=()=>{if(/^#[0-9a-f]{6}$/i.test(hex.value))picker.value=hex.value;};}
+  },100);
+}
+async function saveUISettings(){
+  const ver = new Date().toISOString().slice(0,10);
+  await Promise.all([
+    saveAppSetting('app_name', document.getElementById('cfg-name')?.value.trim()||APP.app_name),
+    saveAppSetting('primary_color', document.getElementById('cfg-color')?.value.trim()||APP.primary_color),
+    saveAppSetting('app_version', ver),
+  ]);
+  alert('저장됨');
+  renderAppSettings(document.getElementById('contentArea'));
+}
+async function saveFeatSettings(){
+  await Promise.all(['comments_enabled','watermark_enabled','read_confirm_enabled','search_enabled','stats_enabled'].map(k=>saveAppSetting(k,APP[k])));
+  alert('저장됨');
+}
+
+// ── 프로필 ───────────────────────────────────────────────────────
+async function renderProfile(area){
+  const {data:stores} = await sb.from('store_options').select('*').order('sort_order');
+  const storeOpts = (stores||[]).map(s=>`<option value="${s.name}"${currentUser.store===s.name?' selected':''}>${s.name}</option>`).join('');
+  const avatarHtml = currentUser.avatar_url
+    ? `<img src="${currentUser.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+    : `<span style="font-size:20px;font-weight:700;color:var(--br)">${(currentUser.nickname||currentUser.name).slice(0,2)}</span>`;
+  area.innerHTML = `
+    <div class="page-header"><div class="page-title">내 정보</div><div class="page-sub">개인정보 및 비밀번호 변경</div></div>
+    <div class="profile-card" style="background:#fff;border:0.5px solid var(--crd);border-radius:14px;padding:24px;max-width:480px">
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:18px">
+        <div onclick="document.getElementById('avInput').click()" style="width:64px;height:64px;border-radius:50%;background:var(--crm);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;overflow:hidden;position:relative">
+          ${avatarHtml}
+          <div style="position:absolute;inset:0;background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;border-radius:50%;opacity:0;transition:.2s" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0"><i class="ti ti-camera" style="color:#fff;font-size:18px"></i></div>
+        </div>
+        <div>
+          <div style="font-size:18px;font-weight:600;color:var(--tm)">${currentUser.name}</div>
+          <div style="font-size:13px;color:var(--ts)">${currentUser.store} · ${roleLbl[currentUser.role]||currentUser.role} · ${currentUser.code}</div>
+          <div style="font-size:11px;color:var(--th);margin-top:4px">사진 클릭하여 변경</div>
+        </div>
+      </div>
+      <input type="file" id="avInput" accept="image/*" style="display:none" onchange="uploadAvatar(this)"/>
+      <div style="display:flex;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--crd);gap:10px">
+        <span style="font-size:12px;color:var(--th);width:80px;flex-shrink:0;font-weight:600">닉네임</span>
+        <input class="form-input" id="p_nick" value="${currentUser.nickname||''}" placeholder="댓글 표시 이름 (미입력시 본명)" style="flex:1;padding:6px 10px;font-size:13px"/>
+      </div>
+      <div style="display:flex;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--crd);gap:10px">
+        <span style="font-size:12px;color:var(--th);width:80px;flex-shrink:0;font-weight:600">소속 매장</span>
+        <select class="form-input" id="p_store" style="flex:1;padding:6px 10px;font-size:13px">${storeOpts||`<option value="${currentUser.store}">${currentUser.store}</option>`}</select>
+      </div>
+      <div style="display:flex;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--crd);gap:10px">
+        <span style="font-size:12px;color:var(--th);width:80px;flex-shrink:0;font-weight:600">연락처</span>
+        <input class="form-input" id="p_phone" value="${currentUser.phone||''}" placeholder="010-0000-0000" style="flex:1;padding:6px 10px;font-size:13px"/>
+      </div>
+      <div style="display:flex;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--crd);gap:10px">
+        <span style="font-size:12px;color:var(--th);width:80px;flex-shrink:0;font-weight:600">이메일</span>
+        <input class="form-input" id="p_email" value="${currentUser.email||''}" placeholder="email@bonanza.kr" style="flex:1;padding:6px 10px;font-size:13px"/>
+      </div>
+      <div style="margin-top:16px;padding-top:14px;border-top:0.5px solid var(--crd)">
+        <div class="form-label" style="margin-bottom:10px">비밀번호 변경</div>
+        <input class="form-input" type="password" id="p_cur" placeholder="현재 비밀번호" style="margin-bottom:8px"/>
+        <input class="form-input" type="password" id="p_new" placeholder="새 비밀번호" style="margin-bottom:8px"/>
+        <input class="form-input" type="password" id="p_con" placeholder="새 비밀번호 확인"/>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:16px">
+        <button class="btn-submit" onclick="saveProfile()">저장</button>
+      </div>
+    </div>`;
+}
+async function uploadAvatar(input){
+  const file = input.files[0]; if(!file) return;
+  const ext = file.name.split('.').pop();
+  const fname = `avatars/${currentUser.id}.${ext}`;
+  const STURL = SUPABASE_URL+'/storage/v1/object/public/attachments/';
+  const {error} = await sb.storage.from('attachments').upload(fname,file,{upsert:true});
+  if(error){alert('업로드 오류: '+error.message);return;}
+  const url = STURL+fname+'?t='+Date.now();
+  await sb.from('users').update({avatar_url:url}).eq('id',currentUser.id);
+  currentUser.avatar_url = url;
+  renderProfile(document.getElementById('contentArea'));
+}
+async function saveProfile(){
+  const store = document.getElementById('p_store').value;
+  const phone = document.getElementById('p_phone').value.trim();
+  const email = document.getElementById('p_email').value.trim();
+  const nickname = document.getElementById('p_nick')?.value.trim();
+  const cur = document.getElementById('p_cur').value;
+  const pw = document.getElementById('p_new').value;
+  const con = document.getElementById('p_con').value;
+  const updates = {store, phone:phone||null, email:email||null, nickname:nickname||null};
+  if(cur||pw||con){
+    if(cur!==currentUser.password_hash){alert('현재 비밀번호가 맞지 않습니다.');return;}
+    if(pw.length<4){alert('새 비밀번호는 4자 이상이어야 합니다.');return;}
+    if(pw!==con){alert('새 비밀번호가 일치하지 않습니다.');return;}
+    updates.password_hash = pw;
+  }
+  const {error} = await sb.from('users').update(updates).eq('id',currentUser.id);
+  if(error){alert('저장 오류: '+error.message);return;}
+  Object.assign(currentUser, updates);
+  document.getElementById('sidebarInfoTxt').textContent = currentUser.store+' · '+currentUser.name;
+  alert('저장되었습니다.');
+}
+
+function canWriteCat(catName){
+  if(!currentUser) return false;
+  if(currentUser.role==='admin') return true;
+  if(catName==='구매팀'&&currentUser.role==='purchase') return true;
+  if(catName==='인사팀'&&currentUser.role==='hr') return true;
+  return false;
+}
+
+// ── CSS (추가분) ─────────────────────────────────────────────────
 // ── INIT ──────────────────────────────────────────
 document.addEventListener('click', e => {
   const panel = document.getElementById('notifPanel');
@@ -1214,205 +1423,6 @@ document.addEventListener('click', e => {
     panel.classList.remove('open');
   }
 });
-
-
-// ── 앱 설정 ───────────────────────────────────────
-async function loadAppSettings(){
-  const{data}=await sb.from('app_settings').select('*');
-  if(data) data.forEach(r=>{APP[r.key]=r.value;});
-  applyAppSettings();
-}
-function applyAppSettings(){
-  const logo=document.querySelector('.logo');
-  if(logo&&APP.app_name) logo.textContent=APP.app_name;
-  if(APP.primary_color) document.documentElement.style.setProperty('--br',APP.primary_color);
-}
-async function saveAppSetting(key,value){
-  await sb.from('app_settings').upsert({key,value,updated_at:new Date().toISOString()},{onConflict:'key'});
-  APP[key]=value; applyAppSettings();
-}
-async function renderAppSettings(area){
-  await loadAppSettings();
-  function tog(key){return '<button class="toggle-switch'+(APP[key]==='true'?' on':'')+'" id="ts-'+key+'" onclick="toggleAS(''+key+'')"></button>';}
-  area.innerHTML='<div class="page-header"><div class="page-title">앱 관리</div><div class="page-sub">버전: <strong>'+APP.app_version+'</strong></div></div>'
-    +'<div class="notif-card" style="margin-bottom:12px"><div class="section-label" style="margin-bottom:12px">UI 설정</div>'
-    +'<div class="form-row"><label class="form-label">앱 이름</label><input class="form-input" id="cfg-app_name" value="'+(APP.app_name||'')+'"/></div>'
-    +'<div class="form-row"><label class="form-label">로그인 화면 로고</label><input class="form-input" id="cfg-logo_text" value="'+(APP.logo_text||'')+'"/></div>'
-    +'<div class="form-row"><label class="form-label">메인 색상</label><div style="display:flex;gap:10px;align-items:center"><input type="color" id="cfg-color-picker" value="'+(APP.primary_color||'#3B2314')+'" style="width:48px;height:36px;border:0.5px solid var(--crd);border-radius:8px;cursor:pointer;padding:2px"/><input class="form-input" id="cfg-primary_color" value="'+(APP.primary_color||'#3B2314')+'" style="flex:1"/></div></div>'
-    +'<div style="text-align:right;margin-top:8px"><button class="btn-submit" style="font-size:13px;padding:8px 18px" onclick="saveUISettings()">UI 저장</button></div></div>'
-    +'<div class="notif-card" style="margin-bottom:12px"><div class="section-label" style="margin-bottom:12px">기능 ON/OFF</div>'
-    +'<div class="setting-row"><div><div class="setting-title">댓글 기능</div></div>'+tog('comments_enabled')+'</div>'
-    +'<div class="setting-row"><div><div class="setting-title">워터마크 보안</div></div>'+tog('watermark_enabled')+'</div>'
-    +'<div class="setting-row"><div><div class="setting-title">확인했습니다 버튼</div></div>'+tog('read_confirm_enabled')+'</div>'
-    +'<div class="setting-row"><div><div class="setting-title">검색 기능</div></div>'+tog('search_enabled')+'</div>'
-    +'<div class="setting-row"><div><div class="setting-title">공지 통계</div></div>'+tog('stats_enabled')+'</div>'
-    +'<div style="text-align:right;margin-top:12px"><button class="btn-submit" style="font-size:13px;padding:8px 18px" onclick="saveFeatSettings()">기능 저장</button></div></div>'
-    +'<div class="notif-card"><div class="section-label" style="margin-bottom:10px">시스템 정보</div>'
-    +'<div class="setting-row"><div><div class="setting-title">데이터베이스</div><div class="setting-sub">Supabase (한국 리전)</div></div></div>'
-    +'<div class="setting-row"><div><div class="setting-title">호스팅</div><div class="setting-sub">Netlify — bonanzacoffee-ops.netlify.app</div></div></div></div>';
-  setTimeout(()=>{
-    const picker=document.getElementById('cfg-color-picker');
-    const hex=document.getElementById('cfg-primary_color');
-    if(picker&&hex){picker.oninput=()=>{hex.value=picker.value;};hex.oninput=()=>{if(/^#[0-9a-f]{6}$/i.test(hex.value))picker.value=hex.value;};}
-  },100);
-}
-function toggleAS(key){const btn=document.getElementById('ts-'+key);APP[key]=APP[key]==='true'?'false':'true';if(btn)btn.classList.toggle('on',APP[key]==='true');}
-async function saveUISettings(){
-  const version=new Date().toISOString().slice(0,10);
-  await Promise.all([saveAppSetting('app_name',document.getElementById('cfg-app_name')?.value.trim()),saveAppSetting('logo_text',document.getElementById('cfg-logo_text')?.value.trim()),saveAppSetting('primary_color',document.getElementById('cfg-primary_color')?.value.trim()),saveAppSetting('app_version',version)]);
-  alert('UI 설정 저장됨');renderAppSettings(document.getElementById('contentArea'));
-}
-async function saveFeatSettings(){
-  await Promise.all(['comments_enabled','watermark_enabled','read_confirm_enabled','search_enabled','stats_enabled'].map(k=>saveAppSetting(k,APP[k])));
-  alert('기능 설정 저장됨');
-}
-
-// ── 전체보기 ───────────────────────────────────────
-async function renderAll(area){
-  area.innerHTML='<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  let q=sb.from('posts').select('*,categories(name)').order('created_at',{ascending:false});
-  if(currentUser.role!=='admin') q=q.eq('status','published');
-  const{data:posts}=await q;
-  const filtered=(posts||[]).filter(p=>canSee(p));
-  const week=new Date(Date.now()-7*864e5).toISOString();
-  const catColors=['#E8F0FE|#1A4B7A','#EAF4EE|#2D6A4F','#FFF3E0|#B85C00','#EEEDFE|#534AB7','#FAF0EE|#A0291E','#EDE4D6|#6B3E2A','#E8F4F0|#1A5C44','#FEF3F8|#A0297A'];
-  const html=filtered.length?filtered.map(p=>{
-    const isNew=p.status==='published'&&new Date(p.created_at)>=new Date(week);
-    const catIdx=allCats.findIndex(c=>c.id===p.category_id);
-    const cc=(catColors[catIdx>=0?catIdx%catColors.length:0]).split('|');
-    const catName=p.categories?.name||'';
-    return '<div class="post-card" onclick="openPostById('+p.id+')">'
-      +'<div class="post-card-top"><span class="post-title-txt">'+p.title+'</span>'
-      +(isNew?'<span class="badge-new">NEW</span>':'')
-      +(p.status==='scheduled'?'<span style="background:var(--orb);color:var(--or);font-size:9px;font-weight:700;border-radius:10px;padding:2px 6px">예약</span>':'')
-      +(p.status==='draft'?'<span style="background:var(--crm);color:var(--ts);font-size:9px;font-weight:700;border-radius:10px;padding:2px 6px">임시저장</span>':'')
-      +'<span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:'+cc[0]+';color:'+cc[1]+'">'+catName+'</span>'
-      +'</div><div class="post-meta"><span>'+fmtDate(p.created_at)+'</span></div></div>';
-  }).join(''):'<div style="text-align:center;padding:40px;color:var(--th)">등록된 공지가 없습니다.</div>';
-  const tabs='<button class="tab-btn" onclick="goPage('all')" style="background:var(--br);color:#fff;border-color:var(--br)">전체보기</button>'+allCats.map(c=>'<button class="tab-btn" onclick="switchCat('+c.id+',''+c.name+'')">'+c.name+'</button>').join('');
-  const adminBtn=currentUser.role==='admin'?'<button class="tab-manage" onclick="openCatModal()"><i class="ti ti-settings"></i> 카테고리 관리</button>':'';
-  const newBtn=allCats.some(c=>canWriteCat(c.name))?'<button class="btn-new" onclick="goPage('newpost')"><i class="ti ti-plus"></i> 새 공지</button>':'';
-  area.innerHTML='<div class="page-header"><div class="page-title">전체보기</div><div class="page-sub">모든 게시판 공지 최신순</div></div>'
-    +'<div class="board-tabs">'+tabs+adminBtn+'</div>'
-    +'<div class="board-toolbar"><div class="search-box"><i class="ti ti-search" style="color:var(--th)"></i><input id="boardSearch" placeholder="제목·본문 검색..." onkeydown="if(event.key==='Enter')doSearchAll()"/><button onclick="doSearchAll()" style="background:var(--br);color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer">검색</button></div>'+newBtn+'</div>'
-    +'<div class="post-list">'+html+'</div>';
-}
-async function doSearchAll(){
-  const q=document.getElementById('boardSearch')?.value.trim().toLowerCase()||'';
-  let query=sb.from('posts').select('*,categories(name)').order('created_at',{ascending:false});
-  if(currentUser.role!=='admin') query=query.eq('status','published');
-  const{data:posts}=await query;
-  const filtered=(posts||[]).filter(p=>canSee(p)&&(!q||p.title?.toLowerCase().includes(q)||p.body?.toLowerCase().includes(q)));
-  const week=new Date(Date.now()-7*864e5).toISOString();
-  const catColors=['#E8F0FE|#1A4B7A','#EAF4EE|#2D6A4F','#FFF3E0|#B85C00','#EEEDFE|#534AB7','#FAF0EE|#A0291E','#EDE4D6|#6B3E2A'];
-  const pl=document.querySelector('.post-list');
-  if(pl) pl.innerHTML=filtered.map(p=>{
-    const isNew=p.status==='published'&&new Date(p.created_at)>=new Date(week);
-    const catIdx=allCats.findIndex(c=>c.id===p.category_id);
-    const cc=(catColors[catIdx>=0?catIdx%catColors.length:0]).split('|');
-    return '<div class="post-card" onclick="openPostById('+p.id+')">'
-      +'<div class="post-card-top"><span class="post-title-txt">'+p.title+'</span>'
-      +(isNew?'<span class="badge-new">NEW</span>':'')
-      +'<span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:'+cc[0]+';color:'+cc[1]+'">'+(p.categories?.name||'')+'</span>'
-      +'</div><div class="post-meta"><span>'+fmtDate(p.created_at)+'</span></div></div>';
-  }).join('')||'<div style="text-align:center;padding:40px;color:var(--th)">검색 결과가 없습니다.</div>';
-}
-
-// ── 임시저장 목록 ─────────────────────────────────
-async function renderDrafts(area){
-  area.innerHTML='<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  const{data}=await sb.from('posts').select('*,categories(name)').in('status',['draft','scheduled']).eq('author_id',currentUser.id).order('updated_at',{ascending:false});
-  const html=(data||[]).length?(data||[]).map(p=>'<div class="post-card">'
-    +'<div class="post-card-top"><span class="post-title-txt">'+(p.title||'(제목 없음)')+'</span>'
-    +(p.status==='scheduled'?'<span style="background:var(--orb);color:var(--or);font-size:9px;font-weight:700;border-radius:10px;padding:2px 6px"><i class="ti ti-clock"></i> 예약</span>':'<span style="background:var(--crm);color:var(--ts);font-size:9px;font-weight:700;border-radius:10px;padding:2px 6px">임시저장</span>')
-    +'<span style="background:var(--crm);color:var(--ts);font-size:9px;border-radius:10px;padding:2px 6px">'+(p.categories?.name||'')+'</span></div>'
-    +'<div class="post-meta"><span>마지막 수정: '+fmtDateTime(p.updated_at)+'</span></div>'
-    +'<div style="display:flex;gap:8px;margin-top:10px">'
-    +'<button class="btn-cancel-sm" style="font-size:12px;padding:5px 12px" onclick="openEditPost('+p.id+')"><i class="ti ti-edit"></i> 이어서 작성</button>'
-    +(p.status==='scheduled'?'<button class="btn-cancel-sm" style="font-size:12px;padding:5px 12px" onclick="publishNow('+p.id+')"><i class="ti ti-send"></i> 지금 발행</button>':'')
-    +'<button class="btn-cancel-sm" style="font-size:12px;padding:5px 12px;color:var(--rd);border-color:var(--rd)" onclick="deleteDraft('+p.id+')"><i class="ti ti-trash"></i> 삭제</button>'
-    +'</div></div>').join(''):'<div style="text-align:center;padding:40px;color:var(--th)">임시저장된 게시글이 없습니다.</div>';
-  area.innerHTML='<div class="page-header"><div class="page-title">임시저장</div><div class="page-sub">저장된 초안 및 예약 게시글</div></div><div class="post-list">'+html+'</div>';
-  updateDraftBadge();
-}
-async function deleteDraft(id){if(!confirm('삭제할까요?'))return;await sb.from('attachments').delete().eq('post_id',id);await sb.from('posts').delete().eq('id',id);renderDrafts(document.getElementById('contentArea'));}
-async function publishNow(id){if(!confirm('지금 발행할까요?'))return;await sb.from('posts').update({status:'published',scheduled_at:null,created_at:new Date().toISOString()}).eq('id',id);updateNotifDot();renderDrafts(document.getElementById('contentArea'));}
-
-// ── 프로필 ────────────────────────────────────────
-async function renderProfile(area){
-  const{data:stores}=await sb.from('store_options').select('*').order('sort_order');
-  const storeOpts=(stores||[]).map(s=>'<option value="'+s.name+'"'+(currentUser.store===s.name?' selected':'')+'>'+s.name+'</option>').join('');
-  const avatarHtml=currentUser.avatar_url
-    ?'<img src="'+currentUser.avatar_url+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%">'
-    :'<span style="font-size:20px;font-weight:700;color:var(--br)">'+(currentUser.nickname||currentUser.name).slice(0,2)+'</span>';
-  area.innerHTML='<div class="page-header"><div class="page-title">내 정보</div><div class="page-sub">개인정보 및 비밀번호 변경</div></div>'
-    +'<div class="profile-card" style="background:#fff;border:0.5px solid var(--crd);border-radius:14px;padding:24px;max-width:480px">'
-    +'<div style="display:flex;align-items:center;gap:16px;margin-bottom:18px">'
-    +'<div style="width:64px;height:64px;border-radius:50%;background:var(--crm);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;position:relative;overflow:hidden" onclick="document.getElementById('avInput').click()">'
-    +avatarHtml
-    +'<div style="position:absolute;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;border-radius:50%;opacity:0;transition:.2s" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0"><i class="ti ti-camera" style="color:#fff;font-size:18px"></i></div>'
-    +'</div>'
-    +'<div><div style="font-size:18px;font-weight:600;color:var(--tm)">'+currentUser.name+'</div>'
-    +'<div style="font-size:13px;color:var(--ts)">'+currentUser.store+' · '+(roleLbl[currentUser.role]||currentUser.role)+' · '+currentUser.code+'</div>'
-    +'<div style="font-size:11px;color:var(--th);margin-top:4px">사진 클릭하여 변경</div></div></div>'
-    +'<input type="file" id="avInput" accept="image/*" style="display:none" onchange="uploadAvatar(this)"/>'
-    +'<div style="display:flex;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--crd);gap:10px"><span style="font-size:12px;color:var(--th);width:80px;flex-shrink:0;font-weight:600">닉네임</span><input class="form-input" id="p_nick" value="'+(currentUser.nickname||'')+'" placeholder="댓글 표시 이름" style="flex:1;padding:6px 10px;font-size:13px"/></div>'
-    +'<div style="display:flex;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--crd);gap:10px"><span style="font-size:12px;color:var(--th);width:80px;flex-shrink:0;font-weight:600">소속 매장</span><select class="form-input" id="p_store" style="flex:1;padding:6px 10px;font-size:13px">'+(storeOpts||'<option value="'+currentUser.store+'">'+currentUser.store+'</option>')+'</select></div>'
-    +'<div style="display:flex;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--crd);gap:10px"><span style="font-size:12px;color:var(--th);width:80px;flex-shrink:0;font-weight:600">연락처</span><input class="form-input" id="p_phone" value="'+(currentUser.phone||'')+'" placeholder="010-0000-0000" style="flex:1;padding:6px 10px;font-size:13px"/></div>'
-    +'<div style="display:flex;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--crd);gap:10px"><span style="font-size:12px;color:var(--th);width:80px;flex-shrink:0;font-weight:600">이메일</span><input class="form-input" id="p_email" value="'+(currentUser.email||'')+'" placeholder="email@bonanza.kr" style="flex:1;padding:6px 10px;font-size:13px"/></div>'
-    +'<div style="margin-top:16px;padding-top:14px;border-top:0.5px solid var(--crd)"><div class="form-label" style="margin-bottom:10px">비밀번호 변경</div>'
-    +'<input class="form-input" type="password" id="p_cur" placeholder="현재 비밀번호" style="margin-bottom:8px"/>'
-    +'<input class="form-input" type="password" id="p_new" placeholder="새 비밀번호" style="margin-bottom:8px"/>'
-    +'<input class="form-input" type="password" id="p_con" placeholder="새 비밀번호 확인"/></div>'
-    +'<div style="display:flex;justify-content:flex-end;margin-top:16px"><button class="btn-submit" onclick="saveProfile()">저장</button></div>'
-    +'</div>';
-}
-async function uploadAvatar(input){
-  const file=input.files[0];if(!file)return;
-  const ext=file.name.split('.').pop();
-  const fname='avatars/'+currentUser.id+'.'+ext;
-  const{error}=await sb.storage.from('attachments').upload(fname,file,{upsert:true});
-  if(error){alert('업로드 오류: '+error.message);return;}
-  const url=ST_URL+fname+'?t='+Date.now();
-  await sb.from('users').update({avatar_url:url}).eq('id',currentUser.id);
-  currentUser.avatar_url=url;
-  renderProfile(document.getElementById('contentArea'));
-}
-async function saveProfile(){
-  const store=document.getElementById('p_store').value;
-  const phone=document.getElementById('p_phone').value.trim();
-  const email=document.getElementById('p_email').value.trim();
-  const nickname=document.getElementById('p_nick')?.value.trim();
-  const cur=document.getElementById('p_cur').value;
-  const pw=document.getElementById('p_new').value;
-  const con=document.getElementById('p_con').value;
-  const updates={store,phone:phone||null,email:email||null,nickname:nickname||null};
-  if(cur||pw||con){
-    if(cur!==currentUser.password_hash){alert('현재 비밀번호가 맞지 않습니다.');return;}
-    if(pw.length<4){alert('새 비밀번호는 4자 이상이어야 합니다.');return;}
-    if(pw!==con){alert('새 비밀번호가 일치하지 않습니다.');return;}
-    updates.password_hash=pw;updates.last_pw_changed=new Date().toISOString();
-  }
-  const{error}=await sb.from('users').update(updates).eq('id',currentUser.id);
-  if(error){alert('저장 오류: '+error.message);return;}
-  Object.assign(currentUser,updates);
-  document.getElementById('sidebarInfoText').textContent=currentUser.store+' · '+currentUser.name;
-  alert('저장되었습니다.');
-}
-
-// ── 알림 패널 개선 ────────────────────────────────
-async function loadNotifPanel() {
-  const week = new Date(Date.now()-7*864e5).toISOString();
-  const {data:posts} = await sb.from('posts').select('id,title,created_at,categories(name)').eq('status','published').gte('created_at',week).order('created_at',{ascending:false}).limit(10);
-  const {data:myReads} = await sb.from('post_reads').select('post_id').eq('user_id',currentUser.id);
-  const readIds = new Set((myReads||[]).map(r=>r.post_id));
-  const unread = (posts||[]).filter(p=>!readIds.has(p.id));
-  const guide = '<div style="font-size:11px;color:var(--th);padding:8px 0 0;border-top:0.5px solid var(--crd);margin-top:8px;line-height:1.5">✔ 게시글에서 <strong>확인했습니다</strong>를 누르면 알림이 해제됩니다.</div>';
-  const list = document.getElementById('notifList');
-  list.innerHTML = unread.length
-    ? unread.map(p=>'<div class="notif-item" onclick="openPostById('+p.id+');closeNotifPanel()"><div class="notif-item-title"><span class="notif-dot-item"></span>'+p.title+'</div><div class="notif-item-meta">'+(p.categories?.name||'')+' · '+fmtDate(p.created_at)+'</div></div>').join('')+guide
-    : '<div style="font-size:13px;color:var(--th);padding:10px 0">새 알림이 없습니다.</div>'+guide;
-}
 
 try {
   const saved = JSON.parse(localStorage.getItem('bck_auto')||'null');
