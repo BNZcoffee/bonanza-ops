@@ -154,7 +154,7 @@ textarea.form-input{min-height:120px;resize:vertical}
 .staff-store{font-size:11px;color:var(--ts);margin-bottom:5px}
 .staff-role{font-size:10px;font-weight:700;border-radius:10px;padding:2px 7px;display:inline-block}
 .role-admin{background:var(--br);color:#fff}
-.role-manager{background:var(--gdl);color:var(--br)}
+.role-manager{background:var(--gdl);color:var(--br);font-weight:700}
 .role-barista{background:var(--crm);color:var(--brm)}
 .role-pastry{background:#e8f4f0;color:#1a5c44}
 .role-purchase{background:var(--blb);color:var(--bl)}
@@ -815,9 +815,23 @@ function renderNewPost(area, ex) {
           <div id="nFileProg" style="height:100%;background:var(--gn);width:0;transition:width .3s"></div>
         </div>
       </div>
+      <div class="form-row">
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label"><i class="ti ti-clock" style="font-size:14px;vertical-align:-1px;margin-right:4px"></i>예약 발행</div>
+            <div class="toggle-sub">설정한 시간에 자동 게시됩니다</div>
+          </div>
+          <button class="toggle-switch" id="schedToggle" onclick="toggleSched()"></button>
+        </div>
+        <div id="schedBox" style="display:none;background:var(--orb,#FFF3E0);border:0.5px solid var(--or,#B85C00);border-radius:8px;padding:12px 14px;margin-top:8px">
+          <div style="font-size:12px;font-weight:600;color:var(--or,#B85C00);margin-bottom:8px"><i class="ti ti-calendar-event"></i> 발행 예약 시간</div>
+          <input type="datetime-local" id="schedAt" style="width:100%;border:0.5px solid var(--crd);border-radius:8px;padding:8px 12px;font-size:13px;outline:none;background:#fff"/>
+        </div>
+      </div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">
+        <button class="btn-cancel-sm" onclick="saveDraft()">임시저장</button>
         <button class="btn-cancel-sm" onclick="goPage('board')">취소</button>
-        <button class="btn-submit" onclick="submitPost()">공지 등록</button>
+        <button class="btn-submit" onclick="submitPost()">${ex?'수정 완료':'공지 등록'}</button>
       </div>
     </div>`;
 
@@ -904,17 +918,35 @@ function setAccess(v) {
   document.getElementById('acc-manager').className = 'access-opt'+(v==='manager'?' selected':'');
 }
 
-async function submitPost() {
+
+function toggleSched(){
+  const t = document.getElementById('schedToggle');
+  t.classList.toggle('on');
+  document.getElementById('schedBox').style.display = t.classList.contains('on') ? 'block' : 'none';
+}
+function saveDraft(){
+  submitPost(true);
+}
+async function submitPost(isDraft=false) {
   const title = document.getElementById('nTitle')?.value.trim();
   const body = nQuill ? nQuill.root.innerHTML : '';
   const catId = parseInt(document.getElementById('nCat')?.value);
   const commentsOn = document.getElementById('cmtToggle')?.classList.contains('on');
+  const schedOn = document.getElementById('schedToggle')?.classList.contains('on');
+  const schedVal = document.getElementById('schedAt')?.value;
   if(!title){alert('제목을 입력해주세요.');return;}
-  if(!body||body==='<p><br></p>'){alert('내용을 입력해주세요.');return;}
+  if(!isDraft && (!body||body==='<p><br></p>')){alert('내용을 입력해주세요.');return;}
+  if(schedOn && !schedVal){alert('예약 발행 시간을 설정해주세요.');return;}
+
+  let status = 'published', scheduledAt = null;
+  if(isDraft) status = 'draft';
+  else if(schedOn && schedVal && new Date(schedVal) > new Date()){
+    status = 'scheduled'; scheduledAt = new Date(schedVal).toISOString();
+  }
 
   const payload = {category_id:catId, title, body, access:selectedAccess,
-    comments_on:commentsOn, author_id:currentUser.id, status:'published',
-    updated_at:new Date().toISOString()};
+    comments_on:commentsOn, author_id:currentUser.id, status,
+    scheduled_at:scheduledAt, updated_at:new Date().toISOString()};
 
   let postId = nEditingId;
   if(nEditingId){
@@ -946,7 +978,15 @@ async function submitPost() {
   currentCatId = catId;
   currentCatName = allCats.find(c=>c.id===catId)?.name || '';
   updateNotifDot();
-  goPage('board');
+  if(isDraft){
+    alert('임시저장 완료!');
+    goPage('drafts');
+  } else if(status==='scheduled'){
+    alert('예약 완료! '+schedVal+' 에 자동 발행됩니다.');
+    goPage('board');
+  } else {
+    goPage('board');
+  }
 }
 
 // ── STAFF ─────────────────────────────────────────
