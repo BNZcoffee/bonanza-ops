@@ -550,7 +550,7 @@ function postCard(p,showCat=false){
     </div>
     <div class="post-meta">
       <span>${p.status==='scheduled'?'예약: '+fdt(p.scheduled_at):fd(p.created_at)}</span>
-      ${canStats()?`<span class="read-rate" id="rt-${p.id}"></span>`:''}
+      ${canStats()?"<span class=\"read-rate\" id=\"rt-"+p.id+"\"></span>":""}
     </div>
   </div>`;
 }
@@ -639,8 +639,8 @@ async function renderPostDetail(area){
     readList=`<div style="margin-bottom:16px"><div class="section-label">직원별 확인 현황</div>
       <div class="reach-bar"><div class="reach-fill" style="width:${rate}%"></div></div>
       <div class="reach-label"><span>도달률 ${rate}%</span><span>${reads.length}/${total}명</span></div>
-      <div style="margin-top:8px">${reads.map(r=>`<div class="read-row"><div><span style="font-weight:600;font-size:12px">${r.users?.name||''}</span> <span style="color:var(--th);font-size:11px">${r.users?.store||''}</span></div><span style="color:var(--th);font-size:11px">${fdt(r.read_at)}</span></div>`).join('')}
-      ${total-reads.length>0?`<div class="read-row"><span class="unread-badge">미확인 ${total-reads.length}명</span></div>`:''}</div></div>`;
+      <div style="margin-top:8px">${reads.map(r=>'<div class="read-row"><div><span style="font-weight:600;font-size:12px">'+(r.users?.name||'')+'</span> <span style="color:var(--th);font-size:11px">'+(r.users?.store||'')+'</span></div><span style="color:var(--th);font-size:11px">'+fdt(r.read_at)+'</span></div>').join('')}
+      ${total-reads.length>0?"<div class=\"read-row\"><span class=\"unread-badge\">미확인 "+(total-reads.length)+"명</span></div>":""}</div></div>`;
   }
   let attHtml='';
   if(atts&&atts.length>0){
@@ -678,8 +678,8 @@ async function renderPostDetail(area){
           <span style="font-size:12px;font-weight:600">${dispName}</span>
           <span style="font-size:11px;color:var(--th);margin-left:4px">${c.users?.store||''}</span>
           <span style="font-size:11px;color:var(--th);margin-left:auto">${fdt(c.created_at)}</span>
-          ${canEdit?`<button onclick="editComment(${c.id},this)" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:6px"><i class="ti ti-edit"></i></button>`:''}
-          ${canDel?`<button onclick="deleteComment(${c.id},${p.id})" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:2px"><i class="ti ti-trash"></i></button>`:''}
+          ${canEdit?"<button onclick=\"editComment("+c.id+",this)\" style=\"background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:6px\"><i class=\"ti ti-edit\"></i></button>":""}
+          ${canDel?"<button onclick=\"deleteComment("+c.id+","+p.id+")\" style=\"background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:2px\"><i class=\"ti ti-trash\"></i></button>":""}
         </div>
         <div class="comment-body" id="cbody-${c.id}">${c.body}</div>
       </div>`;
@@ -1307,7 +1307,7 @@ async function loadNotifPanel(){
   const readIds=new Set((myReads||[]).map(r=>r.post_id));
   const unread=(posts||[]).filter(p=>!readIds.has(p.id));
   const guide='<div style="font-size:11px;color:var(--th);padding:8px 0 0;border-top:0.5px solid var(--crd);margin-top:8px;line-height:1.5">✔ 게시글에서 <strong>확인했습니다</strong>를 누르면 알림이 해제됩니다.</div>';
-  document.getElementById('notifList').innerHTML=unread.length?unread.map(p=>`<div class="notif-item" onclick="openPostById(${p.id});closeNotifPanel()"><div class="notif-item-title"><span class="notif-dot-item"></span>${p.title}</div><div class="notif-item-meta">${p.categories?.name||''} · ${fd(p.created_at)}</div></div>`).join('')+guide:'<div style="font-size:13px;color:var(--th);padding:10px 0">새 알림이 없습니다.</div>'+guide;
+  document.getElementById('notifList').innerHTML=unread.length?unread.map(p=>'<div class="notif-item" onclick="openPostById('+p.id+');closeNotifPanel()"><div class="notif-item-title"><span class="notif-dot-item"></span>'+p.title+'</div><div class="notif-item-meta">'+(p.categories?.name||'')+' · '+fd(p.created_at)+'</div></div>').join('')+guide:'<div style="font-size:13px;color:var(--th);padding:10px 0">새 알림이 없습니다.</div>'+guide;
 }
 function openShareModal(postId){document.getElementById('shareLinkBox').textContent=`${location.origin}${location.pathname}?post=${postId}`;document.getElementById('shareModal').classList.add('open');}
 function copyShareLink(){navigator.clipboard.writeText(document.getElementById('shareLinkBox').textContent).then(()=>alert('링크가 복사되었습니다.'));}
