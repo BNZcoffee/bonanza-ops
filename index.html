@@ -1159,7 +1159,7 @@ function addCatRow(){
   d.innerHTML='<select id="ci-'+i+'" data-id="" style="border:0.5px solid var(--crd);border-radius:6px;padding:4px 6px;font-size:12px;background:var(--cr);cursor:pointer;flex-shrink:0">'+iconOpts+'</select>'
     +'<i class="ti ti-folder" id="ci-preview-'+i+'" style="font-size:16px;color:var(--br);flex-shrink:0"></i>'
     +'<input value="" id="cf-'+i+'" data-id="" placeholder="새 카테고리명" style="flex:1;border:0.5px solid var(--crd);border-radius:6px;padding:6px 10px;font-size:13px;outline:none"/>'
-    +'<button onclick="this.closest(\'.tag-item\').remove()" style="background:none;border:none;color:var(--th);cursor:pointer;padding:4px 6px;font-size:14px;flex-shrink:0"><i class=\"ti ti-x\"></i></button>';
+    +'<button onclick="this.closest(\'.tag-item\').remove()" style="background:none;border:none;color:var(--th);cursor:pointer;padding:4px 6px;font-size:14px;flex-shrink:0"><i class="ti ti-x"></i></button>';
   list.appendChild(d);
   const sel=document.getElementById('ci-'+i);
   if(sel)sel.onchange=()=>{const prev=document.getElementById('ci-preview-'+i);if(prev){prev.className='ti '+sel.value;prev.style.cssText='font-size:16px;color:var(--br);flex-shrink:0';}};
@@ -1195,38 +1195,45 @@ async function saveCats(){
 // ── 앱 관리 ──────────────────────────────────────
 async function renderAppSettings(area){
   await loadAppSettings();
-  function toggle(key){return `<button class="toggle-switch${APP[key]==='true'?' on':''}" id="ts-${key}" onclick="toggleAppSetting('${key}')"></button>`;}
-  area.innerHTML=`
-    <div class="page-header"><div class="page-title">앱 관리</div><div class="page-sub">현재 버전: <strong>${APP.app_version||'-'}</strong></div></div>
-    <div class="notif-card" style="margin-bottom:12px">
-      <div class="section-label" style="margin-bottom:12px">UI 설정</div>
-      <div class="form-row"><label class="form-label">앱 이름 (상단 로고)</label><input class="form-input" id="cfg-app_name" value="${APP.app_name||''}"/></div>
-      <div class="form-row"><label class="form-label">로그인 화면 로고 텍스트</label><input class="form-input" id="cfg-logo_text" value="${APP.logo_text||''}"/></div>
-      <div class="form-row"><label class="form-label">메인 색상</label>
-        <div style="display:flex;gap:10px;align-items:center">
-          <input type="color" id="cfg-color-picker" value="${APP.primary_color||'#3B2314'}" style="width:48px;height:36px;border:0.5px solid var(--crd);border-radius:8px;cursor:pointer;padding:2px"/>
-          <input class="form-input" id="cfg-primary_color" value="${APP.primary_color||'#3B2314'}" placeholder="#3B2314" style="flex:1"/>
-        </div>
-      </div>
-      <div style="text-align:right;margin-top:8px"><button class="btn-submit" style="font-size:13px;padding:8px 18px" onclick="saveUISettings()">UI 저장</button></div>
-    </div>
-    <div class="notif-card" style="margin-bottom:12px">
-      <div class="section-label" style="margin-bottom:12px">기능 ON/OFF</div>
-      <div class="setting-row"><div><div class="setting-title">댓글 기능</div><div class="setting-sub">전체 댓글 허용 여부</div></div>${toggle('comments_enabled')}</div>
-      <div class="setting-row"><div><div class="setting-title">워터마크 보안</div><div class="setting-sub">본문 워터마크 표시</div></div>${toggle('watermark_enabled')}</div>
-      <div class="setting-row"><div><div class="setting-title">확인했습니다 버튼</div><div class="setting-sub">공지 확인 기록 기능</div></div>${toggle('read_confirm_enabled')}</div>
-      <div class="setting-row"><div><div class="setting-title">검색 기능</div><div class="setting-sub">게시판 검색창 표시</div></div>${toggle('search_enabled')}</div>
-      <div class="setting-row"><div><div class="setting-title">공지 통계</div><div class="setting-sub">도달률 통계 표시</div></div>${toggle('stats_enabled')}</div>
-      <div style="text-align:right;margin-top:12px"><button class="btn-submit" style="font-size:13px;padding:8px 18px" onclick="saveFeatureSettings()">기능 저장</button></div>
-    </div>
-    <div class="notif-card">
-      <div class="section-label" style="margin-bottom:10px">시스템 정보</div>
-      <div class="setting-row"><div><div class="setting-title">앱 버전</div><div class="setting-sub">${APP.app_version||'-'}</div></div></div>
-      <div class="setting-row"><div><div class="setting-title">데이터베이스</div><div class="setting-sub">Supabase (한국 리전)</div></div></div>
-      <div class="setting-row"><div><div class="setting-title">호스팅</div><div class="setting-sub">Netlify — bonanzacoffee-ops.netlify.app</div></div></div>
-    </div>`;
-  setTimeout(()=>{const picker=document.getElementById('cfg-color-picker');const hex=document.getElementById('cfg-primary_color');if(picker&&hex){picker.oninput=()=>{hex.value=picker.value;};hex.oninput=()=>{if(/^#[0-9a-f]{6}$/i.test(hex.value))picker.value=hex.value;};}},100);
+  function tog(key){
+    var on=APP[key]==='true';
+    return '<button class="toggle-switch'+(on?' on':'')+'" id="ts-'+key+'" onclick="toggleAppSetting(''+key+'')"></button>';
+  }
+  var html='<div class="page-header"><div class="page-title">앱 관리</div><div class="page-sub">현재 버전: <strong>'+(APP.app_version||'-')+'</strong></div></div>'
+    +'<div class="notif-card" style="margin-bottom:12px">'
+      +'<div class="section-label" style="margin-bottom:12px">UI 설정</div>'
+      +'<div class="form-row"><label class="form-label">앱 이름 (상단 로고)</label><input class="form-input" id="cfg-app_name" value="'+(APP.app_name||'')+'"/></div>'
+      +'<div class="form-row"><label class="form-label">로그인 화면 로고 텍스트</label><input class="form-input" id="cfg-logo_text" value="'+(APP.logo_text||'')+'"/></div>'
+      +'<div class="form-row"><label class="form-label">메인 색상</label>'
+        +'<div style="display:flex;gap:10px;align-items:center">'
+          +'<input type="color" id="cfg-color-picker" value="'+(APP.primary_color||'#3B2314')+'" style="width:48px;height:36px;border:0.5px solid var(--crd);border-radius:8px;cursor:pointer;padding:2px"/>'
+          +'<input class="form-input" id="cfg-primary_color" value="'+(APP.primary_color||'#3B2314')+'" placeholder="#3B2314" style="flex:1"/>'
+        +'</div></div>'
+      +'<div style="text-align:right;margin-top:8px"><button class="btn-submit" style="font-size:13px;padding:8px 18px" onclick="saveUISettings()">UI 저장</button></div>'
+    +'</div>'
+    +'<div class="notif-card" style="margin-bottom:12px">'
+      +'<div class="section-label" style="margin-bottom:12px">기능 ON/OFF</div>'
+      +'<div class="setting-row"><div><div class="setting-title">댓글 기능</div><div class="setting-sub">전체 댓글 허용 여부</div></div>'+tog('comments_enabled')+'</div>'
+      +'<div class="setting-row"><div><div class="setting-title">워터마크 보안</div><div class="setting-sub">본문 워터마크 표시</div></div>'+tog('watermark_enabled')+'</div>'
+      +'<div class="setting-row"><div><div class="setting-title">확인했습니다 버튼</div><div class="setting-sub">공지 확인 기록 기능</div></div>'+tog('read_confirm_enabled')+'</div>'
+      +'<div class="setting-row"><div><div class="setting-title">검색 기능</div><div class="setting-sub">게시판 검색창 표시</div></div>'+tog('search_enabled')+'</div>'
+      +'<div class="setting-row"><div><div class="setting-title">공지 통계</div><div class="setting-sub">도달률 통계 표시</div></div>'+tog('stats_enabled')+'</div>'
+      +'<div style="text-align:right;margin-top:12px"><button class="btn-submit" style="font-size:13px;padding:8px 18px" onclick="saveFeatureSettings()">기능 저장</button></div>'
+    +'</div>'
+    +'<div class="notif-card">'
+      +'<div class="section-label" style="margin-bottom:10px">시스템 정보</div>'
+      +'<div class="setting-row"><div><div class="setting-title">앱 버전</div><div class="setting-sub">'+(APP.app_version||'-')+'</div></div></div>'
+      +'<div class="setting-row"><div><div class="setting-title">데이터베이스</div><div class="setting-sub">Supabase (한국 리전)</div></div></div>'
+      +'<div class="setting-row"><div><div class="setting-title">호스팅</div><div class="setting-sub">Netlify — bonanzacoffee-ops.netlify.app</div></div></div>'
+    +'</div>';
+  area.innerHTML=html;
+  setTimeout(()=>{
+    var picker=document.getElementById('cfg-color-picker');
+    var hex=document.getElementById('cfg-primary_color');
+    if(picker&&hex){picker.oninput=function(){hex.value=picker.value;};hex.oninput=function(){if(/^#[0-9a-f]{6}$/i.test(hex.value))picker.value=hex.value;};}
+  },100);
 }
+
 function toggleAppSetting(key){const btn=document.getElementById('ts-'+key);APP[key]=APP[key]==='true'?'false':'true';if(btn)btn.classList.toggle('on',APP[key]==='true');}
 async function saveUISettings(){
   const version=new Date().toISOString().slice(0,10);
