@@ -181,6 +181,7 @@ textarea.form-input{min-height:120px;resize:vertical}
 /* MODAL */
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(43,26,14,.5);z-index:200;align-items:center;justify-content:center}
 .modal-bg.open{display:flex}
+.modal-inner.wide{width:560px!important;max-width:92vw}
 .modal-inner{background:#fff;border-radius:14px;padding:24px;width:340px;max-width:90vw}
 .modal-title{font-size:15px;font-weight:600;margin-bottom:14px;color:var(--tm)}
 .modal-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
@@ -309,12 +310,12 @@ textarea.form-input{min-height:120px;resize:vertical}
 <!-- CAT MODAL -->
 <div class="modal-bg" id="catModal">
   <div class="modal-inner">
-    <div class="modal-title">게시판 카테고리 관리</div>
+    <div class="modal-title" id="catModalTitle">게시판 카테고리 관리</div>
     <div class="tag-list" id="catList"></div>
-    <button class="btn-add-tag" onclick="addCatField()"><i class="ti ti-plus"></i> 카테고리 추가</button>
+    <button class="btn-add-tag" id="catModalAddBtn" onclick="addCatField()"><i class="ti ti-plus"></i> 카테고리 추가</button>
     <div class="modal-footer">
       <button class="btn-sm ghost" onclick="closeCatModal()">취소</button>
-      <button class="btn-sm primary" onclick="saveCats()">저장</button>
+      <button class="btn-sm primary" id="catModalOkBtn" onclick="saveCats()">저장</button>
     </div>
   </div>
 </div>
@@ -531,7 +532,7 @@ function goPage(page) {
   } else if (page === 'profile') {
     renderProfile(area);
   } else if (page === 'editpost') {
-    renderEditPost(area);
+    renderNewPost(area, currentPost);
   }
 }
 
@@ -1146,7 +1147,8 @@ async function openEditUser(userId){
   ).join('');
   
   // 모달 재사용 (catModal)
-  document.getElementById('catModal').querySelector('.modal-title').textContent = userId?'직원 정보 수정':'직원 추가';
+  document.querySelector('#catModal .modal-inner').classList.add('wide');
+  document.getElementById('catModalTitle').textContent = userId?'직원 정보 수정':'직원 추가';
   document.getElementById('catList').innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div><label class="form-label">이름 *</label><input class="form-input" id="eu_name" value="${u?.name||''}" placeholder="홍길동"/></div>
@@ -1219,8 +1221,19 @@ async function submitEditUser(){
 }
 
 async function toggleActive(id, cur){
-  if(!confirm(cur?'비활성화(퇴사 처리)할까요?':'다시 활성화할까요?')) return;
-  await sb.from('users').update({active:!cur}).eq('id',id);
+  if(cur){
+    if(!confirm('이 직원을 비활성화할까요?\n로그인이 차단됩니다.')) return;
+    await sb.from('users').update({active:false}).eq('id',id);
+  } else {
+    const {data:u} = await sb.from('users').select('retire_date,name').eq('id',id).single();
+    const today = new Date().toISOString().slice(0,10);
+    if(u && u.retire_date && u.retire_date <= today){
+      alert('\u26a0\ufe0f 퇴사 처리된 직원입니다.\n\n'+u.name+' 님은 퇴사일('+u.retire_date+')이 지나 활성화할 수 없습니다.\n\n다시 근무하는 경우, 직원 정보 수정에서 퇴사일을 삭제하거나 미래 날짜로 변경해주세요.');
+      return;
+    }
+    if(!confirm('이 직원을 다시 활성화할까요?\n로그인이 가능해집니다.')) return;
+    await sb.from('users').update({active:true}).eq('id',id);
+  }
   renderStaff(document.getElementById('contentArea'));
 }
 
@@ -1249,7 +1262,8 @@ async function delStore(id, elemId){
 
 async function openBulkImport(){
   // 일괄 등록 모달 열기
-  document.getElementById('catModal').querySelector('.modal-title').textContent='직원 일괄 등록';
+  document.querySelector('#catModal .modal-inner').classList.add('wide');
+  document.getElementById('catModalTitle').textContent='직원 일괄 등록';
   document.getElementById('catList').innerHTML=`
     <div class="hint-box" style="background:var(--gnb);border:0.5px solid var(--gn);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--gn);margin-bottom:12px">
       아래 표에 직접 입력하거나, Google Sheets/Excel에서 복사 후 이름 첫 셀 클릭 → Cmd+V 붙여넣기<br>
@@ -1457,6 +1471,18 @@ const CAT_ICONS = [
 ];
 
 function openCatModal() {
+  // 모달을 카테고리 관리 모드로 복구
+  document.getElementById('catModalTitle').textContent = '게시판 카테고리 관리';
+  document.getElementById('catModalTitle').textContent = '게시판 카테고리 관리';
+  const addBtn = document.getElementById('catModalAddBtn');
+  addBtn.style.display = '';
+  addBtn.innerHTML = '<i class="ti ti-plus"></i> 카테고리 추가';
+  addBtn.onclick = addCatField;
+  const okBtn = document.getElementById('catModalOkBtn');
+  okBtn.textContent = '저장';
+  okBtn.onclick = saveCats;
+  okBtn.disabled = false;
+  document.querySelector('#catModal .modal-inner').classList.remove('wide');
   const list = document.getElementById('catList');
   list.innerHTML = allCats.map((c,i) => {
     const opts = CAT_ICONS.map(ic =>
@@ -1535,70 +1561,6 @@ async function loadNotifPanel() {
     : `<div style="font-size:13px;color:var(--th);padding:10px 0">새 알림이 없습니다.</div>` + guide;
 }
 
-
-// ── 게시글 수정 ─────────────────────────────────────────────────
-async function renderEditPost(area) {
-  const p = currentPost;
-  if (!p) { goPage('board'); return; }
-  const catOpts = allCats.filter(c=>canWriteCat(c.name)).map(c =>
-    `<option value="${c.id}"${c.id===p.category_id?' selected':''}>${c.name}</option>`
-  ).join('');
-  const {data:atts} = await sb.from('attachments').select('*').eq('post_id',p.id);
-
-  area.innerHTML = `
-    <div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage('board')"><i class="ti ti-arrow-left"></i> 취소</button></div>
-    <div class="form-section">
-      <div class="page-title" style="margin-bottom:18px">공지 수정</div>
-      <div class="form-row"><label class="form-label">카테고리</label><select class="form-input" id="eCat">${catOpts}</select></div>
-      <div class="form-row"><label class="form-label">제목</label><input class="form-input" id="eTitle" value="${p.title||''}"/></div>
-      <div class="form-row"><label class="form-label">내용</label><div id="eEditor"></div></div>
-      <div class="form-row"><label class="form-label">열람 권한</label>
-        <div class="form-access-row">
-          <div class="access-opt${p.access==='all'?' selected':''}" id="eacc-all" onclick="setEditAccess('all')"><i class="ti ti-users"></i><br>전 직원</div>
-          <div class="access-opt${p.access==='manager'?' selected':''}" id="eacc-mgr" onclick="setEditAccess('manager')"><i class="ti ti-user-check"></i><br>매니저 이상</div>
-        </div>
-      </div>
-      <div class="form-row"><div class="toggle-row"><div><div class="toggle-label">댓글 허용</div></div>
-        <button class="toggle-switch${p.comments_on?' on':''}" id="eCmtToggle" onclick="this.classList.toggle('on')"></button>
-      </div></div>
-      ${atts&&atts.length ? `<div class="form-row"><label class="form-label">기존 첨부파일</label>${atts.map(a=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)"><i class="ti ti-paperclip" style="color:var(--bl)"></i><span style="flex:1;font-size:13px;color:var(--bl)">${a.file_name}</span><button onclick="delAttachment(${a.id},this)" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-trash"></i></button></div>`).join('')}</div>` : ''}
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">
-        <button class="btn-cancel-sm" onclick="goPage('board')">취소</button>
-        <button class="btn-submit" onclick="updatePost(${p.id})">수정 완료</button>
-      </div>
-    </div>`;
-
-  let editAccess = p.access || 'all';
-  window.setEditAccess = function(v){
-    editAccess = v;
-    document.getElementById('eacc-all').className = 'access-opt'+(v==='all'?' selected':'');
-    document.getElementById('eacc-mgr').className = 'access-opt'+(v==='manager'?' selected':'');
-  };
-  window.updatePost = async function(id){
-    const title = document.getElementById('eTitle').value.trim();
-    const body = editQuill ? editQuill.root.innerHTML : '';
-    const catId = parseInt(document.getElementById('eCat').value);
-    const commentsOn = document.getElementById('eCmtToggle').classList.contains('on');
-    if (!title) { alert('제목을 입력해주세요.'); return; }
-    await sb.from('posts').update({title,body,category_id:catId,access:editAccess,comments_on:commentsOn,updated_at:new Date().toISOString()}).eq('id',id);
-    currentCatId = catId;
-    goPage('board');
-  };
-  window.delAttachment = async function(attId, btn){
-    await sb.from('attachments').delete().eq('id',attId);
-    btn.closest('div').remove();
-  };
-
-  let editQuill = null;
-  function initEditQuill(){
-    if (typeof Quill==='undefined'){setTimeout(initEditQuill,200);return;}
-    const el = document.getElementById('eEditor');
-    if(!el||el.classList.contains('ql-container')) return;
-    editQuill = new Quill('#eEditor',{theme:'snow',modules:{toolbar:[[{header:[1,2,3,false]}],['bold','italic','underline'],[{list:'ordered'},{list:'bullet'}],['link','image'],['clean']]},placeholder:'내용을 입력하세요...'});
-    if (p.body) editQuill.root.innerHTML = p.body;
-  }
-  setTimeout(initEditQuill, 150);
-}
 
 // ── 댓글 수정/삭제 ───────────────────────────────────────────────
 async function delCmt(cmtId, postId){
