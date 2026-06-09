@@ -929,7 +929,7 @@ async function downloadFile(url, fileName){
     }
     // 이미지 아닌 파일: 안내 후 다운로드
     if(wmEnabled){
-      const ok = confirm('⚠️ 내부 자료 안내\n\n본 자료는 ['+wmText+'] 님에게 배포된 내부 자료입니다.\n외부 유출에 유의 바랍니다.\n\n다운로드하시겠습니까?');
+      const ok = confirm('⚠️ 내부 자료 안내\n\n본 자료는 ['+wmText+'] 님에게 배포된 내부 자료입니다.\n무단 배포·외부 유출에 유의 바랍니다.\n\n다운로드하시겠습니까?');
       if(!ok) return;
     }
     const res = await fetch(url);
@@ -1436,13 +1436,24 @@ async function toggleActive(id, cur){
 }
 
 // ── 직원 삭제 (이중 확인) ────────────────────────────────────────
+function verifyAdminPassword(actionDesc){
+  const pw = prompt('🔒 '+actionDesc+'\n\n계속하려면 현재 로그인한 관리자(['+currentUser.name+']) 비밀번호를 입력해주세요.');
+  if(pw === null) return false; // 취소
+  if(pw !== currentUser.password_hash){
+    alert('비밀번호가 일치하지 않습니다. 삭제가 취소되었습니다.');
+    return false;
+  }
+  return true;
+}
+
 async function deleteUser(id, name){
   // 1차 확인
-  if(!confirm('['+name+'] 직원을 삭제하시겠습니까?\n\n삭제하면 계정과 모든 기록이 사라지며 복구할 수 없습니다.')) return;
-  // 2차 확인 (데이터 삭제 경고)
-  if(!confirm('⚠️ 데이터를 삭제하시겠습니까?\n\n['+name+'] 님의 데이터가 영구 삭제됩니다.\n이 작업은 되돌릴 수 없습니다.\n\n정말 삭제하려면 [확인]을 눌러주세요.')) return;
+  if(!confirm('['+name+'] 직원을 삭제하시겠습니까?\n\n삭제하면 계정과 모든 기록이 사라지며 복구할 수 없습니다.\n인원현황 시트에서도 자동으로 제거됩니다.')) return;
+  // 2차 확인: 비밀번호 입력
+  if(!verifyAdminPassword('['+name+'] 님의 데이터를 영구 삭제합니다. 되돌릴 수 없습니다.')) return;
   const {error} = await sb.from('users').delete().eq('id', id);
   if(error){ alert('삭제 오류: '+error.message); return; }
+  alert('['+name+'] 직원이 삭제되었습니다.');
   renderStaff(document.getElementById('contentArea'));
 }
 
@@ -1450,12 +1461,13 @@ async function bulkDeleteUsers(){
   const ids = Array.from(window.__selStaff || []);
   if(!ids.length){ alert('선택된 직원이 없습니다.'); return; }
   // 1차 확인
-  if(!confirm('선택한 '+ids.length+'명을 삭제하시겠습니까?\n\n삭제하면 계정과 모든 기록이 사라지며 복구할 수 없습니다.')) return;
-  // 2차 확인
-  if(!confirm('⚠️ 데이터를 삭제하시겠습니까?\n\n선택한 '+ids.length+'명의 데이터가 영구 삭제됩니다.\n이 작업은 되돌릴 수 없습니다.\n\n정말 삭제하려면 [확인]을 눌러주세요.')) return;
+  if(!confirm('선택한 '+ids.length+'명을 삭제하시겠습니까?\n\n삭제하면 계정과 모든 기록이 사라지며 복구할 수 없습니다.\n인원현황 시트에서도 자동으로 제거됩니다.')) return;
+  // 2차 확인: 비밀번호 입력
+  if(!verifyAdminPassword('선택한 '+ids.length+'명의 데이터를 영구 삭제합니다. 되돌릴 수 없습니다.')) return;
   const {error} = await sb.from('users').delete().in('id', ids);
   if(error){ alert('삭제 오류: '+error.message); return; }
   window.__selStaff = new Set();
+  alert(ids.length+'명이 삭제되었습니다.');
   renderStaff(document.getElementById('contentArea'));
 }
 
