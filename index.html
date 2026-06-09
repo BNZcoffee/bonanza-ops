@@ -1071,10 +1071,31 @@ async function renderStaff(area) {
     <div class="page-header"><div class="page-title">인원 현황</div>
       <div class="page-sub">재직 ${active.length}명 · 퇴사/비활성 ${inactive.length}명</div>
     </div>
-    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
       <button class="staff-tab active" id="stab-active" onclick="switchStaffTab('active')">재직 ${active.length}</button>
       <button class="staff-tab" id="stab-inactive" onclick="switchStaffTab('inactive')">퇴사/비활성 ${inactive.length}</button>
     </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+      <div class="search-box" style="flex:1;min-width:180px">
+        <i class="ti ti-search" style="color:var(--th)"></i>
+        <input id="staffSearch" placeholder="이름·코드·연락처 검색..." oninput="applyStaffFilter()"/>
+      </div>
+      <select id="filterStore" onchange="applyStaffFilter()" style="border:0.5px solid var(--crd);border-radius:8px;padding:8px 12px;font-size:13px;background:#fff;color:var(--tm);cursor:pointer;min-width:110px">
+        <option value="">전체 매장</option>
+        ${storeOpts}
+      </select>
+      <select id="filterRole" onchange="applyStaffFilter()" style="border:0.5px solid var(--crd);border-radius:8px;padding:8px 12px;font-size:13px;background:#fff;color:var(--tm);cursor:pointer;min-width:110px">
+        <option value="">전체 직급</option>
+        <option value="admin">운영팀</option>
+        <option value="manager">매니저</option>
+        <option value="barista">바리스타</option>
+        <option value="pastry">파티쉐</option>
+        <option value="purchase">구매팀</option>
+        <option value="hr">인사팀</option>
+      </select>
+      <button class="btn-cancel-sm" onclick="resetStaffFilter()" style="font-size:12px;padding:8px 12px"><i class="ti ti-filter-off"></i> 초기화</button>
+    </div>
+    <div id="filterResult" style="font-size:12px;color:var(--th);margin-bottom:8px;display:none"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <div id="bulkBar" style="display:none;align-items:center;gap:8px">
         <span id="selCount" style="font-size:13px;color:var(--bl);font-weight:600">0명 선택</span>
@@ -1106,19 +1127,30 @@ async function renderStaff(area) {
       <table class="staff-list-table" id="staffTable">
         <thead><tr>
           <th><input type="checkbox" onclick="selAllUsers(this)"></th>
-          <th>직급</th><th>이름</th><th>매장</th><th>코드</th>
-          <th>연락처</th><th>이메일</th><th>입사일</th><th>퇴사일</th><th>관리</th>
+          <th onclick="sortStaff('role')" style="cursor:pointer">직급 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
+          <th onclick="sortStaff('name')" style="cursor:pointer">이름 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
+          <th onclick="sortStaff('store')" style="cursor:pointer">매장 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
+          <th onclick="sortStaff('code')" style="cursor:pointer">코드 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
+          <th>연락처</th><th>이메일</th>
+          <th onclick="sortStaff('hire_date')" style="cursor:pointer">입사일 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
+          <th>퇴사일</th><th>관리</th>
         </tr></thead>
         <tbody id="staffTbody">${renderTab(active)}</tbody>
       </table>
     </div>`;
 
+  // 필터/정렬용 상태 window에 노출
+  window.__staffData = {active, inactive, renderTab};
+  window.__staffTab = 'active';
+  window.__staffSort = {col:null, dir:1};
+
   // 탭 전환
   window.switchStaffTab = function(tab){
+    window.__staffTab = tab;
     document.getElementById('stab-active').className = 'staff-tab'+(tab==='active'?' active':'');
     document.getElementById('stab-inactive').className = 'staff-tab'+(tab==='inactive'?' active':'');
-    document.getElementById('staffTbody').innerHTML = renderTab(tab==='active'?active:inactive);
     selStaff = new Set();
+    applyStaffFilter();
     updateBulkBar();
   };
   window.toggleUserSel = function(id, checked){
@@ -1145,6 +1177,69 @@ async function renderStaff(area) {
     p.style.display = p.style.display==='none' ? 'block' : 'none';
   };
 }
+
+// ── 인원현황 검색/필터/정렬 ──────────────────────────────────────
+function applyStaffFilter(){
+  if(!window.__staffData) return;
+  const tab = window.__staffTab || 'active';
+  let list = tab==='active' ? [...window.__staffData.active] : [...window.__staffData.inactive];
+
+  const q = (document.getElementById('staffSearch')?.value||'').trim().toLowerCase();
+  const fStore = document.getElementById('filterStore')?.value||'';
+  const fRole = document.getElementById('filterRole')?.value||'';
+
+  if(q) list = list.filter(u =>
+    (u.name||'').toLowerCase().includes(q) ||
+    (u.code||'').toLowerCase().includes(q) ||
+    (u.phone||'').toLowerCase().includes(q) ||
+    (u.email||'').toLowerCase().includes(q)
+  );
+  if(fStore) list = list.filter(u => u.store === fStore);
+  if(fRole) list = list.filter(u => u.role === fRole);
+
+  // 정렬
+  const s = window.__staffSort;
+  if(s && s.col){
+    list.sort((a,b)=>{
+      let va=(a[s.col]||''), vb=(b[s.col]||'');
+      if(s.col==='role'){ const order={admin:0,manager:1,barista:2,pastry:3,purchase:4,hr:5}; va=order[a.role]??9; vb=order[b.role]??9; }
+      if(va<vb) return -1*s.dir;
+      if(va>vb) return 1*s.dir;
+      return 0;
+    });
+  }
+
+  const tbody = document.getElementById('staffTbody');
+  if(tbody) tbody.innerHTML = list.length ? window.__staffData.renderTab(list)
+    : '<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--th)">검색 결과가 없습니다.</td></tr>';
+
+  // 필터 적용 안내
+  const total = tab==='active' ? window.__staffData.active.length : window.__staffData.inactive.length;
+  const resEl = document.getElementById('filterResult');
+  if(resEl){
+    const filtered = (q||fStore||fRole);
+    if(filtered){
+      resEl.style.display='block';
+      resEl.innerHTML = '<i class="ti ti-filter"></i> '+list.length+'명 표시 중 (전체 '+total+'명)';
+    } else {
+      resEl.style.display='none';
+    }
+  }
+}
+function sortStaff(col){
+  if(!window.__staffSort) window.__staffSort={col:null,dir:1};
+  if(window.__staffSort.col===col){ window.__staffSort.dir *= -1; }
+  else { window.__staffSort.col=col; window.__staffSort.dir=1; }
+  applyStaffFilter();
+}
+function resetStaffFilter(){
+  const s=document.getElementById('staffSearch'); if(s) s.value='';
+  const st=document.getElementById('filterStore'); if(st) st.value='';
+  const r=document.getElementById('filterRole'); if(r) r.value='';
+  window.__staffSort={col:null,dir:1};
+  applyStaffFilter();
+}
+
 async function addUser() {
   const code = document.getElementById('uCode').value.trim().toUpperCase();
   const name = document.getElementById('uName').value.trim();
