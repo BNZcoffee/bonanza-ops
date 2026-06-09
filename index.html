@@ -672,12 +672,13 @@ async function renderPostDetail(area) {
     const attLinks = attachments.map(a => {
       const ext = (a.file_name||'').split('.').pop().toLowerCase();
       const ico = iconMap2[ext] || 'ti-paperclip';
-      return `<a href="${a.file_url}" target="_blank" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;text-decoration:none;margin-bottom:6px;color:var(--bl)">
-        <i class="ti ${ico}" style="font-size:20px;flex-shrink:0"></i>
-        <span style="flex:1;font-size:13px;text-decoration:underline;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.file_name}</span>
-        <span style="font-size:10px;font-weight:700;background:var(--blb);border-radius:4px;padding:2px 6px;flex-shrink:0">${ext.toUpperCase()}</span>
-        <i class="ti ti-download" style="font-size:14px;color:var(--th);flex-shrink:0"></i>
-      </a>`;
+      return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:6px">
+        <i class="ti ${ico}" style="font-size:20px;flex-shrink:0;color:var(--bl)"></i>
+        <span style="flex:1;font-size:13px;font-weight:500;color:var(--bl);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.file_name}</span>
+        <span style="font-size:10px;font-weight:700;background:var(--blb);color:var(--bl);border-radius:4px;padding:2px 6px;flex-shrink:0">${ext.toUpperCase()}</span>
+        <a href="${a.file_url}" target="_blank" title="새 탭에서 보기" style="color:var(--th);text-decoration:none;flex-shrink:0"><i class="ti ti-eye" style="font-size:16px"></i></a>
+        <button onclick="downloadFile('${a.file_url}','${a.file_name.replace(/'/g,"\\'")}')" title="저장" style="background:none;border:none;cursor:pointer;color:var(--bl);flex-shrink:0;padding:0"><i class="ti ti-download" style="font-size:16px"></i></button>
+      </div>`;
     }).join('');
     attachHtml = `<div style="margin-bottom:16px"><div class="attach-label">첨부파일 (${attachments.length}개)</div><div style="margin-top:8px">${attLinks}</div></div>`;
   }
@@ -893,6 +894,26 @@ function nRenderFileList(){
     </div>`
   ).join('');
 }
+
+// ── 파일 다운로드 (다른 이름으로 저장) ──────────────────────────
+async function downloadFile(url, fileName){
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = fileName || 'download';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(blobUrl), 1000);
+  } catch(e) {
+    // CORS 등 실패 시 새 탭 폴백
+    window.open(url, '_blank');
+  }
+}
+
 async function nUploadFile(file, folder){
   const ext = file.name.split('.').pop().toLowerCase();
   const fname = folder+'/'+Date.now()+'_'+Math.random().toString(36).slice(2)+'.'+ext;
@@ -1695,9 +1716,15 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자 커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'-'};
+let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
-  if(data) data.forEach(r=>{APP[r.key]=r.value;});
+  if(data){
+    data.forEach(r=>{APP[r.key]=r.value;});
+    // 가장 최근 updated_at 찾기
+    const times = data.map(r=>r.updated_at).filter(Boolean).sort();
+    APP_UPDATED_AT = times.length ? times[times.length-1] : null;
+  }
   // 저장된 설정 즉시 반영
   if(APP.app_name){
     const logo = document.querySelector('.logo');
@@ -1717,7 +1744,7 @@ async function renderAppSettings(area){
   await loadAppSettings();
   const tog = key => `<button class="toggle-switch${APP[key]==='true'?' on':''}" id="ts-${key}" onclick="this.classList.toggle('on');APP['${key}']=this.classList.contains('on')?'true':'false'"></button>`;
   area.innerHTML = `
-    <div class="page-header"><div class="page-title">앱 관리</div><div class="page-sub">현재 버전: <strong>${APP.app_version}</strong></div></div>
+    <div class="page-header"><div class="page-title">앱 관리</div><div class="page-sub">현재 버전: <strong>${APP.app_version}</strong>${APP_UPDATED_AT?'  ·  마지막 업데이트: <strong>'+fmtDateTime(APP_UPDATED_AT)+'</strong>':''}</div></div>
     <div class="notif-card" style="margin-bottom:12px">
       <div class="section-label" style="margin-bottom:12px">UI 설정</div>
       <div class="form-row"><label class="form-label">앱 이름 (상단 로고)</label><input class="form-input" id="cfg-name" value="${APP.app_name||''}"/></div>
@@ -1740,8 +1767,9 @@ async function renderAppSettings(area){
     </div>
     <div class="notif-card">
       <div class="section-label" style="margin-bottom:10px">시스템 정보</div>
+      <div class="setting-row"><div><div class="setting-title">마지막 업데이트</div><div class="setting-sub">${APP_UPDATED_AT?fmtDateTime(APP_UPDATED_AT):'-'}</div></div></div>
       <div class="setting-row"><div><div class="setting-title">데이터베이스</div><div class="setting-sub">Supabase (한국 리전)</div></div></div>
-      <div class="setting-row"><div><div class="setting-title">호스팅</div><div class="setting-sub">Netlify — bonanzacoffee-ops.netlify.app</div></div></div>
+      <div class="setting-row"><div><div class="setting-title">호스팅</div><div class="setting-sub">GitHub Pages — bnzcoffee.github.io/bonanza-ops</div></div></div>
     </div>`;
   setTimeout(()=>{
     const picker=document.getElementById('cfg-cpicker');
