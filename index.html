@@ -240,6 +240,15 @@ textarea.form-input{min-height:120px;resize:vertical}
 .staff-tab{background:none;border:0.5px solid var(--crd);border-radius:8px;padding:6px 16px;font-size:13px;color:var(--ts);cursor:pointer}
 .staff-tab.active{background:var(--br);color:#fff;border-color:var(--br)}
 .hint-box{background:var(--gnb);border:0.5px solid var(--gn);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--gn);margin-bottom:12px;line-height:1.7}
+
+@media print {
+  .sidebar, .topbar, .notif-panel, .board-tabs, .board-toolbar, .btn-new, .btn-cancel-sm, .btn-submit, .comment-input-row, #favBtn { display: none !important; }
+  .content { padding: 0 !important; overflow: visible !important; }
+  .post-detail { border: none !important; padding: 0 !important; }
+  .watermark { opacity: 0.06 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { background: #fff !important; }
+  .detail-body { color: #000 !important; }
+}
 </style>
 </head>
 <body>
@@ -907,21 +916,80 @@ function nRenderFileList(){
 
 // ── 파일 다운로드 (다른 이름으로 저장) ──────────────────────────
 async function downloadFile(url, fileName){
+  const ext = (fileName||'').split('.').pop().toLowerCase();
+  const isImage = ['jpg','jpeg','png','gif','webp','bmp'].includes(ext);
+  const wmEnabled = (APP.watermark_enabled !== 'false');
+  const wmText = currentUser ? (currentUser.code+' '+currentUser.name+' '+currentUser.store) : '';
+
   try {
+    if(isImage && wmEnabled){
+      // 이미지에 워터마크 새겨서 다운로드
+      await downloadImageWithWatermark(url, fileName, wmText);
+      return;
+    }
+    // 이미지 아닌 파일: 안내 후 다운로드
+    if(wmEnabled){
+      const ok = confirm('⚠️ 내부 자료 안내\n\n본 자료는 ['+wmText+'] 님에게 배포된 내부 자료입니다.\n외부 유출 시 책임이 따를 수 있습니다.\n\n다운로드하시겠습니까?');
+      if(!ok) return;
+    }
     const res = await fetch(url);
     const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = blobUrl;
     a.download = fileName || 'download';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(()=>URL.revokeObjectURL(blobUrl), 1000);
   } catch(e) {
-    // CORS 등 실패 시 새 탭 폴백
     window.open(url, '_blank');
   }
+}
+
+async function downloadImageWithWatermark(url, fileName, wmText){
+  return new Promise((resolve, reject)=>{
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = ()=>{
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+
+      // 워터마크: 대각선 반복, 아주 옅게 (인쇄 시 거슬리지 않게)
+      const fontSize = Math.max(14, Math.round(canvas.width/40));
+      ctx.font = '600 '+fontSize+'px sans-serif';
+      ctx.fillStyle = 'rgba(60,40,25,0.10)';  // 매우 옅은 갈색
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.save();
+      ctx.translate(canvas.width/2, canvas.height/2);
+      ctx.rotate(-Math.PI/6); // -30도
+      // 대각선 격자로 반복
+      const stepX = fontSize * 14;
+      const stepY = fontSize * 6;
+      const diag = Math.sqrt(canvas.width**2 + canvas.height**2);
+      for(let y=-diag/2; y<diag/2; y+=stepY){
+        for(let x=-diag/2; x<diag/2; x+=stepX){
+          ctx.fillText(wmText, x, y);
+        }
+      }
+      ctx.restore();
+
+      canvas.toBlob((blob)=>{
+        if(!blob){ window.open(url,'_blank'); resolve(); return; }
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = fileName || 'image.png';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(()=>URL.revokeObjectURL(blobUrl), 1000);
+        resolve();
+      }, 'image/png');
+    };
+    img.onerror = ()=>{ window.open(url,'_blank'); resolve(); };
+    img.src = url;
+  });
 }
 
 async function nUploadFile(file, folder){
