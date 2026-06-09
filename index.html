@@ -279,6 +279,7 @@ textarea.form-input{min-height:120px;resize:vertical}
     <div class="sidebar-section">
       <div class="sidebar-label">게시판</div>
       <button class="nav-btn" onclick="goPage('all')" id="nav-all"><i class="ti ti-layout-list"></i> 전체보기</button>
+      <button class="nav-btn" onclick="goPage('saved')" id="nav-saved"><i class="ti ti-bookmark"></i> 저장한 공지</button>
       <div id="catNavArea"></div>
     </div>
     <div class="sidebar-section" id="adminNav" style="display:none">
@@ -531,6 +532,10 @@ function goPage(page) {
     renderAppSettings(area);
   } else if (page === 'profile') {
     renderProfile(area);
+  } else if (page === 'saved') {
+    const nb = document.getElementById('nav-saved');
+    if (nb) nb.classList.add('active');
+    renderSaved(area);
   } else if (page === 'editpost') {
     renderNewPost(area, currentPost);
   }
@@ -626,11 +631,13 @@ async function renderPostDetail(area) {
   const isDeptWriter = canWrite();
 
   // load reads, comments, attachments
-  const [readsRes, cmtsRes, attRes] = await Promise.all([
+  const [readsRes, cmtsRes, attRes, favRes] = await Promise.all([
     sb.from('post_reads').select('*, users(name,store)').eq('post_id', p.id),
     sb.from('comments').select('*, users(name,store,nickname,avatar_url)').eq('post_id', p.id).order('created_at'),
-    sb.from('attachments').select('*').eq('post_id', p.id)
+    sb.from('attachments').select('*').eq('post_id', p.id),
+    sb.from('post_favorites').select('id').eq('post_id', p.id).eq('user_id', currentUser.id)
   ]);
+  const isFav = (favRes.data && favRes.data.length > 0);
   const reads = readsRes.data || [];
   const comments = cmtsRes.data || [];
   const attachments = attRes.data || [];
@@ -716,6 +723,7 @@ async function renderPostDetail(area) {
 
   const catNameForEdit = allCats.find(c=>c.id===p.category_id)?.name||'';
   const editBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openEditPost(${p.id})"><i class="ti ti-edit"></i> 수정</button>` : '';
+  const remindBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px;color:var(--or,#B85C00);border-color:var(--or,#B85C00)" onclick="openRemindModal(${p.id})"><i class="ti ti-bell-ringing"></i> 리마인드</button>` : '';
 
   area.innerHTML = `
     <div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage('board')"><i class="ti ti-arrow-left"></i> 목록</button></div>
@@ -728,6 +736,8 @@ async function renderPostDetail(area) {
           <span>열람: ${accLbl}</span>
           <span style="margin-left:auto;display:flex;gap:8px">
             ${editBtn}
+            ${remindBtn}
+            <button class="btn-cancel-sm" id="favBtn" style="font-size:12px;padding:5px 10px;${isFav?'color:var(--gd);border-color:var(--gd)':''}" onclick="toggleFav(${p.id})"><i class="ti ti-bookmark${isFav?'-filled':''}"></i> ${isFav?'저장됨':'저장'}</button>
             <button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openShareModal(${p.id})"><i class="ti ti-share"></i> 링크 공유</button>
           </span>
         </div>
@@ -1434,6 +1444,7 @@ async function renderStats(area) {
 // ── NOTIF SETTINGS ────────────────────────────────
 async function renderNotifSettings(area) {
   const { data: ns } = await sb.from('notification_settings').select('*').single();
+  window.__remindTarget = ns?.remind_target || 'unread';
   area.innerHTML = `
     <div class="page-header"><div class="page-title">알림 설정</div><div class="page-sub">새 공지 등록 시 알림 발송 방식 설정</div></div>
     <div class="notif-card">
@@ -1461,13 +1472,27 @@ async function renderNotifSettings(area) {
     <div class="notif-card">
       <div class="section-label" style="margin-bottom:10px">알림 트리거</div>
       <div class="setting-row">
-        <div><div class="setting-title">미확인 직원 3일 후 리마인드</div></div>
+        <div><div class="setting-title">미확인 직원 3일 후 자동 리마인드</div><div class="setting-sub">3일간 확인 안 한 직원에게 자동 알림</div></div>
         <button class="toggle-switch${ns?.remind_unread?' on':''}" id="ts-remind" onclick="this.classList.toggle('on')"></button>
+      </div>
+      <div style="padding:10px 0">
+        <label class="form-label">수동 리마인드 기본 대상</label>
+        <div class="form-access-row" style="margin-top:6px">
+          <div class="access-opt${(ns?.remind_target||'unread')==='unread'?' selected':''}" id="rt-unread" onclick="setRemindTarget('unread')"><i class="ti ti-user-x"></i><br>미확인 직원만</div>
+          <div class="access-opt${(ns?.remind_target)==='all'?' selected':''}" id="rt-all" onclick="setRemindTarget('all')"><i class="ti ti-users"></i><br>전 직원</div>
+        </div>
+        <p style="font-size:11px;color:var(--th);margin-top:6px">게시글 수정 화면에서 리마인드 발송 시 적용되는 기본 대상입니다.</p>
       </div>
     </div>
     <div style="text-align:right">
       <button class="btn-submit" onclick="saveNotifSettings()">설정 저장</button>
     </div>`;
+}
+
+function setRemindTarget(v){
+  window.__remindTarget = v;
+  document.getElementById('rt-unread').className = 'access-opt'+(v==='unread'?' selected':'');
+  document.getElementById('rt-all').className = 'access-opt'+(v==='all'?' selected':'');
 }
 
 async function saveNotifSettings() {
@@ -1477,6 +1502,7 @@ async function saveNotifSettings() {
     email_enabled: document.getElementById('ts-email').classList.contains('on'),
     pwa_enabled: document.getElementById('ts-pwa').classList.contains('on'),
     remind_unread: document.getElementById('ts-remind').classList.contains('on'),
+    remind_target: window.__remindTarget || 'unread',
     slack_webhook_url: document.getElementById('slackUrl').value.trim(),
     updated_at: new Date().toISOString()
   }).eq('id', ns.id);
@@ -1562,6 +1588,104 @@ function copyShareLink() {
   const txt = document.getElementById('shareLinkBox').textContent;
   navigator.clipboard.writeText(txt).then(() => alert('링크가 복사되었습니다.'));
 }
+
+
+// ── 리마인드 알림 ─────────────────────────────────────────────────
+async function openRemindModal(postId){
+  const {data:ns} = await sb.from('notification_settings').select('remind_target').single();
+  const defTarget = ns?.remind_target || 'unread';
+  // 미확인 인원 수 계산
+  const {data:activeUsers} = await sb.from('users').select('id').eq('active',true).neq('role','admin');
+  const {data:reads} = await sb.from('post_reads').select('user_id').eq('post_id',postId);
+  const readSet = new Set((reads||[]).map(r=>r.user_id));
+  const total = (activeUsers||[]).length;
+  const unreadCount = (activeUsers||[]).filter(u=>!readSet.has(u.id)).length;
+
+  window.__remindModalTarget = defTarget;
+  document.querySelector('#catModal .modal-inner').classList.remove('wide');
+  document.getElementById('catModalTitle').textContent = '리마인드 알림 보내기';
+  document.getElementById('catList').innerHTML = `
+    <p style="font-size:13px;color:var(--ts);margin-bottom:14px;line-height:1.6">이 공지를 직원들의 알림창에 다시 표시합니다.<br>대상을 선택해주세요.</p>
+    <div class="form-access-row">
+      <div class="access-opt${defTarget==='unread'?' selected':''}" id="rm-unread" onclick="pickRemind('unread')">
+        <i class="ti ti-user-x"></i><br>미확인 직원만<br><strong style="font-size:15px">${unreadCount}명</strong>
+      </div>
+      <div class="access-opt${defTarget==='all'?' selected':''}" id="rm-all" onclick="pickRemind('all')">
+        <i class="ti ti-users"></i><br>전 직원<br><strong style="font-size:15px">${total}명</strong>
+      </div>
+    </div>
+    <p style="font-size:11px;color:var(--th);margin-top:10px">* 선택한 직원의 알림창(종 아이콘)에 이 공지가 다시 표시됩니다.</p>`;
+  document.getElementById('catModalAddBtn').style.display = 'none';
+  const okBtn = document.getElementById('catModalOkBtn');
+  okBtn.textContent = '리마인드 발송';
+  okBtn.onclick = ()=>sendRemind(postId);
+  document.getElementById('catModal').classList.add('open');
+}
+function pickRemind(v){
+  window.__remindModalTarget = v;
+  document.getElementById('rm-unread').className = 'access-opt'+(v==='unread'?' selected':'');
+  document.getElementById('rm-all').className = 'access-opt'+(v==='all'?' selected':'');
+}
+async function sendRemind(postId){
+  const target = window.__remindModalTarget || 'unread';
+  if(target==='all'){
+    // 전 직원 대상: 모든 읽음 기록 삭제 → 알림창에 다시 뜸
+    await sb.from('post_reads').delete().eq('post_id',postId);
+  } else {
+    // 미확인자만: 아무것도 안 지움 (이미 미확인자에겐 알림창에 떠있음)
+    // 단, 리마인드 기록만 남김
+  }
+  // 게시글 갱신시간 업데이트로 NEW 표시 + 알림 상단 노출
+  await sb.from('posts').update({updated_at:new Date().toISOString()}).eq('id',postId);
+  // 리마인드 기록
+  await sb.from('post_reminders').insert({post_id:postId, target});
+  document.getElementById('catModal').classList.remove('open');
+  // 모달 복구
+  document.getElementById('catModalAddBtn').style.display = '';
+  const cnt = target==='all' ? '전 직원' : '미확인 직원';
+  alert('리마인드 발송 완료!\n\n'+cnt+'의 알림창에 이 공지가 다시 표시됩니다.');
+  updateNotifDot();
+}
+
+// ── 즐겨찾기 ─────────────────────────────────────────────────────
+async function toggleFav(postId){
+  const {data:existing} = await sb.from('post_favorites').select('id').eq('post_id',postId).eq('user_id',currentUser.id);
+  if(existing && existing.length){
+    await sb.from('post_favorites').delete().eq('post_id',postId).eq('user_id',currentUser.id);
+  } else {
+    await sb.from('post_favorites').insert({post_id:postId, user_id:currentUser.id});
+  }
+  openPostById(postId);
+}
+async function renderSaved(area){
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const {data:favs} = await sb.from('post_favorites').select('post_id, created_at').eq('user_id',currentUser.id).order('created_at',{ascending:false});
+  if(!favs || !favs.length){
+    area.innerHTML = '<div class="page-header"><div class="page-title"><i class="ti ti-bookmark"></i> 저장한 공지</div><div class="page-sub">즐겨찾기한 공지 모음</div></div><div style="text-align:center;padding:50px;color:var(--th)"><i class="ti ti-bookmark-off" style="font-size:40px;opacity:.4"></i><div style="margin-top:12px;font-size:14px">저장한 공지가 없습니다.</div><div style="font-size:12px;margin-top:4px">공지 상세에서 <strong>저장</strong> 버튼을 눌러 추가하세요.</div></div>';
+    return;
+  }
+  const postIds = favs.map(f=>f.post_id);
+  const {data:posts} = await sb.from('posts').select('*,categories(name)').in('id',postIds);
+  // 즐겨찾기 순서(최신순) 유지
+  const orderMap = {};
+  favs.forEach((f,i)=>{orderMap[f.post_id]=i;});
+  const sorted = (posts||[]).filter(p=>canSee(p)).sort((a,b)=>orderMap[a.id]-orderMap[b.id]);
+  const week = new Date(Date.now()-7*864e5).toISOString();
+  const html = sorted.map(p=>{
+    const catIdx = allCats.findIndex(c=>c.id===p.category_id);
+    const cc = CAT_COLORS[catIdx>=0?catIdx%CAT_COLORS.length:0];
+    return `<div class="post-card" onclick="openPostById(${p.id})">
+      <div class="post-card-top">
+        <i class="ti ti-bookmark-filled" style="color:var(--gd);font-size:14px"></i>
+        <span class="post-title-txt">${p.title}</span>
+        <span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:${cc.bg};color:${cc.fg}">${p.categories?.name||''}</span>
+      </div>
+      <div class="post-meta"><span>${fmtDate(p.created_at)}</span></div>
+    </div>`;
+  }).join('') || '<div style="text-align:center;padding:40px;color:var(--th)">표시할 공지가 없습니다.</div>';
+  area.innerHTML = `<div class="page-header"><div class="page-title"><i class="ti ti-bookmark"></i> 저장한 공지</div><div class="page-sub">즐겨찾기한 공지 ${sorted.length}개</div></div><div class="post-list">${html}</div>`;
+}
+
 function toggleNotifPanel() {
   const panel = document.getElementById('notifPanel');
   if (panel.classList.contains('open')) { panel.classList.remove('open'); return; }
