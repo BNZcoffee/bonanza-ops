@@ -335,6 +335,24 @@ textarea.form-input{min-height:120px;resize:vertical}
   </div>
 </div>
 
+
+<!-- SLACK SETUP MODAL -->
+<div class="modal-bg" id="slackModal">
+  <div class="modal-inner">
+    <div class="modal-title"><i class="ti ti-brand-slack"></i> 슬랙 계정 등록</div>
+    <p style="font-size:13px;color:var(--ts);line-height:1.7;margin-bottom:14px">
+      업무 알림을 받기 위해 슬랙 계정을 등록해주세요.<br>
+      <span style="font-size:12px;color:var(--th)">이력서 이메일과 다를 수 있어, 실제 사용하는 슬랙 계정을 입력합니다.</span>
+    </p>
+    <label class="form-label">슬랙 계정 (이메일 또는 사용자명)</label>
+    <input class="form-input" id="slackInput" placeholder="예: hong@bonanza.kr 또는 @hong" />
+    <div id="slackErr" style="font-size:12px;color:var(--rd);min-height:16px;margin-top:6px"></div>
+    <div class="modal-footer">
+      <button class="btn-sm primary" onclick="saveSlackId()" style="width:100%">등록 완료</button>
+    </div>
+  </div>
+</div>
+
 <!-- SHARE MODAL -->
 <div class="modal-bg" id="shareModal">
   <div class="modal-inner">
@@ -418,6 +436,38 @@ function loginAs(user) {
   const params = new URLSearchParams(location.search);
   const postId = params.get('post');
   if (postId) openPostById(parseInt(postId));
+
+  // 슬랙 계정 미등록 시 안내 팝업
+  checkSlackSetup();
+}
+
+// 슬랙 계정 등록 안내
+function checkSlackSetup(){
+  if(!currentUser) return;
+  // slack_id가 비어있으면 안내
+  if(!currentUser.slack_id || currentUser.slack_id.trim()===''){
+    setTimeout(()=>{
+      if(confirm('슬랙 계정이 등록되어 있지 않습니다.\n\n업무 알림을 받기 위해 슬랙 계정 등록이 필요합니다.\n지금 등록하시겠습니까?')){
+        openSlackModal();
+      }
+    }, 800);
+  }
+}
+function openSlackModal(){
+  const inp = document.getElementById('slackInput');
+  if(inp) inp.value = currentUser.slack_id || '';
+  document.getElementById('slackErr').textContent = '';
+  document.getElementById('slackModal').classList.add('open');
+}
+async function saveSlackId(){
+  const val = document.getElementById('slackInput').value.trim();
+  const err = document.getElementById('slackErr');
+  if(!val){ err.textContent = '슬랙 계정을 입력해주세요.'; return; }
+  const {error} = await sb.from('users').update({slack_id: val}).eq('id', currentUser.id);
+  if(error){ err.textContent = '저장 오류: '+error.message; return; }
+  currentUser.slack_id = val;
+  document.getElementById('slackModal').classList.remove('open');
+  alert('슬랙 계정이 등록되었습니다.');
 }
 
 async function doLogout() {
@@ -2209,6 +2259,10 @@ async function renderProfile(area){
         <input class="form-input" id="p_phone" value="${currentUser.phone||''}" placeholder="010-0000-0000" style="flex:1;padding:6px 10px;font-size:13px"/>
       </div>
       <div style="display:flex;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--crd);gap:10px">
+        <span style="font-size:12px;color:var(--th);width:80px;flex-shrink:0;font-weight:600">슬랙 계정</span>
+        <input class="form-input" id="p_slack" value="${currentUser.slack_id||''}" placeholder="업무 알림 받을 슬랙 계정" style="flex:1;padding:6px 10px;font-size:13px"/>
+      </div>
+      <div style="display:flex;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--crd);gap:10px">
         <span style="font-size:12px;color:var(--th);width:80px;flex-shrink:0;font-weight:600">이메일</span>
         <input class="form-input" id="p_email" value="${currentUser.email||''}" placeholder="email@bonanza.kr" style="flex:1;padding:6px 10px;font-size:13px"/>
       </div>
@@ -2240,10 +2294,11 @@ async function saveProfile(){
   const phone = document.getElementById('p_phone').value.trim();
   const email = document.getElementById('p_email').value.trim();
   const nickname = document.getElementById('p_nick')?.value.trim();
+  const slackId = document.getElementById('p_slack')?.value.trim();
   const cur = document.getElementById('p_cur').value;
   const pw = document.getElementById('p_new').value;
   const con = document.getElementById('p_con').value;
-  const updates = {store, phone:phone||null, email:email||null, nickname:nickname||null};
+  const updates = {store, phone:phone||null, email:email||null, nickname:nickname||null, slack_id:slackId||null};
   if(cur||pw||con){
     if(cur!==currentUser.password_hash){alert('현재 비밀번호가 맞지 않습니다.');return;}
     if(pw.length<4){alert('새 비밀번호는 4자 이상이어야 합니다.');return;}
