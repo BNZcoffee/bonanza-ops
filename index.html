@@ -1357,10 +1357,14 @@ async function getNextCode(){
 let editingUserId = null;
 async function openEditUser(userId){
   editingUserId = userId;
-  const [{data:u},{data:stores}] = await Promise.all([
+  const [{data:u},{data:stores},{data:partList}] = await Promise.all([
     userId ? sb.from('users').select('*').eq('id',userId).single() : Promise.resolve({data:null}),
-    sb.from('store_options').select('*').order('sort_order')
+    sb.from('store_options').select('*').order('sort_order'),
+    sb.from('parts').select('*').order('sort_order')
   ]);
+  const partOpts = '<option value="">미지정</option>' + (partList||[]).map(p=>
+    `<option value="${p.name}"${u?.part===p.name?' selected':''}>${p.name}</option>`
+  ).join('');
   const storeOpts = (stores||[]).map(s=>
     `<option value="${s.name}"${u?.store===s.name?' selected':''}>${s.name}</option>`
   ).join('');
@@ -1392,6 +1396,15 @@ async function openEditUser(userId){
       <div><label class="form-label">퇴사일 <span style="font-size:10px;color:var(--th)">(익일 자동 비활성)</span></label>
         <input class="form-input" type="date" id="eu_retire" value="${u?.retire_date||''}"/>
       </div>
+      <div><label class="form-label">본사 파트 <span style="font-size:10px;color:var(--th)">(업무 신청 담당)</span></label>
+        <select class="form-input" id="eu_part">${partOpts}</select>
+      </div>
+      <div><label class="form-label">총괄 마스터</label>
+        <label style="display:flex;align-items:center;gap:8px;padding:9px 0;font-size:13px;color:var(--tm);cursor:pointer">
+          <input type="checkbox" id="eu_master" ${u?.is_master?'checked':''} style="width:auto"/>
+          전체 신청 열람 권한 (이사·대표 등)
+        </label>
+      </div>
     </div>
     ${userId?`<div style="margin-top:12px;padding-top:12px;border-top:0.5px solid var(--crd)">
       <label class="form-label">비밀번호 초기화 (변경 시만 입력)</label>
@@ -1412,6 +1425,13 @@ async function openEditUser(userId){
   document.getElementById('catModal').classList.add('open');
 }
 
+// 코드(BCK-NNN)로 초기 비밀번호 생성: bnz + 숫자4자리
+function initPwFromCode(code){
+  const m = (code||'').match(/(\d+)/);
+  const num = m ? m[1].padStart(4,'0') : '0000';
+  return 'bnz' + num;
+}
+
 async function submitEditUser(){
   const name = document.getElementById('eu_name')?.value.trim();
   const role = document.getElementById('eu_role')?.value;
@@ -1422,17 +1442,23 @@ async function submitEditUser(){
   const hire = document.getElementById('eu_hire')?.value||null;
   const retire = document.getElementById('eu_retire')?.value||null;
   const pw = document.getElementById('eu_pw')?.value.trim();
+  const part = document.getElementById('eu_part')?.value || null;
+  const isMaster = document.getElementById('eu_master')?.checked || false;
   if(!name||!store){alert('이름과 소속매장은 필수입니다.');return;}
   const today = new Date().toISOString().slice(0,10);
   const active = !retire || (retire >= today);
-  const payload = {name,role,store,phone:phone||null,email:email||null,hire_date:hire,retire_date:retire,active};
+  const payload = {name,role,store,phone:phone||null,email:email||null,hire_date:hire,retire_date:retire,active,part,is_master:isMaster};
   if(pw) payload.password_hash = pw;
-  let error;
+  let error, newCode;
   if(editingUserId){
     ({error} = await sb.from('users').update(payload).eq('id',editingUserId));
   } else {
-    const code = await getNextCode();
-    ({error} = await sb.from('users').insert({...payload,code,password_hash:pw||'bonanza1234'}));
+    newCode = await getNextCode();
+    const initPw = pw || initPwFromCode(newCode);
+    ({error} = await sb.from('users').insert({...payload,code:newCode,password_hash:initPw}));
+    if(!error) {
+      alert('직원이 등록되었습니다.\n\n직원 코드: '+newCode+'\n초기 비밀번호: '+initPw+'\n\n초기 비밀번호는 위 규칙(bnz+코드숫자)으로 부여됩니다.');
+    }
   }
   if(error){alert('오류: '+error.message);return;}
   document.getElementById('catModal').classList.remove('open');
@@ -1523,7 +1549,7 @@ async function openBulkImport(){
   document.getElementById('catList').innerHTML=`
     <div class="hint-box" style="background:var(--gnb);border:0.5px solid var(--gn);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--gn);margin-bottom:12px">
       아래 표에 직접 입력하거나, Google Sheets/Excel에서 복사 후 이름 첫 셀 클릭 → Cmd+V 붙여넣기<br>
-      직급: <strong>매니저/바리스타/파티쉐/구매팀/인사팀</strong> | 날짜: YYYY-MM-DD | 초기 비밀번호: bonanza1234
+      직급: <strong>매니저/바리스타/파티쉐/구매팀/인사팀</strong> | 날짜: YYYY-MM-DD | 초기 비밀번호: 자동(bnz+코드숫자)
     </div>
     <div style="overflow-x:auto;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:8px">
       <table style="width:100%;border-collapse:collapse">
@@ -1621,7 +1647,8 @@ async function submitBulk(){
   let ok=0,fail=0;
   for(const r of valid){
     const code=await getNextCode();
-    const{error}=await sb.from('users').insert({code,name:r.name,store:r.store,role:r.role,password_hash:'bonanza1234',hire_date:r.hire||null,retire_date:r.retire||null,active:r.active});
+    const initPw=initPwFromCode(code);
+    const{error}=await sb.from('users').insert({code,name:r.name,store:r.store,role:r.role,password_hash:initPw,hire_date:r.hire||null,retire_date:r.retire||null,active:r.active});
     if(error)fail++;else ok++;
   }
   btn.textContent='등록하기';btn.disabled=false;
