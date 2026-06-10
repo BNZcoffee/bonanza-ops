@@ -226,7 +226,7 @@ textarea.form-input{min-height:120px;resize:vertical}
   .nav-btn.active{background:none;border-bottom-color:var(--br);color:var(--br)}
   .nav-btn i{display:none}
   .sidebar-footer{display:none}
-  #adminNav{flex-direction:row}
+  #adminNav,#requestNav{flex-direction:row}
   .content{padding:14px}
   .board-tabs{flex-wrap:nowrap;overflow-x:auto}
   .tab-btn{white-space:nowrap;flex-shrink:0}
@@ -290,6 +290,11 @@ textarea.form-input{min-height:120px;resize:vertical}
       <button class="nav-btn" onclick="goPage('all')" id="nav-all"><i class="ti ti-layout-list"></i> 전체보기</button>
       <button class="nav-btn" onclick="goPage('saved')" id="nav-saved"><i class="ti ti-bookmark"></i> 저장한 공지</button>
       <div id="catNavArea"></div>
+    </div>
+    <div class="sidebar-section" id="requestNav" style="display:none">
+      <div class="sidebar-label">업무 신청</div>
+      <button class="nav-btn" onclick="goPage('requests')" id="nav-requests"><i class="ti ti-clipboard-list"></i> 업무 신청</button>
+      <button class="nav-btn" onclick="goPage('reqadmin')" id="nav-reqadmin" style="display:none"><i class="ti ti-settings-automation"></i> 신청 유형 관리</button>
     </div>
     <div class="sidebar-section" id="adminNav" style="display:none">
       <div class="sidebar-label">관리</div>
@@ -399,6 +404,10 @@ function loginAs(user) {
   document.getElementById('mainScreen').style.display = 'flex';
   document.getElementById('topbar').style.display = 'flex';
   document.getElementById('adminNav').style.display = (user.role === 'admin') ? '' : 'none';
+  // 업무 신청: 매니저+관리자만 진입. 유형관리: 관리자만
+  document.getElementById('requestNav').style.display = (user.role === 'admin' || user.role === 'manager' || user.is_master) ? '' : 'none';
+  const reqAdminBtn = document.getElementById('nav-reqadmin');
+  if (reqAdminBtn) reqAdminBtn.style.display = (user.role === 'admin') ? '' : 'none';
   document.getElementById('sidebarInfoTxt').textContent = user.store + ' · ' + user.name;
   document.getElementById('userBadgeEl').innerHTML = `<span class="role-tag">${roleLbl[user.role]||user.role}</span>${user.store} ${user.name}`;
   loadAppSettings();
@@ -547,6 +556,18 @@ function goPage(page) {
     renderSaved(area);
   } else if (page === 'editpost') {
     renderNewPost(area, currentPost);
+  } else if (page === 'requests') {
+    const nb = document.getElementById('nav-requests');
+    if (nb) nb.classList.add('active');
+    renderRequests(area);
+  } else if (page === 'reqnew') {
+    renderReqNew(area);
+  } else if (page === 'reqdetail') {
+    renderReqDetail(area);
+  } else if (page === 'reqadmin') {
+    const nb = document.getElementById('nav-reqadmin');
+    if (nb) nb.classList.add('active');
+    renderReqAdmin(area);
   }
 }
 
@@ -2218,6 +2239,527 @@ function canWriteCat(catName){
 }
 
 // ── CSS (추가분) ─────────────────────────────────────────────────
+
+// ════════════════════════════════════════════════════════════════
+// 업무 신청 게시판
+// ════════════════════════════════════════════════════════════════
+const REQ_STATUS = {
+  submitted: {label:'접수됨', bg:'#EDE4D6', fg:'#6B3E2A'},
+  in_progress: {label:'진행 중', bg:'#FFF3E0', fg:'#B85C00'},
+  done: {label:'처리 완료', bg:'#EAF4EE', fg:'#2D6A4F'},
+  rejected: {label:'반려', bg:'#FAF0EE', fg:'#A0291E'}
+};
+let reqTab = 'mine';      // mine(우리매장/내파트) | in_progress | done | rejected
+let reqSearchQ = '';
+let curReq = null;
+
+// 권한: 이 신청을 볼 수 있는가
+function canSeeReq(r) {
+  if (!currentUser) return false;
+  if (currentUser.is_master) return true;            // 마스터: 전체
+  if (currentUser.role === 'admin') return true;     // 운영팀(관리자): 전체
+  // 매장 매니저: 자기 매장 신청 전부
+  if (currentUser.role === 'manager' && r.store === currentUser.store) return true;
+  // 본사 담당자: 자기 파트 신청 전부
+  if (currentUser.part && r.part_name === currentUser.part) return true;
+  // 담당자 본인
+  if (r.assignee_id === currentUser.id) return true;
+  return false;
+}
+// 신청 작성 권한
+function canWriteReq() {
+  return currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.is_master);
+}
+
+// ── 신청 목록 ────────────────────────────────────────────────────
+async function renderRequests(area) {
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const { data: reqs } = await sb.from('requests')
+    .select('*, request_types(name, icon), parts(name)')
+    .order('created_at', {ascending:false});
+
+  // part_name 평탄화
+  (reqs||[]).forEach(r => { r.part_name = r.parts ? r.parts.name : null; });
+  let visible = (reqs||[]).filter(canSeeReq);
+
+  // 탭 필터
+  if (reqTab === 'in_progress') visible = visible.filter(r => r.status === 'in_progress');
+  else if (reqTab === 'done') visible = visible.filter(r => r.status === 'done');
+  else if (reqTab === 'rejected') visible = visible.filter(r => r.status === 'rejected');
+
+  // 검색 (제목 + form_data 내부 값)
+  if (reqSearchQ) {
+    const q = reqSearchQ.toLowerCase();
+    visible = visible.filter(r => {
+      if ((r.title||'').toLowerCase().includes(q)) return true;
+      const fd = r.form_data || {};
+      return Object.values(fd).some(v => String(v).toLowerCase().includes(q));
+    });
+  }
+
+  const scopeLabel = currentUser.is_master ? '전체' :
+    (currentUser.role === 'admin' ? '전체' :
+    (currentUser.role === 'manager' ? currentUser.store + ' 매장' :
+    (currentUser.part ? currentUser.part + ' 파트' : '내 담당')));
+
+  const tabBtn = (id, label) =>
+    '<button class="staff-tab' + (reqTab===id?' active':'') + '" onclick="reqTab=\'' + id + '\';renderRequests(document.getElementById(\'contentArea\'))">' + label + '</button>';
+
+  const cards = visible.length ? visible.map(r => {
+    const st = REQ_STATUS[r.status] || REQ_STATUS.submitted;
+    const typeName = r.request_types ? r.request_types.name : '신청';
+    const due = r.due_date ? (' · 완료 예정 ' + r.due_date) : '';
+    return '<div class="post-card" onclick="openReqById(' + r.id + ')">' +
+      '<div class="post-card-top">' +
+        '<span style="font-size:9px;font-weight:700;border-radius:8px;padding:2px 8px;background:#EAF0FA;color:#1A4B7A">' + typeName + '</span>' +
+        '<span class="post-title-txt">' + r.title + '</span>' +
+        '<span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:' + st.bg + ';color:' + st.fg + '">' + st.label + '</span>' +
+      '</div>' +
+      '<div class="post-meta"><span>' + r.store + '</span><span>신청 ' + fmtDate(r.created_at) + due + '</span></div>' +
+    '</div>';
+  }).join('') : '<div style="text-align:center;padding:40px;color:var(--th)">해당하는 신청이 없습니다.</div>';
+
+  const newBtn = canWriteReq() ?
+    '<button class="btn-new" onclick="goPage(\'reqnew\')"><i class="ti ti-plus"></i> 새 신청</button>' : '';
+
+  area.innerHTML =
+    '<div class="page-header"><div class="page-title">업무 신청</div>' +
+    '<div class="page-sub">' + scopeLabel + ' 기준으로 신청 내역을 확인합니다</div></div>' +
+    '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">' +
+      tabBtn('mine','전체') + tabBtn('in_progress','진행 중') + tabBtn('done','완료') + tabBtn('rejected','반려') +
+      '<div style="margin-left:auto">' + newBtn + '</div>' +
+    '</div>' +
+    '<div class="search-box" style="margin-bottom:12px"><i class="ti ti-search" style="color:var(--th)"></i>' +
+      '<input id="reqSearch" placeholder="제목·내용 검색..." value="' + reqSearchQ + '" oninput="reqSearchQ=this.value;clearTimeout(window.__reqST);window.__reqST=setTimeout(()=>renderRequests(document.getElementById(\'contentArea\')),300)"/></div>' +
+    '<div class="post-list">' + cards + '</div>';
+  // 검색창 포커스 유지
+  const si = document.getElementById('reqSearch');
+  if (si && reqSearchQ) { si.focus(); si.setSelectionRange(si.value.length, si.value.length); }
+}
+
+async function openReqById(id) {
+  const { data } = await sb.from('requests')
+    .select('*, request_types(name, form_fields, guide), parts(name), author:users!requests_author_id_fkey(name, store), assignee:users!requests_assignee_id_fkey(name)')
+    .eq('id', id).single();
+  if (!data) return;
+  data.part_name = data.parts ? data.parts.name : null;
+  if (!canSeeReq(data)) { alert('이 신청을 열람할 권한이 없습니다.'); return; }
+  curReq = data;
+  goPage('reqdetail');
+}
+
+
+// ── 신청 작성 ────────────────────────────────────────────────────
+let reqSelectedType = null;
+let reqPendingFiles = [];
+
+async function renderReqNew(area) {
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const { data: types } = await sb.from('request_types')
+    .select('*, parts(name)').eq('active', true).order('sort_order');
+  reqSelectedType = null;
+  reqPendingFiles = [];
+
+  const typeCards = (types||[]).map(t =>
+    '<div class="req-type-card" id="rtc-' + t.id + '" onclick="selectReqType(' + t.id + ')" ' +
+    'style="border:0.5px solid var(--crd);border-radius:8px;padding:12px;cursor:pointer;text-align:center;background:#fff">' +
+      '<i class="ti ' + (t.icon||'ti-file-text') + '" style="font-size:20px;color:var(--brm)"></i>' +
+      '<div style="font-size:12px;font-weight:600;color:var(--tm);margin-top:4px">' + t.name + '</div>' +
+      '<div style="font-size:10px;color:var(--th)">' + (t.parts ? t.parts.name : '') + '</div>' +
+    '</div>'
+  ).join('');
+
+  window.__reqTypes = types || [];
+
+  area.innerHTML =
+    '<div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage(\'requests\')"><i class="ti ti-arrow-left"></i> 목록</button></div>' +
+    '<div class="form-section">' +
+      '<div class="page-title" style="margin-bottom:6px">새 업무 신청</div>' +
+      '<div class="page-sub" style="margin-bottom:16px">신청 유형을 선택하면 그에 맞는 입력 항목이 나타납니다.</div>' +
+      '<div class="form-label">신청 유형</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:18px">' + typeCards + '</div>' +
+      '<div id="reqFormArea"></div>' +
+    '</div>';
+}
+
+function selectReqType(typeId) {
+  const types = window.__reqTypes || [];
+  const t = types.find(x => x.id === typeId);
+  if (!t) return;
+  reqSelectedType = t;
+  document.querySelectorAll('.req-type-card').forEach(c => {
+    c.style.borderColor = 'var(--crd)'; c.style.background = '#fff';
+  });
+  const sel = document.getElementById('rtc-' + typeId);
+  if (sel) { sel.style.borderColor = 'var(--br)'; sel.style.background = 'var(--crm)'; }
+
+  const fields = t.form_fields || [];
+  let fieldsHtml = '';
+  fields.forEach((f, i) => {
+    const req = f.required ? ' <span style="color:var(--rd)">*</span>' : '';
+    if (f.type === 'textarea') {
+      fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
+        '<textarea class="form-input" id="rf-' + i + '" style="min-height:70px"></textarea></div>';
+    } else if (f.type === 'date') {
+      fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
+        '<input type="date" class="form-input" id="rf-' + i + '"/></div>';
+    } else {
+      fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
+        '<input class="form-input" id="rf-' + i + '"/></div>';
+    }
+  });
+
+  const guideHtml = t.guide ?
+    '<div class="note" style="margin-bottom:14px"><strong>신청 방법 안내</strong><br>' + t.guide + '</div>' : '';
+
+  document.getElementById('reqFormArea').innerHTML =
+    guideHtml +
+    '<div class="form-row"><label class="form-label">제목 <span style="color:var(--rd)">*</span></label>' +
+      '<input class="form-input" id="rfTitle" placeholder="신청 제목을 입력하세요"/></div>' +
+    fieldsHtml +
+    '<div class="form-row"><label class="form-label">첨부파일</label>' +
+      '<div style="border:0.5px dashed var(--crd);border-radius:8px;padding:14px;text-align:center;cursor:pointer;background:var(--cr)" onclick="document.getElementById(\'reqFileInput\').click()">' +
+        '<i class="ti ti-upload" style="font-size:18px;color:var(--th)"></i>' +
+        '<div style="font-size:12px;color:var(--th);margin-top:4px">클릭하여 파일 첨부</div>' +
+        '<input type="file" id="reqFileInput" multiple style="display:none" onchange="reqAddFiles(this.files)"/>' +
+      '</div><div id="reqFileList" style="margin-top:8px"></div></div>' +
+    '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">' +
+      '<button class="btn-cancel-sm" onclick="goPage(\'requests\')">취소</button>' +
+      '<button class="btn-submit" onclick="submitRequest()">신청 접수</button>' +
+    '</div>';
+}
+
+function reqAddFiles(files) {
+  Array.from(files).forEach(f => reqPendingFiles.push(f));
+  reqRenderFileList();
+}
+function reqRenderFileList() {
+  const fl = document.getElementById('reqFileList');
+  if (!fl) return;
+  fl.innerHTML = reqPendingFiles.map((f, i) =>
+    '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:4px">' +
+    '<i class="ti ti-file" style="color:var(--th)"></i>' +
+    '<span style="flex:1;font-size:13px">' + f.name + '</span>' +
+    '<button onclick="reqPendingFiles.splice(' + i + ',1);reqRenderFileList()" style="background:none;border:none;color:var(--th);cursor:pointer"><i class="ti ti-x"></i></button>' +
+    '</div>'
+  ).join('');
+}
+
+async function submitRequest() {
+  if (!reqSelectedType) { alert('신청 유형을 선택해주세요.'); return; }
+  const title = document.getElementById('rfTitle').value.trim();
+  if (!title) { alert('제목을 입력해주세요.'); return; }
+
+  const fields = reqSelectedType.form_fields || [];
+  const formData = {};
+  for (let i = 0; i < fields.length; i++) {
+    const el = document.getElementById('rf-' + i);
+    const val = el ? el.value.trim() : '';
+    if (fields[i].required && !val) { alert('"' + fields[i].label + '" 항목을 입력해주세요.'); return; }
+    formData[fields[i].label] = val;
+  }
+
+  const { data: req, error } = await sb.from('requests').insert({
+    type_id: reqSelectedType.id,
+    store: currentUser.store,
+    part_id: reqSelectedType.part_id,
+    title: title,
+    author_id: currentUser.id,
+    assignee_id: reqSelectedType.default_assignee_id || null,
+    status: 'submitted',
+    form_data: formData
+  }).select().single();
+
+  if (error) { alert('접수 오류: ' + error.message); return; }
+
+  // 첨부파일 업로드
+  for (const file of reqPendingFiles) {
+    const url = await nUploadFile(file, 'requests');
+    if (url) await sb.from('request_attachments').insert({request_id: req.id, file_name: file.name, file_url: url});
+  }
+
+  alert('신청이 접수되었습니다.');
+  reqTab = 'mine';
+  goPage('requests');
+}
+
+
+// ── 신청 상세 ────────────────────────────────────────────────────
+async function renderReqDetail(area) {
+  const r = curReq;
+  if (!r) { goPage('requests'); return; }
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+
+  const { data: atts } = await sb.from('request_attachments').select('*').eq('request_id', r.id);
+  const st = REQ_STATUS[r.status] || REQ_STATUS.submitted;
+  const typeName = r.request_types ? r.request_types.name : '신청';
+  const fields = r.request_types ? (r.request_types.form_fields || []) : [];
+  const fd = r.form_data || {};
+
+  // 담당자/마스터/관리자만 상태 변경 가능
+  const canManage = currentUser.is_master || currentUser.role === 'admin' ||
+    r.assignee_id === currentUser.id ||
+    (currentUser.part && r.part_name === currentUser.part);
+
+  // 신청 내용 표시
+  let contentHtml = '';
+  fields.forEach(f => {
+    const v = fd[f.label] || '-';
+    contentHtml += '<div style="display:flex;padding:7px 0;border-bottom:0.5px solid var(--crd)">' +
+      '<div style="width:130px;font-size:12px;color:var(--th);flex-shrink:0">' + f.label + '</div>' +
+      '<div style="font-size:13px;color:var(--tm);white-space:pre-wrap">' + v + '</div></div>';
+  });
+
+  // 첨부파일
+  let attHtml = '';
+  if (atts && atts.length) {
+    attHtml = '<div style="margin-top:14px"><div class="attach-label">첨부파일</div>' +
+      atts.map(a => {
+        const ext = (a.file_name||'').split('.').pop().toLowerCase();
+        return '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:4px">' +
+          '<i class="ti ti-paperclip" style="color:var(--bl)"></i>' +
+          '<span style="flex:1;font-size:13px;color:var(--bl)">' + a.file_name + '</span>' +
+          '<a href="' + a.file_url + '" target="_blank" style="color:var(--th)"><i class="ti ti-eye"></i></a>' +
+          '<button onclick="downloadFile(\'' + a.file_url + '\',\'' + a.file_name.replace(/'/g,"\\'") + '\')" style="background:none;border:none;color:var(--bl);cursor:pointer"><i class="ti ti-download"></i></button>' +
+        '</div>';
+      }).join('') + '</div>';
+  }
+
+  // 상태 변경 영역
+  let manageHtml = '';
+  if (canManage) {
+    const dueHtml = r.due_date ? ('완료 예정일: ' + r.due_date) : '완료 예정일 미지정';
+    manageHtml =
+      '<div style="border-top:0.5px solid var(--crd);margin-top:16px;padding-top:14px">' +
+      '<div class="section-label">담당자 처리</div>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' +
+        '<button class="btn-cancel-sm" style="color:#B85C00;border-color:#B85C00" onclick="setReqStatus(' + r.id + ',\'in_progress\')">진행 중</button>' +
+        '<button class="btn-cancel-sm" onclick="setReqDue(' + r.id + ')">완료 예정일 지정</button>' +
+        '<button class="btn-cancel-sm" style="color:#2D6A4F;border-color:#2D6A4F" onclick="setReqStatus(' + r.id + ',\'done\')">처리 완료</button>' +
+        '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd)" onclick="rejectReq(' + r.id + ')">반려</button>' +
+        '<button class="btn-cancel-sm" onclick="changeAssignee(' + r.id + ')">담당자 변경</button>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--th)">' + dueHtml + '</div></div>';
+  }
+
+  // 반려 사유 표시
+  let rejectHtml = '';
+  if (r.status === 'rejected' && r.reject_reason) {
+    rejectHtml = '<div class="warn" style="margin-top:12px"><strong>반려 사유</strong><br>' + r.reject_reason + '</div>';
+  }
+
+  const authorName = r.author ? (r.author.name + (r.author.store ? ' ('+r.author.store+')' : '')) : '-';
+  const assigneeName = r.assignee ? r.assignee.name : '(배정 대기)';
+
+  area.innerHTML =
+    '<div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage(\'requests\')"><i class="ti ti-arrow-left"></i> 목록</button></div>' +
+    '<div class="post-detail">' +
+      '<div style="display:flex;gap:8px;margin-bottom:8px">' +
+        '<span style="font-size:10px;font-weight:700;border-radius:8px;padding:3px 10px;background:#EAF0FA;color:#1A4B7A">' + typeName + '</span>' +
+        '<span style="font-size:10px;font-weight:700;border-radius:10px;padding:3px 10px;background:' + st.bg + ';color:' + st.fg + '">' + st.label + '</span>' +
+      '</div>' +
+      '<div style="font-size:17px;font-weight:500;margin-bottom:14px">' + r.title + '</div>' +
+      '<div style="background:var(--cr);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:12px">' +
+        '<div style="display:flex;padding:4px 0"><div style="width:130px;color:var(--th)">요청 매장</div><div style="font-weight:600">' + r.store + '</div></div>' +
+        '<div style="display:flex;padding:4px 0"><div style="width:130px;color:var(--th)">신청자</div><div>' + authorName + '</div></div>' +
+        '<div style="display:flex;padding:4px 0"><div style="width:130px;color:var(--th)">담당 파트</div><div>' + (r.part_name||'-') + '</div></div>' +
+        '<div style="display:flex;padding:4px 0"><div style="width:130px;color:var(--th)">담당자</div><div>' + assigneeName + '</div></div>' +
+        '<div style="display:flex;padding:4px 0"><div style="width:130px;color:var(--th)">신청일</div><div>' + fmtDate(r.created_at) + '</div></div>' +
+      '</div>' +
+      '<div class="section-label">신청 내용</div>' +
+      '<div style="margin-bottom:6px">' + contentHtml + '</div>' +
+      attHtml + rejectHtml + manageHtml +
+    '</div>';
+}
+
+async function setReqStatus(id, status) {
+  await sb.from('requests').update({status: status, updated_at: new Date().toISOString()}).eq('id', id);
+  openReqById(id);
+}
+async function setReqDue(id) {
+  const d = prompt('완료 예정일을 입력하세요 (예: 2026-06-15)');
+  if (!d) return;
+  await sb.from('requests').update({due_date: d, status: 'in_progress', updated_at: new Date().toISOString()}).eq('id', id);
+  openReqById(id);
+}
+async function rejectReq(id) {
+  const reason = prompt('반려 사유를 입력하세요. (신청자가 확인합니다)');
+  if (reason === null) return;
+  await sb.from('requests').update({status: 'rejected', reject_reason: reason, updated_at: new Date().toISOString()}).eq('id', id);
+  openReqById(id);
+}
+async function changeAssignee(id) {
+  const { data: users } = await sb.from('users').select('id,name,store,part').eq('active', true).order('name');
+  const list = (users||[]).map((u,i) => (i+1) + '. ' + u.name + (u.part?' ['+u.part+']':'') + (u.store?' ('+u.store+')':'')).join('\n');
+  const pick = prompt('담당자로 지정할 직원 번호를 입력하세요:\n\n' + list);
+  if (!pick) return;
+  const idx = parseInt(pick) - 1;
+  if (isNaN(idx) || idx < 0 || idx >= users.length) { alert('올바른 번호를 입력해주세요.'); return; }
+  await sb.from('requests').update({assignee_id: users[idx].id, updated_at: new Date().toISOString()}).eq('id', id);
+  alert(users[idx].name + ' 님을 담당자로 지정했습니다.');
+  openReqById(id);
+}
+
+
+// ── 신청 유형 관리 (관리자 전용) ─────────────────────────────────
+async function renderReqAdmin(area) {
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const [{data:parts},{data:types},{data:users}] = await Promise.all([
+    sb.from('parts').select('*').order('sort_order'),
+    sb.from('request_types').select('*, parts(name)').order('sort_order'),
+    sb.from('users').select('id,name,store,part').eq('active',true).order('name')
+  ]);
+  window.__parts = parts || [];
+  window.__users = users || [];
+
+  // 파트 목록
+  const partList = (parts||[]).map(p =>
+    '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)">' +
+    '<span style="flex:1;font-size:13px">' + p.name + '</span>' +
+    '<button onclick="delPart(' + p.id + ')" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-trash"></i></button>' +
+    '</div>'
+  ).join('') || '<div style="color:var(--th);font-size:13px">등록된 파트 없음</div>';
+
+  // 유형 목록
+  const typeList = (types||[]).map(t => {
+    const fieldCount = (t.form_fields||[]).length;
+    const assignee = (users||[]).find(u => u.id === t.default_assignee_id);
+    return '<div style="background:#fff;border:0.5px solid var(--crd);border-radius:8px;padding:12px 14px;margin-bottom:8px">' +
+      '<div style="display:flex;align-items:center;gap:8px">' +
+        '<i class="ti ' + (t.icon||'ti-file-text') + '" style="color:var(--brm)"></i>' +
+        '<span style="flex:1;font-weight:600;font-size:13px">' + t.name + '</span>' +
+        '<span style="font-size:10px;color:var(--th)">' + (t.parts?t.parts.name:'미지정') + ' 파트</span>' +
+        '<button class="btn-cancel-sm" style="padding:3px 9px;font-size:11px" onclick="editReqType(' + t.id + ')"><i class="ti ti-edit"></i></button>' +
+        '<button class="btn-cancel-sm" style="padding:3px 9px;font-size:11px;color:var(--rd);border-color:var(--rd)" onclick="delReqType(' + t.id + ')"><i class="ti ti-trash"></i></button>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--th);margin-top:6px">입력 항목 ' + fieldCount + '개 · 기본 담당 ' + (assignee?assignee.name:'미지정') + '</div>' +
+    '</div>';
+  }).join('') || '<div style="text-align:center;padding:30px;color:var(--th)">등록된 신청 유형이 없습니다.</div>';
+
+  window.__reqTypesAdmin = types || [];
+
+  area.innerHTML =
+    '<div class="page-header"><div class="page-title">신청 유형 관리</div>' +
+    '<div class="page-sub">파트와 신청 유형, 입력 양식·가이드를 관리합니다</div></div>' +
+    '<div class="notif-card" style="margin-bottom:14px">' +
+      '<div class="section-label" style="margin-bottom:10px">파트 관리</div>' +
+      '<div id="partListBox">' + partList + '</div>' +
+      '<div style="display:flex;gap:8px;margin-top:10px">' +
+        '<input class="form-input" id="newPartInp" placeholder="새 파트명 (예: 마케팅)" onkeydown="if(event.key===\'Enter\')addPart()"/>' +
+        '<button class="btn-submit" style="padding:8px 16px;font-size:13px;white-space:nowrap" onclick="addPart()">추가</button>' +
+      '</div>' +
+    '</div>' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
+      '<div class="section-label">신청 유형</div>' +
+      '<button class="btn-new" onclick="editReqType(null)"><i class="ti ti-plus"></i> 유형 추가</button>' +
+    '</div>' +
+    typeList;
+}
+
+async function addPart() {
+  const inp = document.getElementById('newPartInp');
+  const name = inp.value.trim();
+  if (!name) return;
+  const max = (window.__parts||[]).reduce((m,p)=>Math.max(m,p.sort_order||0),0);
+  const { error } = await sb.from('parts').insert({name: name, sort_order: max+1});
+  if (error) { alert(error.message.includes('unique')?'이미 존재하는 파트입니다.':error.message); return; }
+  renderReqAdmin(document.getElementById('contentArea'));
+}
+async function delPart(id) {
+  if (!confirm('이 파트를 삭제할까요? 연결된 신청 유형의 파트 지정이 해제됩니다.')) return;
+  await sb.from('parts').delete().eq('id', id);
+  renderReqAdmin(document.getElementById('contentArea'));
+}
+
+// 유형 추가/수정 (catModal 재사용)
+let editingTypeId = null;
+let editingFields = [];
+function editReqType(typeId) {
+  editingTypeId = typeId;
+  const types = window.__reqTypesAdmin || [];
+  const parts = window.__parts || [];
+  const users = window.__users || [];
+  const t = typeId ? types.find(x => x.id === typeId) : null;
+  editingFields = t ? JSON.parse(JSON.stringify(t.form_fields||[])) : [];
+
+  const partOpts = parts.map(p => '<option value="'+p.id+'"'+(t&&t.part_id===p.id?' selected':'')+'>'+p.name+'</option>').join('');
+  const userOpts = '<option value="">미지정</option>' + users.map(u => '<option value="'+u.id+'"'+(t&&t.default_assignee_id===u.id?' selected':'')+'>'+u.name+(u.part?' ['+u.part+']':'')+'</option>').join('');
+
+  document.querySelector('#catModal .modal-inner').classList.add('wide');
+  document.getElementById('catModalTitle').textContent = typeId ? '신청 유형 수정' : '신청 유형 추가';
+  document.getElementById('catList').innerHTML =
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">' +
+      '<div><label class="form-label">유형 이름 *</label><input class="form-input" id="rt_name" value="' + (t?t.name:'') + '" placeholder="예: 매장 보수 요청"/></div>' +
+      '<div><label class="form-label">담당 파트</label><select class="form-input" id="rt_part">' + partOpts + '</select></div>' +
+      '<div><label class="form-label">기본 담당자</label><select class="form-input" id="rt_assignee">' + userOpts + '</select></div>' +
+      '<div><label class="form-label">아이콘</label><input class="form-input" id="rt_icon" value="' + (t?t.icon||'ti-file-text':'ti-file-text') + '"/></div>' +
+    '</div>' +
+    '<div class="form-row"><label class="form-label">신청 방법 안내 (가이드)</label>' +
+      '<textarea class="form-input" id="rt_guide" style="min-height:50px" placeholder="신청 시 직원에게 보여줄 안내문">' + (t?t.guide||'':'') + '</textarea></div>' +
+    '<div class="form-label" style="margin-top:10px">입력 항목</div>' +
+    '<div id="fieldEditor"></div>' +
+    '<button class="btn-add-tag" onclick="addField()" style="margin-top:6px"><i class="ti ti-plus"></i> 항목 추가</button>';
+
+  document.getElementById('catModalAddBtn').style.display = 'none';
+  document.getElementById('catModalOkBtn').textContent = '저장';
+  document.getElementById('catModalOkBtn').onclick = saveReqType;
+  renderFieldEditor();
+  document.getElementById('catModal').classList.add('open');
+}
+
+function renderFieldEditor() {
+  const box = document.getElementById('fieldEditor');
+  if (!box) return;
+  box.innerHTML = editingFields.map((f, i) =>
+    '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">' +
+      '<input class="form-input" style="flex:1;padding:6px 10px" value="' + (f.label||'') + '" placeholder="항목 이름" onchange="editingFields[' + i + '].label=this.value"/>' +
+      '<select class="form-input" style="width:90px;padding:6px" onchange="editingFields[' + i + '].type=this.value">' +
+        '<option value="text"' + (f.type==='text'?' selected':'') + '>한 줄</option>' +
+        '<option value="textarea"' + (f.type==='textarea'?' selected':'') + '>여러 줄</option>' +
+        '<option value="date"' + (f.type==='date'?' selected':'') + '>날짜</option>' +
+      '</select>' +
+      '<label style="font-size:11px;color:var(--ts);display:flex;align-items:center;gap:3px;white-space:nowrap">' +
+        '<input type="checkbox"' + (f.required?' checked':'') + ' onchange="editingFields[' + i + '].required=this.checked" style="width:auto"/>필수</label>' +
+      '<button onclick="editingFields.splice(' + i + ',1);renderFieldEditor()" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-x"></i></button>' +
+    '</div>'
+  ).join('') || '<div style="font-size:12px;color:var(--th);padding:6px 0">입력 항목을 추가하세요.</div>';
+}
+function addField() {
+  editingFields.push({label:'', type:'text', required:false});
+  renderFieldEditor();
+}
+
+async function saveReqType() {
+  const name = document.getElementById('rt_name').value.trim();
+  if (!name) { alert('유형 이름을 입력해주세요.'); return; }
+  const partId = parseInt(document.getElementById('rt_part').value) || null;
+  const assigneeId = document.getElementById('rt_assignee').value || null;
+  const icon = document.getElementById('rt_icon').value.trim() || 'ti-file-text';
+  const guide = document.getElementById('rt_guide').value.trim();
+  const fields = editingFields.filter(f => f.label.trim());
+
+  const payload = {name, part_id: partId, default_assignee_id: assigneeId, icon, guide, form_fields: fields};
+  let error;
+  if (editingTypeId) {
+    ({error} = await sb.from('request_types').update(payload).eq('id', editingTypeId));
+  } else {
+    const max = (window.__reqTypesAdmin||[]).reduce((m,t)=>Math.max(m,t.sort_order||0),0);
+    payload.sort_order = max + 1;
+    payload.active = true;
+    ({error} = await sb.from('request_types').insert(payload));
+  }
+  if (error) { alert('저장 오류: ' + error.message); return; }
+  document.getElementById('catModal').classList.remove('open');
+  document.getElementById('catModalAddBtn').style.display = '';
+  renderReqAdmin(document.getElementById('contentArea'));
+}
+async function delReqType(id) {
+  if (!confirm('이 신청 유형을 삭제할까요? 이미 접수된 신청 건은 유지됩니다.')) return;
+  await sb.from('request_types').delete().eq('id', id);
+  renderReqAdmin(document.getElementById('contentArea'));
+}
+
+
 // ── INIT ──────────────────────────────────────────
 document.addEventListener('click', e => {
   const panel = document.getElementById('notifPanel');
