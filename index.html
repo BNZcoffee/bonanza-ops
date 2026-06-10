@@ -2560,6 +2560,20 @@ async function submitRequest() {
     if (url) await sb.from('request_attachments').insert({request_id: req.id, file_name: file.name, file_url: url});
   }
 
+  // 파트 슬랙 채널로 알림 발송
+  if (reqSelectedType.part_id) {
+    const { data: part } = await sb.from('parts').select('slack_webhook, name').eq('id', reqSelectedType.part_id).single();
+    if (part && part.slack_webhook) {
+      const msg = '[신규 업무 신청]\n' +
+        '유형: ' + reqSelectedType.name + '\n' +
+        '제목: ' + title + '\n' +
+        '요청 매장: ' + currentUser.store + '\n' +
+        '신청자: ' + currentUser.name + '\n' +
+        '담당 파트: ' + part.name;
+      await sendSlackNotify(part.slack_webhook, msg);
+    }
+  }
+
   alert('신청이 접수되었습니다.');
   reqTab = 'mine';
   goPage('requests');
@@ -2696,9 +2710,16 @@ async function renderReqAdmin(area) {
 
   // 파트 목록
   const partList = (parts||[]).map(p =>
-    '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)">' +
-    '<span style="flex:1;font-size:13px">' + p.name + '</span>' +
-    '<button onclick="delPart(' + p.id + ')" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-trash"></i></button>' +
+    '<div style="padding:8px 0;border-bottom:0.5px solid var(--crd)">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">' +
+        '<span style="flex:1;font-size:13px;font-weight:600">' + p.name + '</span>' +
+        '<button onclick="delPart(' + p.id + ')" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-trash"></i></button>' +
+      '</div>' +
+      '<div style="display:flex;gap:6px;align-items:center">' +
+        '<i class="ti ti-brand-slack" style="font-size:14px;color:var(--th)"></i>' +
+        '<input class="form-input" id="pwh-' + p.id + '" value="' + (p.slack_webhook||'') + '" placeholder="슬랙 웹훅 URL (https://hooks.slack.com/...)" style="flex:1;padding:5px 10px;font-size:12px"/>' +
+        '<button class="btn-cancel-sm" style="padding:5px 10px;font-size:11px" onclick="savePartWebhook(' + p.id + ')">저장</button>' +
+      '</div>' +
     '</div>'
   ).join('') || '<div style="color:var(--th);font-size:13px">등록된 파트 없음</div>';
 
@@ -2751,6 +2772,27 @@ async function delPart(id) {
   if (!confirm('이 파트를 삭제할까요? 연결된 신청 유형의 파트 지정이 해제됩니다.')) return;
   await sb.from('parts').delete().eq('id', id);
   renderReqAdmin(document.getElementById('contentArea'));
+}
+async function savePartWebhook(id) {
+  const url = document.getElementById('pwh-' + id).value.trim();
+  const { error } = await sb.from('parts').update({slack_webhook: url}).eq('id', id);
+  if (error) { alert('저장 오류: ' + error.message); return; }
+  alert('슬랙 웹훅이 저장되었습니다.');
+}
+
+// 슬랙 웹훅으로 알림 발송 (no-cors)
+async function sendSlackNotify(webhookUrl, text) {
+  if (!webhookUrl) return;
+  try {
+    await fetch(webhookUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: text})
+    });
+  } catch (e) {
+    console.warn('Slack 발송 실패:', e);
+  }
 }
 
 // 유형 추가/수정 (catModal 재사용)
