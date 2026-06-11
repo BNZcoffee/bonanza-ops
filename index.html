@@ -753,11 +753,11 @@ async function renderPostDetail(area) {
     </div>`;
   }
 
-  const iconMap2 = {pdf:'ti-file-type-pdf',doc:'ti-file-type-doc',docx:'ti-file-type-doc',xls:'ti-file-type-xls',xlsx:'ti-file-type-xls',ppt:'ti-file-type-ppt',pptx:'ti-file-type-ppt',txt:'ti-file-type-txt',csv:'ti-file-type-csv',hwp:'ti-file-text',hwpx:'ti-file-text',jpg:'ti-photo',jpeg:'ti-photo',png:'ti-photo',gif:'ti-photo',webp:'ti-photo',svg:'ti-photo',heic:'ti-photo',mp4:'ti-movie',webm:'ti-movie',mov:'ti-movie',m4v:'ti-movie',mp3:'ti-music',m4a:'ti-music',zip:'ti-file-zip'};
+  const iconMap2 = {pdf:'ti-file-type-pdf',doc:'ti-file-type-doc',docx:'ti-file-type-doc',xls:'ti-file-type-xls',xlsx:'ti-file-type-xls',ppt:'ti-file-type-ppt',pptx:'ti-file-type-ppt',txt:'ti-file-type-txt',csv:'ti-file-type-csv',hwp:'ti-file-text',hwpx:'ti-file-text',jpg:'ti-photo',jpeg:'ti-photo',png:'ti-photo',gif:'ti-photo',webp:'ti-photo',svg:'ti-photo',heic:'ti-photo',zip:'ti-file-zip'};
   let attachHtml = '';
   if (attachments.length) {
     const imgExts = ['jpg','jpeg','png','gif','webp','bmp','svg'];
-    const vidExts = ['mp4','webm','mov','m4v','ogg'];
+    const vidExts = [];  // 영상 직접 첨부 비활성 (용량 관리). 영상은 외부 링크 권장
     const attLinks = attachments.map(a => {
       const ext = (a.file_name||'').split('.').pop().toLowerCase();
       const ico = iconMap2[ext] || 'ti-paperclip';
@@ -909,8 +909,8 @@ function renderNewPost(area, ex) {
         <div style="border:0.5px dashed var(--crd);border-radius:8px;padding:16px;background:var(--cr);text-align:center;cursor:pointer" onclick="document.getElementById('nFileInput').click()">
           <i class="ti ti-upload" style="font-size:20px;color:var(--th)"></i>
           <div style="font-size:13px;color:var(--th);margin-top:4px">클릭하여 파일 선택</div>
-          <div style="font-size:11px;color:var(--th)">PDF, 이미지, Word, Excel, 이미지, 영상 등 · 여러 파일 가능</div>
-          <input type="file" id="nFileInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.hwp,.hwpx,.txt,.csv,.jpg,.jpeg,.png,.gif,.webp,.svg,.heic,.mp4,.webm,.mov,.m4v,.mp3,.m4a,.zip" style="display:none" onchange="nAddFiles(this.files)"/>
+          <div style="font-size:11px;color:var(--th)">PDF, 이미지, Word, Excel, 이미지 등 · 여러 파일 가능 (영상은 링크로 첨부)</div>
+          <input type="file" id="nFileInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.hwp,.hwpx,.txt,.csv,.jpg,.jpeg,.png,.gif,.webp,.svg,.heic,.zip" style="display:none" onchange="nAddFiles(this.files)"/>
         </div>
         <div id="nFileList" style="margin-top:8px"></div>
         <div style="height:3px;background:var(--crd);border-radius:3px;margin-top:4px;overflow:hidden">
@@ -1075,6 +1075,17 @@ async function downloadImageWithWatermark(url, fileName, wmText){
 
 async function nUploadFile(file, folder){
   const ext = file.name.split('.').pop().toLowerCase();
+  // 영상 차단 (저장공간 관리 — 영상은 외부 링크로 첨부)
+  const blockedExts = ['mp4','webm','mov','m4v','avi','mkv','flv','wmv','mpg','mpeg','ogg','ogv'];
+  if (blockedExts.includes(ext)) {
+    alert('영상 파일은 직접 첨부할 수 없습니다.\n\n영상은 유튜브(미등록 업로드)나 구글 드라이브 링크로 본문에 넣어주세요.');
+    return null;
+  }
+  // 파일당 용량 제한 (25MB)
+  if (file.size > 25*1024*1024) {
+    alert('파일 용량이 너무 큽니다 (최대 25MB).\n\n큰 파일은 구글 드라이브 등 외부 링크로 첨부해주세요.');
+    return null;
+  }
   const fname = folder+'/'+Date.now()+'_'+Math.random().toString(36).slice(2)+'.'+ext;
   const {error} = await sb.storage.from('attachments').upload(fname, file, {upsert:true});
   if(error){console.error('upload error:', error);return null;}
