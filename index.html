@@ -2646,6 +2646,8 @@ async function renderReqDetail(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
 
   const { data: atts } = await sb.from('request_attachments').select('*').eq('request_id', r.id);
+  const { data: assignableUsers } = await sb.from('users').select('id,name,store,part,role').eq('active', true).order('name');
+  window.__assignable = assignableUsers || [];
   const st = REQ_STATUS[r.status] || REQ_STATUS.submitted;
   const typeName = r.request_types ? r.request_types.name : '신청';
   const fields = r.request_types ? (r.request_types.form_fields || []) : [];
@@ -2683,18 +2685,30 @@ async function renderReqDetail(area) {
   // 상태 변경 영역
   let manageHtml = '';
   if (canManage) {
-    const dueHtml = r.due_date ? ('완료 예정일: ' + r.due_date) : '완료 예정일 미지정';
+    const assignOpts = '<option value="">담당자 선택 (필수)</option>' +
+      (window.__assignable||[]).map(u => '<option value="'+u.id+'"'+(r.assignee_id===u.id?' selected':'')+'>'+u.name+(u.part?' ['+u.part+']':'')+(u.store?' ('+u.store+')':'')+'</option>').join('');
+    const dueVal = r.due_date || '';
+    const doneVal = r.done_date || '';
     manageHtml =
       '<div style="border-top:0.5px solid var(--crd);margin-top:16px;padding-top:14px">' +
       '<div class="section-label">담당자 처리</div>' +
-      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' +
-        '<button class="btn-cancel-sm" style="color:#B85C00;border-color:#B85C00" onclick="setReqStatus(' + r.id + ',\'in_progress\')">진행 중</button>' +
-        '<button class="btn-cancel-sm" onclick="setReqDue(' + r.id + ')">완료 예정일 지정</button>' +
-        '<button class="btn-cancel-sm" style="color:#2D6A4F;border-color:#2D6A4F" onclick="setReqStatus(' + r.id + ',\'done\')">처리 완료</button>' +
-        '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd)" onclick="rejectReq(' + r.id + ')">반려</button>' +
-        '<button class="btn-cancel-sm" onclick="changeAssignee(' + r.id + ')">담당자 변경</button>' +
+      '<div style="background:var(--cr);border-radius:10px;padding:14px;margin-bottom:10px">' +
+        '<div style="margin-bottom:10px"><label style="font-size:11px;font-weight:600;color:var(--ts);display:block;margin-bottom:4px">담당자 <span style="color:var(--rd)">*</span></label>' +
+          '<select class="form-input" id="rqAssignee" style="padding:8px 12px">' + assignOpts + '</select></div>' +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+          '<div style="flex:1;min-width:140px"><label style="font-size:11px;font-weight:600;color:var(--ts);display:block;margin-bottom:4px">처리 예정일</label>' +
+            '<input type="date" class="form-input" id="rqDue" value="'+dueVal+'" style="padding:8px 12px"/></div>' +
+          '<div style="flex:1;min-width:140px"><label style="font-size:11px;font-weight:600;color:var(--ts);display:block;margin-bottom:4px">처리 완료일 <span style="color:var(--rd)">*</span></label>' +
+            '<input type="date" class="form-input" id="rqDone" value="'+doneVal+'" style="padding:8px 12px"/></div>' +
+        '</div>' +
       '</div>' +
-      '<div style="font-size:11px;color:var(--th)">' + dueHtml + '</div></div>';
+      '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+        '<button class="btn-cancel-sm" onclick="saveReqProgress(' + r.id + ')"><i class="ti ti-device-floppy"></i> 담당자·예정일 저장</button>' +
+        '<button class="btn-cancel-sm" style="color:#B85C00;border-color:#B85C00" onclick="markInProgress(' + r.id + ')">진행 중</button>' +
+        '<button class="btn-cancel-sm" style="color:#2D6A4F;border-color:#2D6A4F;font-weight:700" onclick="completeReq(' + r.id + ')"><i class="ti ti-check"></i> 처리 완료</button>' +
+        '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd)" onclick="rejectReq(' + r.id + ')">반려</button>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--th);margin-top:8px">처리 완료를 누르려면 <strong>담당자</strong>와 <strong>처리 완료일</strong>이 모두 지정되어야 합니다.</div></div>';
   }
 
   // 반려 사유 표시
@@ -2720,6 +2734,8 @@ async function renderReqDetail(area) {
         '<div style="display:flex;padding:4px 0"><div style="width:130px;color:var(--th)">담당 파트</div><div>' + (r.part_name||'-') + '</div></div>' +
         '<div style="display:flex;padding:4px 0"><div style="width:130px;color:var(--th)">담당자</div><div>' + assigneeName + '</div></div>' +
         '<div style="display:flex;padding:4px 0"><div style="width:130px;color:var(--th)">신청일</div><div>' + fmtDate(r.created_at) + '</div></div>' +
+        (r.due_date ? '<div style="display:flex;padding:4px 0"><div style="width:130px;color:var(--th)">처리 예정일</div><div>' + r.due_date + '</div></div>' : '') +
+        (r.done_date ? '<div style="display:flex;padding:4px 0"><div style="width:130px;color:var(--th)">처리 완료일</div><div style="font-weight:600;color:var(--gn)">' + r.done_date + '</div></div>' : '') +
       '</div>' +
       '<div class="section-label">신청 내용</div>' +
       '<div style="margin-bottom:6px">' + contentHtml + '</div>' +
@@ -2727,14 +2743,35 @@ async function renderReqDetail(area) {
     '</div>';
 }
 
-async function setReqStatus(id, status) {
-  await sb.from('requests').update({status: status, updated_at: new Date().toISOString()}).eq('id', id);
+// 담당자·예정일 저장 (담당자 필수)
+async function saveReqProgress(id) {
+  const assignee = document.getElementById('rqAssignee').value;
+  const due = document.getElementById('rqDue').value || null;
+  if (!assignee) { alert('담당자를 지정해주세요.'); return; }
+  await sb.from('requests').update({assignee_id: assignee, due_date: due, updated_at: new Date().toISOString()}).eq('id', id);
+  alert('담당자와 처리 예정일이 저장되었습니다.');
   openReqById(id);
 }
-async function setReqDue(id) {
-  const d = prompt('완료 예정일을 입력하세요 (예: 2026-06-15)');
-  if (!d) return;
-  await sb.from('requests').update({due_date: d, status: 'in_progress', updated_at: new Date().toISOString()}).eq('id', id);
+// 진행 중으로 전환 (담당자 필수)
+async function markInProgress(id) {
+  const assignee = document.getElementById('rqAssignee').value;
+  const due = document.getElementById('rqDue').value || null;
+  if (!assignee) { alert('담당자를 먼저 지정해주세요.'); return; }
+  await sb.from('requests').update({assignee_id: assignee, due_date: due, status: 'in_progress', updated_at: new Date().toISOString()}).eq('id', id);
+  openReqById(id);
+}
+// 처리 완료 (담당자 + 완료일 필수)
+async function completeReq(id) {
+  const assignee = document.getElementById('rqAssignee').value;
+  const due = document.getElementById('rqDue').value || null;
+  const done = document.getElementById('rqDone').value || null;
+  if (!assignee) { alert('처리 완료 전에 담당자를 지정해주세요.'); return; }
+  if (!done) { alert('처리 완료일을 선택해주세요.'); return; }
+  await sb.from('requests').update({
+    assignee_id: assignee, due_date: due, done_date: done,
+    status: 'done', updated_at: new Date().toISOString()
+  }).eq('id', id);
+  alert('처리 완료로 변경되었습니다.');
   openReqById(id);
 }
 async function rejectReq(id) {
