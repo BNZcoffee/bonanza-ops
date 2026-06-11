@@ -380,6 +380,7 @@ let currentCatId = null;
 let currentCatName = '';
 let currentPost = null;
 let allCats = [];
+let nRefDocs = [];
 let selectedAccess = 'all';
 let commentsOnNew = false;
 
@@ -791,6 +792,21 @@ async function renderPostDetail(area) {
     attachHtml = `<div style="margin-bottom:16px"><div class="attach-label">첨부파일 (${attachments.length}개)</div><div style="margin-top:8px">${attLinks}</div></div>`;
   }
 
+  // 참조문서 표시
+  let refHtml = '';
+  if (p.ref_post_ids && p.ref_post_ids.length) {
+    const { data: refs } = await sb.from('posts').select('id,title,access').in('id', p.ref_post_ids);
+    const visibleRefs = (refs||[]).filter(rp => canSee(rp));
+    if (visibleRefs.length) {
+      refHtml = '<div style="margin-bottom:16px"><div class="attach-label">참조문서</div><div style="margin-top:8px">' +
+        visibleRefs.map(rp => `<div onclick="openPostById(${rp.id})" style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:4px;cursor:pointer">
+          <i class="ti ti-link" style="color:var(--bl)"></i>
+          <span style="flex:1;font-size:13px;color:var(--bl);font-weight:500">${rp.title}</span>
+          <i class="ti ti-chevron-right" style="color:var(--th)"></i>
+        </div>`).join('') + '</div></div>';
+    }
+  }
+
   let cmtHtml = '';
   if (p.comments_on) {
     const cmtItems = comments.map(c => {
@@ -848,6 +864,7 @@ async function renderPostDetail(area) {
         <div class="detail-body" onselectstart="return false">${p.body}</div>
       </div>
       ${attachHtml}
+      ${refHtml}
       ${confirmHtml}
       ${readListHtml}
       ${cmtHtml}
@@ -882,6 +899,7 @@ async function openEditPost(id) {
 function renderNewPost(area, ex) {
   nEditingId = ex ? ex.id : null;
   nPendingFiles = [];
+  nRefDocs = (ex && ex.ref_post_ids) ? [...ex.ref_post_ids] : [];
   selectedAccess = ex ? (ex.access||'all') : 'all';
   const catOpts = allCats.filter(c=>canWriteCat(c.name)).map(c =>
     `<option value="${c.id}"${c.id===(ex?ex.category_id:currentCatId)?' selected':''}>${c.name}</option>`
@@ -920,13 +938,18 @@ function renderNewPost(area, ex) {
         <div style="border:0.5px dashed var(--crd);border-radius:8px;padding:16px;background:var(--cr);text-align:center;cursor:pointer" onclick="document.getElementById('nFileInput').click()">
           <i class="ti ti-upload" style="font-size:20px;color:var(--th)"></i>
           <div style="font-size:13px;color:var(--th);margin-top:4px">클릭하여 파일 선택</div>
-          <div style="font-size:11px;color:var(--th)">PDF, 이미지, Word, Excel, 이미지 등 · 여러 파일 가능 (영상은 링크로 첨부)</div>
+          <div style="font-size:11px;color:var(--th)">PDF, 이미지, Word, Excel 등 · 여러 파일 가능 (영상은 링크로 첨부)</div>
           <input type="file" id="nFileInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.hwp,.hwpx,.txt,.csv,.jpg,.jpeg,.png,.gif,.webp,.svg,.heic,.zip" style="display:none" onchange="nAddFiles(this.files)"/>
         </div>
         <div id="nFileList" style="margin-top:8px"></div>
         <div style="height:3px;background:var(--crd);border-radius:3px;margin-top:4px;overflow:hidden">
           <div id="nFileProg" style="height:100%;background:var(--gn);width:0;transition:width .3s"></div>
         </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">참조문서 <span style="font-size:10px;color:var(--th);font-weight:400">(기존 공지를 참조로 첨부)</span></label>
+        <div id="refDocList" style="margin-bottom:6px"></div>
+        <button type="button" class="btn-cancel-sm" onclick="openRefPicker()"><i class="ti ti-link"></i> 참조문서 추가</button>
       </div>
       <div class="form-row">
         <div class="toggle-row">
@@ -947,6 +970,8 @@ function renderNewPost(area, ex) {
         <button class="btn-submit" onclick="submitPost()">${ex?'수정 완료':'공지 등록'}</button>
       </div>
     </div>`;
+
+  renderRefDocs();
 
   // 기존 첨부파일 표시 (수정 모드)
   if(ex && ex.id) {
@@ -1115,6 +1140,70 @@ async function openEditPost(id){
   goPage('editpost');
 }
 
+// ── 참조문서 ──────────────────────────────────────
+function renderRefDocs() {
+  const box = document.getElementById('refDocList');
+  if (!box) return;
+  if (!nRefDocs.length) { box.innerHTML = '<div style="font-size:12px;color:var(--th)">첨부된 참조문서가 없습니다.</div>'; return; }
+  Promise.all(nRefDocs.map(id => sb.from('posts').select('id,title,access').eq('id',id).single())).then(results => {
+    box.innerHTML = results.map(({data:p}) => {
+      if (!p) return '';
+      const accLbl = p.access==='all' ? '전 직원' : '매니저 이상';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:4px">
+        <i class="ti ti-link" style="color:var(--bl)"></i>
+        <span style="flex:1;font-size:13px">${p.title}</span>
+        <span style="font-size:9px;font-weight:700;border-radius:8px;padding:2px 6px;background:${p.access==='all'?'var(--gnb)':'var(--blb)'};color:${p.access==='all'?'var(--gn)':'var(--bl)'}">${accLbl}</span>
+        <button type="button" onclick="removeRefDoc(${p.id})" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-x"></i></button>
+      </div>`;
+    }).join('');
+  });
+}
+function removeRefDoc(id) {
+  nRefDocs = nRefDocs.filter(x => x !== id);
+  renderRefDocs();
+}
+async function openRefPicker() {
+  // 현재 카테고리 외 전체 공지에서 선택 (자기 자신/이미 추가된 것 제외)
+  const { data: posts } = await sb.from('posts').select('id,title,access,categories(name)').eq('status','published').order('created_at',{ascending:false}).limit(100);
+  const selfId = nEditingId;
+  const candidates = (posts||[]).filter(p => p.id !== selfId && !nRefDocs.includes(p.id));
+  window.__refCandidates = candidates;
+  const listHtml = candidates.length ? candidates.map(p => {
+    const accLbl = p.access==='all' ? '전 직원' : '매니저 이상';
+    return `<div onclick="addRefDoc(${p.id})" style="padding:9px 12px;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:5px;cursor:pointer;display:flex;align-items:center;gap:8px">
+      <span style="flex:1;font-size:13px">${p.title}</span>
+      <span style="font-size:9px;color:var(--th)">${p.categories?.name||''}</span>
+      <span style="font-size:9px;font-weight:700;border-radius:8px;padding:2px 6px;background:${p.access==='all'?'var(--gnb)':'var(--blb)'};color:${p.access==='all'?'var(--gn)':'var(--bl)'}">${accLbl}</span>
+    </div>`;
+  }).join('') : '<div style="color:var(--th);font-size:13px;padding:10px">선택 가능한 공지가 없습니다.</div>';
+  document.getElementById('catModalTitle').textContent = '참조문서 선택';
+  document.getElementById('catList').innerHTML =
+    '<input class="form-input" id="refSearch" placeholder="공지 제목 검색..." oninput="filterRefList(this.value)" style="margin-bottom:10px"/>' +
+    '<div id="refCandList" style="max-height:300px;overflow-y:auto">' + listHtml + '</div>';
+  document.getElementById('catModalAddBtn').style.display = 'none';
+  document.getElementById('catModalOkBtn').style.display = 'none';
+  document.getElementById('catModal').classList.add('open');
+}
+function filterRefList(q) {
+  const ql = q.toLowerCase();
+  const filtered = (window.__refCandidates||[]).filter(p => p.title.toLowerCase().includes(ql));
+  const box = document.getElementById('refCandList');
+  box.innerHTML = filtered.length ? filtered.map(p => {
+    const accLbl = p.access==='all' ? '전 직원' : '매니저 이상';
+    return `<div onclick="addRefDoc(${p.id})" style="padding:9px 12px;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:5px;cursor:pointer;display:flex;align-items:center;gap:8px">
+      <span style="flex:1;font-size:13px">${p.title}</span>
+      <span style="font-size:9px;font-weight:700;border-radius:8px;padding:2px 6px;background:${p.access==='all'?'var(--gnb)':'var(--blb)'};color:${p.access==='all'?'var(--gn)':'var(--bl)'}">${accLbl}</span>
+    </div>`;
+  }).join('') : '<div style="color:var(--th);font-size:13px;padding:10px">검색 결과가 없습니다.</div>';
+}
+function addRefDoc(id) {
+  if (!nRefDocs.includes(id)) nRefDocs.push(id);
+  document.getElementById('catModal').classList.remove('open');
+  document.getElementById('catModalAddBtn').style.display = '';
+  document.getElementById('catModalOkBtn').style.display = '';
+  renderRefDocs();
+}
+
 function setAccess(v) {
   selectedAccess = v;
   document.getElementById('acc-all').className = 'access-opt'+(v==='all'?' selected':'');
@@ -1147,9 +1236,37 @@ async function submitPost(isDraft=false) {
     status = 'scheduled'; scheduledAt = new Date(schedVal).toISOString();
   }
 
+  // ── 참조문서 권한충돌 검증 ──
+  // 작성 글이 '전 직원'(all)인데 참조문서 중 '매니저 이상'(manager)이 있으면 확인
+  let refIds = [...nRefDocs];
+  if (!isDraft && selectedAccess === 'all' && refIds.length) {
+    const { data: refPosts } = await sb.from('posts').select('id,title,access').in('id', refIds);
+    const restricted = (refPosts||[]).filter(p => p.access === 'manager');
+    if (restricted.length) {
+      const names = restricted.map(p => '· ' + p.title).join('\n');
+      const ok = confirm(
+        '열람 권한이 다른 참조문서가 있습니다.\n\n' +
+        '아래 참조문서는 현재 "매니저 이상"만 볼 수 있습니다:\n' + names + '\n\n' +
+        '지금 작성하는 글은 "전 직원"이 볼 수 있어, 이 글에 참조로 첨부하면\n' +
+        '위 참조문서의 열람 권한도 "전 직원"으로 바뀌어 모두가 볼 수 있게 됩니다.\n\n' +
+        '확인: 참조문서 권한을 전 직원으로 변경하고 첨부합니다.\n' +
+        '취소: 작성하던 글은 그대로 두고, 참조문서만 첨부하지 않습니다.'
+      );
+      if (ok) {
+        // 참조문서들의 권한을 all로 상향
+        await sb.from('posts').update({access:'all'}).in('id', restricted.map(p=>p.id));
+      } else {
+        // 참조문서만 제외하고 작성 계속
+        refIds = [];
+        nRefDocs = [];
+        renderRefDocs();
+      }
+    }
+  }
+
   const payload = {category_id:catId, title, body, access:selectedAccess,
     comments_on:commentsOn, author_id:currentUser.id, status,
-    scheduled_at:scheduledAt, updated_at:new Date().toISOString()};
+    scheduled_at:scheduledAt, ref_post_ids:refIds, updated_at:new Date().toISOString()};
 
   let postId = nEditingId;
   if(nEditingId){
