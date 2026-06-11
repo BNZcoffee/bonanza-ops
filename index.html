@@ -293,7 +293,7 @@ textarea.form-input{min-height:120px;resize:vertical}
     </div>
     <div class="sidebar-section" id="requestNav" style="display:none">
       <div class="sidebar-label">업무 신청</div>
-      <button class="nav-btn" onclick="goPage('requests')" id="nav-requests"><i class="ti ti-clipboard-list"></i> 업무 신청</button>
+      <button class="nav-btn" onclick="goPage('requests')" id="nav-requests"><i class="ti ti-clipboard-list"></i> 업무 신청<span class="nav-new" id="reqNavBadge" style="display:none">N</span></button>
       <button class="nav-btn" onclick="goPage('reqadmin')" id="nav-reqadmin" style="display:none"><i class="ti ti-settings-automation"></i> 신청 유형 관리</button>
     </div>
     <div class="sidebar-section" id="adminNav" style="display:none">
@@ -511,7 +511,18 @@ async function updateNotifDot() {
   const {data:myReads} = await sb.from('post_reads').select('post_id').eq('user_id',currentUser.id);
   const readIds = new Set((myReads||[]).map(r=>r.post_id));
   const unread = posts.filter(p=>!readIds.has(p.id));
-  dot.style.display = unread.length ? 'inline-block' : 'none';
+
+  // 나에게 배정된 미완료 신청 개수
+  let myReqCount = 0;
+  if (currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.is_master || currentUser.part) {
+    const {data:reqs} = await sb.from('requests').select('id').eq('assignee_id', currentUser.id).in('status',['submitted','in_progress']);
+    myReqCount = (reqs||[]).length;
+  }
+  // 업무 신청 메뉴 배지
+  const reqBadge = document.getElementById('reqNavBadge');
+  if (reqBadge) reqBadge.style.display = myReqCount > 0 ? '' : 'none';
+
+  dot.style.display = (unread.length || myReqCount) ? 'inline-block' : 'none';
   allCats.forEach(c => {
     const badge = document.getElementById('newBadge-'+c.id);
     if (badge) badge.style.display = unread.some(p=>p.category_id===c.id) ? '' : 'none';
@@ -2022,11 +2033,34 @@ async function loadNotifPanel() {
   const {data:myReads} = await sb.from('post_reads').select('post_id').eq('user_id',currentUser.id);
   const readIds = new Set((myReads||[]).map(r=>r.post_id));
   const unread = (posts||[]).filter(p=>!readIds.has(p.id));
-  const guide = `<div style="font-size:11px;color:var(--th);padding:8px 0 0;border-top:0.5px solid var(--crd);margin-top:8px;line-height:1.5">✔ 게시글에서 <strong>확인했습니다</strong>를 누르면 알림이 해제됩니다.</div>`;
+
+  // 나에게 배정된 미완료 신청
+  let myReqs = [];
+  if (currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.is_master || currentUser.part) {
+    const {data:reqs} = await sb.from('requests')
+      .select('id,title,status,created_at,request_types(name)')
+      .eq('assignee_id', currentUser.id)
+      .in('status',['submitted','in_progress'])
+      .order('created_at',{ascending:false}).limit(10);
+    myReqs = reqs || [];
+  }
+
+  const guide = `<div style="font-size:11px;color:var(--th);padding:8px 0 0;border-top:0.5px solid var(--crd);margin-top:8px;line-height:1.5">게시글에서 <strong>확인했습니다</strong>를 누르면 공지 알림이 해제됩니다.</div>`;
   const list = document.getElementById('notifList');
-  list.innerHTML = unread.length
-    ? unread.map(p=>`<div class="notif-item" onclick="openPostById(${p.id});closeNotifPanel()"><div class="notif-item-title"><span class="notif-dot-item"></span>${p.title}</div><div class="notif-item-meta">${p.categories?.name||''} · ${fmtDate(p.created_at)}</div></div>`).join('') + guide
-    : `<div style="font-size:13px;color:var(--th);padding:10px 0">새 알림이 없습니다.</div>` + guide;
+
+  let html = '';
+  if (myReqs.length) {
+    html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding:4px 0 6px">담당 배정된 업무 신청</div>`;
+    html += myReqs.map(r=>`<div class="notif-item" onclick="openReqById(${r.id});closeNotifPanel()"><div class="notif-item-title"><span class="notif-dot-item" style="background:var(--gd)"></span>${r.title}</div><div class="notif-item-meta">${r.request_types?.name||'신청'} · ${REQ_STATUS[r.status]?.label||''} · ${fmtDate(r.created_at)}</div></div>`).join('');
+  }
+  if (unread.length) {
+    if (myReqs.length) html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding:10px 0 6px;border-top:0.5px solid var(--crd);margin-top:8px">새 공지</div>`;
+    html += unread.map(p=>`<div class="notif-item" onclick="openPostById(${p.id});closeNotifPanel()"><div class="notif-item-title"><span class="notif-dot-item"></span>${p.title}</div><div class="notif-item-meta">${p.categories?.name||''} · ${fmtDate(p.created_at)}</div></div>`).join('');
+  }
+  if (!myReqs.length && !unread.length) {
+    html = `<div style="font-size:13px;color:var(--th);padding:10px 0">새 알림이 없습니다.</div>`;
+  }
+  list.innerHTML = html + guide;
 }
 
 
@@ -2408,14 +2442,18 @@ async function renderRequests(area) {
   const tabBtn = (id, label) =>
     '<button class="staff-tab' + (reqTab===id?' active':'') + '" onclick="reqTab=\'' + id + '\';renderRequests(document.getElementById(\'contentArea\'))">' + label + '</button>';
 
+  const reqWeek = new Date(Date.now() - 7*24*60*60*1000);
   const cards = visible.length ? visible.map(r => {
     const st = REQ_STATUS[r.status] || REQ_STATUS.submitted;
     const typeName = r.request_types ? r.request_types.name : '신청';
     const due = r.due_date ? (' · 완료 예정 ' + r.due_date) : '';
+    const isNew = new Date(r.created_at) >= reqWeek;
+    const newBadge = isNew ? '<span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 6px;background:#E8C07A;color:#3B2314">NEW</span>' : '';
     return '<div class="post-card" onclick="openReqById(' + r.id + ')">' +
       '<div class="post-card-top">' +
         '<span style="font-size:9px;font-weight:700;border-radius:8px;padding:2px 8px;background:#EAF0FA;color:#1A4B7A">' + typeName + '</span>' +
         '<span class="post-title-txt">' + r.title + '</span>' +
+        newBadge +
         '<span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:' + st.bg + ';color:' + st.fg + '">' + st.label + '</span>' +
       '</div>' +
       '<div class="post-meta"><span>' + r.store + '</span><span>신청 ' + fmtDate(r.created_at) + due + '</span></div>' +
