@@ -753,19 +753,29 @@ async function renderPostDetail(area) {
     </div>`;
   }
 
-  const iconMap2 = {pdf:'ti-file-type-pdf',doc:'ti-file-type-doc',docx:'ti-file-type-doc',xls:'ti-file-type-xls',xlsx:'ti-file-type-xls',jpg:'ti-photo',jpeg:'ti-photo',png:'ti-photo',gif:'ti-photo'};
+  const iconMap2 = {pdf:'ti-file-type-pdf',doc:'ti-file-type-doc',docx:'ti-file-type-doc',xls:'ti-file-type-xls',xlsx:'ti-file-type-xls',ppt:'ti-file-type-ppt',pptx:'ti-file-type-ppt',txt:'ti-file-type-txt',csv:'ti-file-type-csv',hwp:'ti-file-text',hwpx:'ti-file-text',jpg:'ti-photo',jpeg:'ti-photo',png:'ti-photo',gif:'ti-photo',webp:'ti-photo',svg:'ti-photo',heic:'ti-photo',mp4:'ti-movie',webm:'ti-movie',mov:'ti-movie',m4v:'ti-movie',mp3:'ti-music',m4a:'ti-music',zip:'ti-file-zip'};
   let attachHtml = '';
   if (attachments.length) {
+    const imgExts = ['jpg','jpeg','png','gif','webp','bmp','svg'];
+    const vidExts = ['mp4','webm','mov','m4v','ogg'];
     const attLinks = attachments.map(a => {
       const ext = (a.file_name||'').split('.').pop().toLowerCase();
       const ico = iconMap2[ext] || 'ti-paperclip';
+      const isImg = imgExts.includes(ext);
+      const isVid = vidExts.includes(ext);
+      let preview = '';
+      if (isImg) {
+        preview = `<div class="wm-wrap" style="margin:6px 0 10px"><div class="watermark">${wmText}&nbsp;&nbsp;&nbsp;${wmText}</div><img src="${a.file_url}" style="max-width:100%;border-radius:8px;border:0.5px solid var(--crd);display:block" loading="lazy" oncontextmenu="return false"/></div>`;
+      } else if (isVid) {
+        preview = `<video src="${a.file_url}" controls controlslist="nodownload" style="max-width:100%;border-radius:8px;border:0.5px solid var(--crd);margin:6px 0 10px;display:block"></video>`;
+      }
       return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:6px">
         <i class="ti ${ico}" style="font-size:20px;flex-shrink:0;color:var(--bl)"></i>
         <span style="flex:1;font-size:13px;font-weight:500;color:var(--bl);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.file_name}</span>
         <span style="font-size:10px;font-weight:700;background:var(--blb);color:var(--bl);border-radius:4px;padding:2px 6px;flex-shrink:0">${ext.toUpperCase()}</span>
         <a href="${a.file_url}" target="_blank" title="새 탭에서 보기" style="color:var(--th);text-decoration:none;flex-shrink:0"><i class="ti ti-eye" style="font-size:16px"></i></a>
         <button onclick="downloadFile('${a.file_url}','${a.file_name.replace(/'/g,"\\'")}')" title="저장" style="background:none;border:none;cursor:pointer;color:var(--bl);flex-shrink:0;padding:0"><i class="ti ti-download" style="font-size:16px"></i></button>
-      </div>`;
+      </div>${preview}`;
     }).join('');
     attachHtml = `<div style="margin-bottom:16px"><div class="attach-label">첨부파일 (${attachments.length}개)</div><div style="margin-top:8px">${attLinks}</div></div>`;
   }
@@ -899,8 +909,8 @@ function renderNewPost(area, ex) {
         <div style="border:0.5px dashed var(--crd);border-radius:8px;padding:16px;background:var(--cr);text-align:center;cursor:pointer" onclick="document.getElementById('nFileInput').click()">
           <i class="ti ti-upload" style="font-size:20px;color:var(--th)"></i>
           <div style="font-size:13px;color:var(--th);margin-top:4px">클릭하여 파일 선택</div>
-          <div style="font-size:11px;color:var(--th)">PDF, 이미지, Word, Excel 등 · 여러 파일 가능</div>
-          <input type="file" id="nFileInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.hwp" style="display:none" onchange="nAddFiles(this.files)"/>
+          <div style="font-size:11px;color:var(--th)">PDF, 이미지, Word, Excel, 이미지, 영상 등 · 여러 파일 가능</div>
+          <input type="file" id="nFileInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.hwp,.hwpx,.txt,.csv,.jpg,.jpeg,.png,.gif,.webp,.svg,.heic,.mp4,.webm,.mov,.m4v,.mp3,.m4a,.zip" style="display:none" onchange="nAddFiles(this.files)"/>
         </div>
         <div id="nFileList" style="margin-top:8px"></div>
         <div style="height:3px;background:var(--crd);border-radius:3px;margin-top:4px;overflow:hidden">
