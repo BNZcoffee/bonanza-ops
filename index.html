@@ -1341,9 +1341,10 @@ async function renderStaff(area) {
       <td>${u.hire_date||'-'}</td>
       <td>${u.retire_date||'-'}</td>
       <td style="white-space:nowrap">
+        ${canEditStaff() ? `
         <button class="btn-cancel-sm" style="padding:3px 9px;font-size:11px" onclick="openEditUser('${u.id}')" title="수정"><i class="ti ti-edit"></i></button>
         <button class="btn-cancel-sm" style="padding:3px 9px;font-size:11px;color:var(--${u.active?'rd':'gn'});border-color:var(--${u.active?'rd':'gn'});margin-left:4px" onclick="toggleActive('${u.id}',${u.active})">${u.active?'비활성':'활성'}</button>
-        <button class="btn-cancel-sm" style="padding:3px 9px;font-size:11px;color:var(--rd);border-color:var(--rd);margin-left:4px" onclick="deleteUser('${u.id}','${(u.name||'').replace(/'/g,"")}')" title="삭제"><i class="ti ti-trash"></i></button>
+        <button class="btn-cancel-sm" style="padding:3px 9px;font-size:11px;color:var(--rd);border-color:var(--rd);margin-left:4px" onclick="deleteUser('${u.id}','${(u.name||'').replace(/'/g,"")}')" title="삭제"><i class="ti ti-trash"></i></button>` : '<span style="font-size:11px;color:var(--th)">-</span>'}
       </td>
     </tr>`).join('');
 
@@ -1394,9 +1395,11 @@ async function renderStaff(area) {
         <button class="btn-cancel-sm" style="font-size:12px;color:var(--rd);border-color:var(--rd)" onclick="bulkDeleteUsers()"><i class="ti ti-trash"></i> 삭제</button>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-left:auto">
+        ${canEditStaff() ? `
         <button class="btn-new" style="background:var(--brm)" onclick="openEditUser(null)"><i class="ti ti-user-plus"></i> 직원 추가</button>
         <button class="btn-new" style="background:var(--gn)" onclick="openStoreManager()"><i class="ti ti-building"></i> 매장 관리</button>
         <button class="btn-new" onclick="openBulkImport()"><i class="ti ti-table-import"></i> 일괄 등록</button>
+        ` : '<span style="font-size:12px;color:var(--th);align-self:center">조회 전용 (수정 권한: 운영총괄·인사팀)</span>'}
       </div>
     </div>
 
@@ -1632,6 +1635,7 @@ function initPwFromCode(code){
 }
 
 async function submitEditUser(){
+  if(!canEditStaff()){alert('인원현황 수정 권한이 없습니다. (운영총괄·인사팀만 가능)');return;}
   const name = document.getElementById('eu_name')?.value.trim();
   const role = document.getElementById('eu_role')?.value;
   const storeSel = document.getElementById('eu_store')?.value;
@@ -1693,6 +1697,7 @@ function verifyAdminPassword(actionDesc){
 }
 
 async function deleteUser(id, name){
+  if(!canEditStaff()){alert('삭제 권한이 없습니다. (운영총괄·인사팀만 가능)');return;}
   // 1차 확인
   if(!confirm('['+name+'] 직원을 삭제하시겠습니까?\n\n삭제하면 계정과 모든 기록이 사라지며 복구할 수 없습니다.\n인원현황 시트에서도 자동으로 제거됩니다.')) return;
   // 2차 확인: 비밀번호 입력
@@ -1704,6 +1709,7 @@ async function deleteUser(id, name){
 }
 
 async function bulkDeleteUsers(){
+  if(!canEditStaff()){alert('삭제 권한이 없습니다.');return;}
   const ids = Array.from(window.__selStaff || []);
   if(!ids.length){ alert('선택된 직원이 없습니다.'); return; }
   // 1차 확인
@@ -1821,6 +1827,7 @@ function handleBulkPaste(e,startRow,startCol){
 
 const roleMap={'매니저':'manager','바리스타':'barista','파티쉐':'pastry','구매팀':'purchase','인사팀':'hr','운영팀':'admin'};
 async function submitBulk(){
+  if(!canEditStaff()){alert('등록 권한이 없습니다.');return;}
   const tbody=document.getElementById('bulkTbody');
   const rows=Array.from(tbody.querySelectorAll('tr'));
   const today=new Date().toISOString().slice(0,10);
@@ -2508,6 +2515,12 @@ let reqSearchQ = '';
 let curReq = null;
 
 // 권한: 이 신청을 볼 수 있는가
+// 인원현황 수정 권한: 총괄 마스터(운영총괄) 또는 인사팀만
+function canEditStaff() {
+  if (!currentUser) return false;
+  return currentUser.is_master === true || currentUser.role === 'hr';
+}
+
 function canSeeReq(r) {
   if (!currentUser) return false;
   if (currentUser.is_master) return true;            // 마스터: 전체
