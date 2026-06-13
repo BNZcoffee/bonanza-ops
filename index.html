@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>보난자 커피 — 운영 매뉴얼</title>
+<title>보난자커피 — 운영 매뉴얼</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.snow.css" rel="stylesheet">
@@ -304,7 +304,7 @@ textarea.form-input{min-height:120px;resize:vertical}
       <button class="nav-btn" onclick="goPage('stats')" id="nav-stats"><i class="ti ti-chart-bar"></i> 공지 통계</button>
       <button class="nav-btn" onclick="goPage('notifsettings')" id="nav-ns"><i class="ti ti-bell"></i> 알림 설정</button>
       <button class="nav-btn" onclick="goPage('appsettings')" id="nav-app"><i class="ti ti-settings-2"></i> 앱 관리</button>
-      <button class="nav-btn" onclick="goPage('manualedit')" id="nav-manualedit"><i class="ti ti-edit"></i> 설명서 편집</button>
+      <button class="nav-btn" onclick="goManualEdit()" id="nav-manualedit"><i class="ti ti-edit"></i> 설명서 편집</button>
       <button class="nav-btn" onclick="goPage('permsetting')" id="nav-perm"><i class="ti ti-shield-lock"></i> 권한 설정</button>
     </div>
     <div class="sidebar-footer" id="sidebarInfo" onclick="goPage('profile')" style="cursor:pointer;display:flex;align-items:center;gap:6px">
@@ -2339,7 +2339,7 @@ async function deleteDraft(id){
 }
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
-let APP = {app_name:'보난자 커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'-'};
+let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'-'};
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -2578,7 +2578,7 @@ async function renderManual(area) {
         <div style="font-size:11px;font-weight:700;color:var(--th);letter-spacing:1px;margin-bottom:8px">목차</div>${toc}</div>${secs}`;
   }
 
-  const editBtn = canEditManual() ? `<button class="btn-cancel-sm" onclick="goPage('manualedit')"><i class="ti ti-edit"></i> 편집</button>` : '';
+  const editBtn = canEditManual() ? `<button class="btn-cancel-sm" onclick="goManualEdit()"><i class="ti ti-edit"></i> 편집</button>` : '';
 
   area.innerHTML = `
     <div class="page-header" style="display:flex;justify-content:space-between;align-items:center">
@@ -2591,6 +2591,13 @@ async function renderManual(area) {
 
 // ── 매뉴얼 편집 ──────────────────────────────────
 let manualEditAudience = 'user';
+
+function goManualEdit() {
+  if (!canEditManual()) { alert('설명서 편집 권한이 없습니다.'); return; }
+  if (confirm('설명서 편집 메뉴로 진입하시겠습니까?\n\n＊ 편집한 내용은 모든 직원이 보는 설명서에 즉시 반영됩니다.\n＊ 수정이 필요한 경우에만 신중히 진행해 주세요.')) {
+    goPage('manualedit');
+  }
+}
 
 async function renderManualEdit(area) {
   if (!canEditManual()) { area.innerHTML = '<div style="padding:40px;text-align:center;color:var(--rd)">편집 권한이 없습니다.</div>'; return; }
