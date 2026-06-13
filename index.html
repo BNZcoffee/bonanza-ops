@@ -789,7 +789,7 @@ async function renderPostDetail(area) {
       const isVid = vidExts.includes(ext);
       let preview = '';
       if (isImg) {
-        preview = `<div class="wm-wrap" style="margin:6px 0 10px"><div class="watermark">${wmText}&nbsp;&nbsp;&nbsp;${wmText}</div><img src="${a.file_url}" style="max-width:100%;border-radius:8px;border:0.5px solid var(--crd);display:block" loading="lazy" oncontextmenu="return false"/></div>`;
+        preview = `<div class="wm-wrap" style="margin:6px 0 10px"><div class="watermark">${wmText}&nbsp;&nbsp;&nbsp;${wmText}&nbsp;&nbsp;&nbsp;${wmText}</div><img src="${a.file_url}" style="max-width:100%;border-radius:8px;border:0.5px solid var(--crd);display:block;-webkit-user-drag:none;user-select:none;pointer-events:none" loading="lazy" oncontextmenu="return false" ondragstart="return false"/></div>`;
       } else if (isVid) {
         preview = `<video src="${a.file_url}" controls controlslist="nodownload" style="max-width:100%;border-radius:8px;border:0.5px solid var(--crd);margin:6px 0 10px;display:block"></video>`;
       }
@@ -797,7 +797,7 @@ async function renderPostDetail(area) {
         <i class="ti ${ico}" style="font-size:20px;flex-shrink:0;color:var(--bl)"></i>
         <span style="flex:1;font-size:13px;font-weight:500;color:var(--bl);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.file_name}</span>
         <span style="font-size:10px;font-weight:700;background:var(--blb);color:var(--bl);border-radius:4px;padding:2px 6px;flex-shrink:0">${ext.toUpperCase()}</span>
-        <a href="${a.file_url}" target="_blank" title="새 탭에서 보기" style="color:var(--th);text-decoration:none;flex-shrink:0"><i class="ti ti-eye" style="font-size:16px"></i></a>
+        ${isImg ? '' : `<a href="${a.file_url}" target="_blank" title="새 탭에서 보기" style="color:var(--th);text-decoration:none;flex-shrink:0"><i class="ti ti-eye" style="font-size:16px"></i></a>`}
         <button onclick="downloadFile('${a.file_url}','${a.file_name.replace(/'/g,"\\'")}')" title="저장" style="background:none;border:none;cursor:pointer;color:var(--bl);flex-shrink:0;padding:0"><i class="ti ti-download" style="font-size:16px"></i></button>
       </div>${preview}`;
     }).join('');
@@ -1026,21 +1026,102 @@ function renderNewPost(area, ex) {
   setTimeout(tryInitQ, 150);
 }
 
-function nAddFiles(files){
-  Array.from(files).forEach(f => nPendingFiles.push(f));
+// 이미지 자동 압축 (최대 1600px, JPEG 0.72) — 용량 절감
+function compressImage(file){
+  return new Promise((resolve) => {
+    const imgExts = ['jpg','jpeg','png','gif','webp','bmp','heic'];
+    const ext = (file.name.split('.').pop()||'').toLowerCase();
+    if (!imgExts.includes(ext) || ext === 'gif') { resolve(file); return; } // gif(애니)·비이미지는 원본 유지
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1600;
+        let { width: w, height: h } = img;
+        if (w > MAX || h > MAX) {
+          if (w >= h) { h = Math.round(h * MAX / w); w = MAX; }
+          else { w = Math.round(w * MAX / h); h = MAX; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0,0,w,h); // 투명 png 대비 흰 배경
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob(blob => {
+          if (!blob || blob.size >= file.size) { resolve(file); return; } // 압축 효과 없으면 원본
+          const newName = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+          resolve(new File([blob], newName, { type: 'image/jpeg' }));
+        }, 'image/jpeg', 0.72);
+      };
+      img.onerror = () => resolve(file);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(file);
+    reader.readAsDataURL(file);
+  });
+}
+
+// 여러 이미지를 세로로 이어붙여 한 장으로 합치기
+function mergeImages(files){
+  return new Promise(async (resolve) => {
+    const imgs = [];
+    for (const f of files) {
+      const dataUrl = await new Promise(r => { const fr = new FileReader(); fr.onload = e => r(e.target.result); fr.readAsDataURL(f); });
+      const img = await new Promise(r => { const im = new Image(); im.onload = () => r(im); im.src = dataUrl; });
+      imgs.push(img);
+    }
+    const MAXW = 1600;
+    const scaled = imgs.map(im => { const s = Math.min(1, MAXW/im.width); return {im, w: Math.round(im.width*s), h: Math.round(im.height*s)}; });
+    const totalW = Math.max(...scaled.map(s=>s.w));
+    const totalH = scaled.reduce((a,s)=>a+s.h, 0) + (scaled.length-1)*8;
+    const canvas = document.createElement('canvas');
+    canvas.width = totalW; canvas.height = totalH;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,totalW,totalH);
+    let y = 0;
+    scaled.forEach(s => { ctx.drawImage(s.im, 0, y, s.w, s.h); y += s.h + 8; });
+    canvas.toBlob(blob => {
+      resolve(new File([blob], '합친이미지_'+Date.now()+'.jpg', { type: 'image/jpeg' }));
+    }, 'image/jpeg', 0.72);
+  });
+}
+
+async function nAddFiles(files){
+  const arr = Array.from(files);
+  for (const f of arr) {
+    const compressed = await compressImage(f);
+    nPendingFiles.push(compressed);
+  }
   nRenderFileList();
+}
+
+// 대기 중인 이미지들을 한 장으로 합치기
+async function nMergePendingImages(){
+  const imgExts = ['jpg','jpeg','png','webp','bmp'];
+  const imgFiles = nPendingFiles.filter(f => imgExts.includes((f.name.split('.').pop()||'').toLowerCase()));
+  if (imgFiles.length < 2) { alert('합칠 이미지가 2장 이상 필요합니다.'); return; }
+  if (!confirm(imgFiles.length + '장의 이미지를 세로로 이어붙여 한 장으로 합칩니다.\n\n＊ 합친 후에는 개별 이미지를 따로 받을 수 없습니다.\n진행할까요?')) return;
+  const merged = await mergeImages(imgFiles);
+  nPendingFiles = nPendingFiles.filter(f => !imgExts.includes((f.name.split('.').pop()||'').toLowerCase()));
+  nPendingFiles.push(merged);
+  nRenderFileList();
+  alert('이미지가 한 장으로 합쳐졌습니다.');
 }
 function nRenderFileList(){
   const fl = document.getElementById('nFileList');
   if(!fl) return;
-  fl.innerHTML = nPendingFiles.map((f,i) =>
+  const imgExts = ['jpg','jpeg','png','webp','bmp'];
+  const imgCount = nPendingFiles.filter(f => imgExts.includes((f.name.split('.').pop()||'').toLowerCase())).length;
+  const list = nPendingFiles.map((f,i) =>
     `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:4px">
       <i class="ti ti-file" style="color:var(--th)"></i>
       <span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.name}</span>
-      <span style="font-size:11px;color:var(--th)">${(f.size/1024/1024).toFixed(1)}MB</span>
+      <span style="font-size:11px;color:var(--th)">${(f.size/1024/1024).toFixed(2)}MB</span>
       <button onclick="nPendingFiles.splice(${i},1);nRenderFileList()" style="background:none;border:none;color:var(--th);cursor:pointer"><i class="ti ti-x"></i></button>
     </div>`
   ).join('');
+  const mergeBtn = imgCount >= 2 ? `<button type="button" class="btn-cancel-sm" style="margin-top:4px;font-size:12px" onclick="nMergePendingImages()"><i class="ti ti-layers-intersect"></i> 이미지 ${imgCount}장을 한 장으로 합치기</button>` : '';
+  fl.innerHTML = list + mergeBtn;
 }
 
 // ── 파일 다운로드 (다른 이름으로 저장) ──────────────────────────
@@ -3054,8 +3135,11 @@ function selectReqType(typeId) {
     '</div>';
 }
 
-function reqAddFiles(files) {
-  Array.from(files).forEach(f => reqPendingFiles.push(f));
+async function reqAddFiles(files) {
+  for (const f of Array.from(files)) {
+    const compressed = await compressImage(f);
+    reqPendingFiles.push(compressed);
+  }
   reqRenderFileList();
 }
 function reqRenderFileList() {
