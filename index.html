@@ -2660,11 +2660,12 @@ async function renderManual(area) {
   }
 
   const editBtn = canEditManual() ? `<button class="btn-cancel-sm" onclick="goManualEdit()"><i class="ti ti-edit"></i> 편집</button>` : '';
+  const pdfBtn = hasPerm('manual_pdf') ? `<button class="btn-cancel-sm" onclick="downloadManualPdf()"><i class="ti ti-download"></i> PDF</button>` : '';
 
   area.innerHTML = `
     <div class="page-header" style="display:flex;justify-content:space-between;align-items:center">
       <div><div class="page-title">사용 설명서</div><div class="page-sub">시스템 사용 안내 (항상 최신 버전)</div></div>
-      ${editBtn}
+      <div style="display:flex;gap:6px">${pdfBtn}${editBtn}</div>
     </div>
     ${tabBar}
     ${body}`;
@@ -2672,6 +2673,60 @@ async function renderManual(area) {
 
 // ── 매뉴얼 편집 ──────────────────────────────────
 let manualEditAudience = 'user';
+
+// 매뉴얼 PDF 다운로드 (인쇄 → PDF 저장, 워터마크 + 목차)
+async function downloadManualPdf() {
+  if (!hasPerm('manual_pdf')) { alert('PDF 다운로드 권한이 없습니다.'); return; }
+  const aud = manualAudience;
+  const { data: sections } = await sb.from('manual_sections').select('*').eq('audience', aud).order('sort_order');
+  if (!sections || !sections.length) { alert('내용이 없습니다.'); return; }
+
+  const audLabel = aud === 'admin' ? '관리자용' : '매장 직원용';
+  const wm = `${currentUser.name} · ${currentUser.code || ''} · ${new Date().toISOString().slice(0,10)}`;
+  const today = new Date().toISOString().slice(0,10);
+
+  const toc = sections.map((s,i) => `<li><a href="#sec${i}">${s.title}</a></li>`).join('');
+  const body = sections.map((s,i) => `<section id="sec${i}"><h2>${i+1}. ${s.title}</h2><div class="mbody">${s.body||''}</div></section>`).join('');
+
+  const html = `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>보난자커피 운영 매뉴얼 (${audLabel})</title>
+  <style>
+    @page { margin: 18mm 15mm; }
+    * { box-sizing:border-box; }
+    body { font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif; color:#2A1A0E; line-height:1.7; font-size:12pt; position:relative; }
+    .wm { position:fixed; top:45%; left:0; right:0; text-align:center; font-size:40pt; color:rgba(160,98,42,0.08); transform:rotate(-25deg); z-index:-1; white-space:nowrap; pointer-events:none; }
+    .cover { text-align:center; padding:40mm 0 30mm; border-bottom:2px solid #C8963C; margin-bottom:10mm; page-break-after:always; }
+    .cover .brand { font-size:11pt; letter-spacing:3px; color:#6B3E2A; }
+    .cover h1 { font-size:26pt; color:#3B2314; margin:6mm 0; }
+    .cover .meta { font-size:11pt; color:#7A5C44; }
+    h2 { font-size:15pt; color:#3B2314; border-bottom:1.5px solid #C8963C; padding-bottom:3px; margin:8mm 0 4mm; page-break-after:avoid; }
+    .toc { margin-bottom:10mm; }
+    .toc h3 { font-size:12pt; color:#6B3E2A; }
+    .toc ol { padding-left:18px; }
+    .toc a { color:#6B3E2A; text-decoration:none; }
+    section { page-break-inside:avoid; }
+    .mbody { font-size:11pt; }
+    ul { margin:4px 0 8px 18px; }
+    .foot { margin-top:10mm; padding-top:4mm; border-top:0.5px solid #D9C9B3; font-size:9pt; color:#B09070; text-align:center; }
+  </style></head><body>
+    <div class="wm">${wm}　　${wm}</div>
+    <div class="cover">
+      <div class="brand">BONANZA COFFEE KOREA</div>
+      <h1>운영 매뉴얼<br><span style="font-size:16pt">${audLabel}</span></h1>
+      <div class="meta">발행일 ${today} · 출력자 ${currentUser.name}</div>
+      <div class="meta" style="margin-top:4mm;font-size:9pt">본 문서는 보난자커피 내부 자료입니다. 외부 유출을 금합니다.</div>
+    </div>
+    <div class="toc"><h3>목차</h3><ol>${toc}</ol></div>
+    ${body}
+    <div class="foot">보난자커피 운영 매뉴얼 (${audLabel}) · ${today} · 출력자 ${currentUser.name} ${currentUser.code||''}</div>
+  </body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) { alert('팝업이 차단되었습니다. 팝업을 허용해주세요.'); return; }
+  w.document.write(html);
+  w.document.close();
+  // 렌더 후 인쇄 다이얼로그 (PDF로 저장 선택 가능)
+  setTimeout(() => { w.focus(); w.print(); }, 600);
+}
 
 function goManualEdit() {
   if (!canEditManual()) { alert('설명서 편집 권한이 없습니다.'); return; }
