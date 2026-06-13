@@ -2,8 +2,14 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>보난자커피 — 운영 매뉴얼</title>
+<meta name="theme-color" content="#3B2314">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="보난자커피">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" id="appleTouchIcon" href="">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.snow.css" rel="stylesheet">
@@ -2525,6 +2531,8 @@ async function loadAppSettings(){
     document.documentElement.style.setProperty('--br', APP.primary_color);
     // 연관 색상도 조정
   }
+  // PWA 홈 화면 아이콘 적용 (로고 URL 기반, 없으면 기본 아이콘)
+  applyPwaIcon(APP.logo_url || '');
 }
 async function saveAppSetting(key,value){
   await sb.from('app_settings').upsert({key,value,updated_at:new Date().toISOString()},{onConflict:'key'});
@@ -2542,6 +2550,18 @@ async function renderAppSettings(area){
         <div style="display:flex;gap:10px;align-items:center">
           <input type="color" id="cfg-cpicker" value="${APP.primary_color||'#3B2314'}" style="width:48px;height:36px;border:0.5px solid var(--crd);border-radius:8px;cursor:pointer;padding:2px"/>
           <input class="form-input" id="cfg-color" value="${APP.primary_color||'#3B2314'}" style="flex:1"/>
+        </div>
+      </div>
+      <div class="form-row"><label class="form-label">홈 화면 아이콘 (로고)</label>
+        <div style="font-size:12px;color:var(--ts);margin-bottom:8px;line-height:1.6">휴대폰 홈 화면에 추가했을 때 표시되는 앱 아이콘입니다. 정사각형 PNG/JPG 권장 (512×512). 등록하지 않으면 기본 아이콘이 사용됩니다.</div>
+        <div style="display:flex;gap:12px;align-items:center">
+          <div id="logoPreview" style="width:64px;height:64px;border-radius:14px;border:0.5px solid var(--crd);background:${APP.logo_url?`url('${APP.logo_url}') center/cover`:'var(--br)'};display:flex;align-items:center;justify-content:center;color:var(--gdl);font-size:28px;font-weight:bold;font-family:Georgia,serif;flex-shrink:0">${APP.logo_url?'':'B'}</div>
+          <div style="flex:1">
+            <input type="file" id="logoFileInput" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="uploadLogo(this.files[0])"/>
+            <button class="btn-cancel-sm" onclick="document.getElementById('logoFileInput').click()"><i class="ti ti-upload"></i> 이미지 선택</button>
+            ${APP.logo_url?`<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:6px" onclick="removeLogo()"><i class="ti ti-trash"></i> 제거</button>`:''}
+            <div id="logoUploadStatus" style="font-size:12px;color:var(--gn);margin-top:6px"></div>
+          </div>
         </div>
       </div>
       <div style="text-align:right;margin-top:8px"><button class="btn-submit" style="font-size:13px;padding:8px 18px" onclick="saveUISettings()">UI 저장</button></div>
@@ -2572,6 +2592,67 @@ async function renderAppSettings(area){
     if(picker&&hex){picker.oninput=()=>{hex.value=picker.value;};hex.oninput=()=>{if(/^#[0-9a-f]{6}$/i.test(hex.value))picker.value=hex.value;};}
   },100);
 }
+// 로고 업로드 (홈 화면 아이콘)
+async function uploadLogo(file) {
+  if (!file) return;
+  if (!hasPerm('app_manage')) { alert('앱 관리 권한이 없습니다.'); return; }
+  const status = document.getElementById('logoUploadStatus');
+  if (status) { status.style.color = 'var(--ts)'; status.textContent = '업로드 중...'; }
+  try {
+    // 아이콘용으로 정사각형 512px 압축
+    const compressed = await compressLogoSquare(file);
+    const ext = 'png';
+    const fname = 'app/logo_' + Date.now() + '.' + ext;
+    const { error: upErr } = await sb.storage.from('attachments').upload(fname, compressed, { upsert: true, contentType: 'image/png' });
+    if (upErr) { if(status){status.style.color='var(--rd)';status.textContent='업로드 실패: '+upErr.message;} return; }
+    const url = SUPABASE_URL + '/storage/v1/object/public/attachments/' + fname;
+    // app_settings에 저장
+    await sb.from('app_settings').upsert({ key: 'logo_url', value: url, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+    APP.logo_url = url;
+    applyPwaIcon(url);
+    if (status) { status.style.color = 'var(--gn)'; status.textContent = '로고가 등록되었습니다. 홈 화면에 다시 추가하면 적용됩니다.'; }
+    // 미리보기 갱신
+    const pv = document.getElementById('logoPreview');
+    if (pv) { pv.style.background = `url('${url}') center/cover`; pv.textContent = ''; }
+  } catch(e) {
+    if (status) { status.style.color = 'var(--rd)'; status.textContent = '오류: ' + e.message; }
+  }
+}
+
+// 로고를 512x512 정사각형으로 압축 (가운데 맞춤, 흰 배경)
+function compressLogoSquare(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const SIZE = 512;
+        const canvas = document.createElement('canvas');
+        canvas.width = SIZE; canvas.height = SIZE;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, SIZE, SIZE);
+        // 비율 유지하며 가운데 맞춤(contain)
+        const scale = Math.min(SIZE / img.width, SIZE / img.height);
+        const w = img.width * scale, h = img.height * scale;
+        ctx.drawImage(img, (SIZE - w) / 2, (SIZE - h) / 2, w, h);
+        canvas.toBlob(b => resolve(b), 'image/png');
+      };
+      img.onerror = () => resolve(file);
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function removeLogo() {
+  if (!hasPerm('app_manage')) { alert('앱 관리 권한이 없습니다.'); return; }
+  if (!confirm('등록된 로고를 제거하고 기본 아이콘으로 되돌릴까요?')) return;
+  await sb.from('app_settings').upsert({ key: 'logo_url', value: '', updated_at: new Date().toISOString() }, { onConflict: 'key' });
+  APP.logo_url = '';
+  applyPwaIcon('');
+  renderAppSettings(document.getElementById('contentArea'));
+}
+
 async function saveUISettings(){
   const ver = new Date().toISOString().slice(0,10);
   const name = document.getElementById('cfg-name')?.value.trim()||APP.app_name;
@@ -2970,6 +3051,39 @@ const PERM_DEFAULT = {
 
 // 현재 권한 맵 (DB 로드 후 채워짐). { perm_key: {master:bool,vice:bool,...} }
 let PERM_MAP = null;
+
+// PWA 홈 화면 아이콘/매니페스트 적용 (로고 URL 기반)
+function applyPwaIcon(logoUrl) {
+  const name = (typeof APP !== 'undefined' && APP.app_name) ? APP.app_name : '보난자커피';
+  const theme = (typeof APP !== 'undefined' && APP.primary_color) ? APP.primary_color : '#3B2314';
+  // 로고가 없으면 기본 아이콘(갈색 배경 + 흰 B) SVG 생성
+  let iconUrl = logoUrl;
+  if (!iconUrl) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><rect width="512" height="512" rx="96" fill="${theme}"/><text x="256" y="340" font-family="Georgia,serif" font-size="300" font-weight="bold" fill="#E8C07A" text-anchor="middle">B</text></svg>`;
+    iconUrl = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+  }
+  // apple-touch-icon (iOS 홈 화면)
+  const apple = document.getElementById('appleTouchIcon');
+  if (apple) apple.href = iconUrl;
+  // theme-color
+  const tc = document.querySelector('meta[name="theme-color"]');
+  if (tc) tc.content = theme;
+  // manifest 동적 생성 (Android 홈 화면)
+  const manifest = {
+    name: name, short_name: name,
+    start_url: location.pathname,
+    display: 'standalone',
+    background_color: theme, theme_color: theme,
+    icons: [
+      { src: iconUrl, sizes: '512x512', type: iconUrl.startsWith('data:image/svg') ? 'image/svg+xml' : 'image/png', purpose: 'any maskable' }
+    ]
+  };
+  const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  let link = document.querySelector('link[rel="manifest"]');
+  if (!link) { link = document.createElement('link'); link.rel = 'manifest'; document.head.appendChild(link); }
+  link.href = url;
+}
 
 // 메뉴 표시를 권한에 따라 제어
 function applyMenuPermissions() {
