@@ -305,6 +305,7 @@ textarea.form-input{min-height:120px;resize:vertical}
       <button class="nav-btn" onclick="goPage('notifsettings')" id="nav-ns"><i class="ti ti-bell"></i> 알림 설정</button>
       <button class="nav-btn" onclick="goPage('appsettings')" id="nav-app"><i class="ti ti-settings-2"></i> 앱 관리</button>
       <button class="nav-btn" onclick="goPage('manualedit')" id="nav-manualedit"><i class="ti ti-edit"></i> 설명서 편집</button>
+      <button class="nav-btn" onclick="goPage('permsetting')" id="nav-perm"><i class="ti ti-shield-lock"></i> 권한 설정</button>
     </div>
     <div class="sidebar-footer" id="sidebarInfo" onclick="goPage('profile')" style="cursor:pointer;display:flex;align-items:center;gap:6px">
       <i class="ti ti-user-circle" style="font-size:16px;color:var(--th)"></i>
@@ -419,21 +420,15 @@ async function doLogin() {
   loginAs(data);
 }
 
-function loginAs(user) {
+async function loginAs(user) {
   currentUser = user;
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('mainScreen').style.display = 'flex';
   document.getElementById('topbar').style.display = 'flex';
-  document.getElementById('adminNav').style.display = (user.role === 'admin') ? '' : 'none';
-  // 업무 신청: 매니저+관리자만 진입. 유형관리: 관리자만
-  document.getElementById('requestNav').style.display = (user.role === 'admin' || user.role === 'manager' || user.is_master) ? '' : 'none';
-  const reqAdminBtn = document.getElementById('nav-reqadmin');
-  if (reqAdminBtn) reqAdminBtn.style.display = (user.role === 'admin') ? '' : 'none';
-  // 설명서 편집: admin 또는 마스터만 (adminNav가 숨겨져도 마스터는 보이도록 별도 처리)
-  const manualEditBtn = document.getElementById('nav-manualedit');
-  if (manualEditBtn) manualEditBtn.style.display = canEditManual() ? '' : 'none';
+  // 권한 맵 로드 (메뉴 표시 판단 전에 먼저)
+  await loadPermMap();
+  applyMenuPermissions();
   document.getElementById('sidebarInfoTxt').textContent = user.store + ' · ' + user.name;
-  document.getElementById('userBadgeEl').innerHTML = `<span class="role-tag">${roleLbl[user.role]||user.role}</span>${user.store} ${user.name}`;
   loadAppSettings();
   loadCats();
   setInterval(checkScheduled, 60000);
@@ -623,6 +618,10 @@ function goPage(page) {
     const nb = document.getElementById('nav-manualedit');
     if (nb) nb.classList.add('active');
     renderManualEdit(area);
+  } else if (page === 'permsetting') {
+    const nb = document.getElementById('nav-perm');
+    if (nb) nb.classList.add('active');
+    renderPermSettings(area);
   } else if (page === 'profile') {
     renderProfile(area);
   } else if (page === 'saved') {
@@ -1617,7 +1616,13 @@ async function openEditUser(userId){
       <div><label class="form-label">총괄 마스터</label>
         <label style="display:flex;align-items:center;gap:8px;padding:9px 0;font-size:13px;color:var(--tm);cursor:pointer">
           <input type="checkbox" id="eu_master" ${u?.is_master?'checked':''} style="width:auto"/>
-          전체 신청 열람 권한 (이사·대표 등)
+          전체 권한 (이사·대표·운영총괄)
+        </label>
+      </div>
+      <div><label class="form-label">부총괄</label>
+        <label style="display:flex;align-items:center;gap:8px;padding:9px 0;font-size:13px;color:var(--tm);cursor:pointer">
+          <input type="checkbox" id="eu_vice" ${u?.is_vice_master?'checked':''} style="width:auto"/>
+          팀장급 (매뉴얼·인원·게시판 관리)
         </label>
       </div>
     </div>
@@ -1660,10 +1665,11 @@ async function submitEditUser(){
   const pw = document.getElementById('eu_pw')?.value.trim();
   const part = document.getElementById('eu_part')?.value || null;
   const isMaster = document.getElementById('eu_master')?.checked || false;
+  const isVice = document.getElementById('eu_vice')?.checked || false;
   if(!name||!store){alert('이름과 소속매장은 필수입니다.');return;}
   const today = new Date().toISOString().slice(0,10);
   const active = !retire || (retire >= today);
-  const payload = {name,role,store,phone:phone||null,email:email||null,hire_date:hire,retire_date:retire,active,part,is_master:isMaster};
+  const payload = {name,role,store,phone:phone||null,email:email||null,hire_date:hire,retire_date:retire,active,part,is_master:isMaster, is_vice_master: isVice};
   if(pw) payload.password_hash = pw;
   let error, newCode;
   if(editingUserId){
@@ -2531,13 +2537,12 @@ let curReq = null;
 // 매뉴얼 편집 권한: admin 또는 총괄 마스터
 function canEditManual() {
   if (!currentUser) return false;
-  return currentUser.role === 'admin' || currentUser.is_master === true;
+  return hasPerm('manual_edit');
 }
 // 관리자용 매뉴얼 열람 권한: admin/마스터/부서담당(part 보유)
 function canSeeAdminManual() {
   if (!currentUser) return false;
-  return currentUser.role === 'admin' || currentUser.is_master === true || !!currentUser.part
-    || currentUser.role === 'hr' || currentUser.role === 'purchase';
+  return hasPerm('manual_read_admin');
 }
 
 // 현재 보고 있는 매뉴얼 대상 (user/admin)
@@ -2653,10 +2658,212 @@ async function moveManualSec(id, dir) {
   renderManualEdit(document.getElementById('contentArea'));
 }
 
+// ════════════════════════════════════════════════
+// 권한 시스템 (등급 × 기능 키)
+// ════════════════════════════════════════════════
+// 등급: master(총괄) > vice(부총괄) > dept(부서담당) > manager(매니저) > staff(매장직원)
+const GRADES = ['master','vice','dept','manager','staff'];
+const GRADE_LABEL = {master:'총괄', vice:'부총괄', dept:'부서담당', manager:'매니저', staff:'매장직원'};
+
+// 기능 키 정의 (권한 설정창의 행)
+const PERM_DEFS = [
+  {group:'공지 게시판', items:[
+    {key:'notice_read',  label:'공지 열람·확인'},
+    {key:'notice_write', label:'공지 작성·수정'},
+    {key:'notice_stats', label:'공지 통계 보기'},
+  ]},
+  {group:'게시판(카테고리) 설정', items:[
+    {key:'cat_manage_full', label:'카테고리 추가·순서·이름·권한·색상·숨김'},
+    {key:'cat_manage_dept', label:'내 부서 게시판 관리'},
+  ]},
+  {group:'업무 신청', items:[
+    {key:'req_write',    label:'업무 신청 작성'},
+    {key:'req_process',  label:'신청 처리(담당자·완료)'},
+    {key:'req_type_manage', label:'신청 유형·파트 관리'},
+    {key:'req_viewer',   label:'신청 개별 열람권한 부여'},
+  ]},
+  {group:'인원 관리', items:[
+    {key:'staff_view', label:'인원 현황 조회'},
+    {key:'staff_edit', label:'인원 현황 수정·등록'},
+    {key:'staff_delete', label:'직원 삭제'},
+  ]},
+  {group:'사용 설명서', items:[
+    {key:'manual_read_user',  label:'설명서 열람(매장용)'},
+    {key:'manual_read_admin', label:'설명서 열람(관리자용)'},
+    {key:'manual_edit',       label:'설명서 편집'},
+    {key:'manual_pdf',        label:'설명서 PDF 다운로드'},
+  ]},
+  {group:'시스템', items:[
+    {key:'app_manage',  label:'앱 관리(이름·색상·기능)'},
+    {key:'notif_setting', label:'알림 설정'},
+    {key:'perm_setting', label:'권한 설정(이 화면)'},
+  ]},
+];
+
+// 기본 권한 맵 (DB에 저장된 값이 없을 때 사용) — [master,vice,dept,manager,staff]
+const PERM_DEFAULT = {
+  notice_read:      [1,1,1,1,1],
+  notice_write:     [1,1,1,0,0],
+  notice_stats:     [1,1,1,0,0],
+  cat_manage_full:  [1,1,0,0,0],
+  cat_manage_dept:  [1,1,1,0,0],
+  req_write:        [1,1,1,1,0],
+  req_process:      [1,1,1,0,0],
+  req_type_manage:  [1,1,0,0,0],
+  req_viewer:       [1,1,0,0,0],
+  staff_view:       [1,1,1,0,0],
+  staff_edit:       [1,1,0,0,0],
+  staff_delete:     [1,0,0,0,0],
+  manual_read_user: [1,1,1,1,1],
+  manual_read_admin:[1,1,1,0,0],
+  manual_edit:      [1,1,0,0,0],
+  manual_pdf:       [1,1,1,0,0],
+  app_manage:       [1,0,0,0,0],
+  notif_setting:    [1,1,0,0,0],
+  perm_setting:     [1,0,0,0,0],
+};
+
+// 현재 권한 맵 (DB 로드 후 채워짐). { perm_key: {master:bool,vice:bool,...} }
+let PERM_MAP = null;
+
+// 메뉴 표시를 권한에 따라 제어
+function applyMenuPermissions() {
+  const u = currentUser; if (!u) return;
+  const show = (id, cond) => { const el = document.getElementById(id); if (el) el.style.display = cond ? '' : 'none'; };
+  // 관리 섹션: 관리 관련 권한이 하나라도 있으면 표시
+  const anyAdmin = hasPerm('staff_view') || hasPerm('notice_stats') || hasPerm('notif_setting') || hasPerm('app_manage') || hasPerm('manual_edit') || hasPerm('perm_setting');
+  show('adminNav', anyAdmin);
+  // 업무 신청 섹션
+  show('requestNav', hasPerm('req_write') || hasPerm('req_process'));
+  show('nav-reqadmin', hasPerm('req_type_manage'));
+  // 개별 메뉴
+  show('nav-staff', hasPerm('staff_view'));
+  show('nav-stats', hasPerm('notice_stats'));
+  show('nav-ns', hasPerm('notif_setting'));
+  show('nav-app', hasPerm('app_manage') || hasPerm('cat_manage_full'));
+  show('nav-manualedit', hasPerm('manual_edit'));
+  show('nav-perm', hasPerm('perm_setting'));
+  // 역할 배지
+  const badge = document.getElementById('userBadgeEl');
+  if (badge) badge.innerHTML = `<span class="role-tag">${GRADE_LABEL[userGrade(u)]||u.role}</span>${u.store} ${u.name}`;
+}
+
+// 사용자 → 등급
+function userGrade(u) {
+  u = u || currentUser;
+  if (!u) return 'staff';
+  if (u.is_master) return 'master';
+  if (u.is_vice_master) return 'vice';
+  if (u.part) return 'dept';
+  if (u.role === 'manager') return 'manager';
+  return 'staff';
+}
+
+// 권한 맵 로드 (로그인 후 호출)
+async function loadPermMap() {
+  PERM_MAP = {};
+  // 기본값으로 초기화
+  PERM_DEFS.forEach(g => g.items.forEach(it => {
+    PERM_MAP[it.key] = {};
+    GRADES.forEach((gr, i) => { PERM_MAP[it.key][gr] = PERM_DEFAULT[it.key] ? !!PERM_DEFAULT[it.key][i] : false; });
+  }));
+  // DB 저장값으로 덮어쓰기
+  try {
+    const { data } = await sb.from('role_permissions').select('*');
+    (data||[]).forEach(row => {
+      if (PERM_MAP[row.perm_key]) PERM_MAP[row.perm_key][row.grade] = !!row.enabled;
+    });
+  } catch(e) { /* 테이블 없으면 기본값 사용 */ }
+}
+
+// 권한 판단 (총괄은 항상 true)
+function hasPerm(permKey, u) {
+  const grade = userGrade(u);
+  if (grade === 'master') return true;  // 총괄은 모든 권한
+  if (!PERM_MAP || !PERM_MAP[permKey]) {
+    // 맵 미로드 시 기본값
+    const idx = GRADES.indexOf(grade);
+    return PERM_DEFAULT[permKey] ? !!PERM_DEFAULT[permKey][idx] : false;
+  }
+  return !!PERM_MAP[permKey][grade];
+}
+
+// ── 권한 설정 화면 ──────────────────────────────
+async function renderPermSettings(area) {
+  if (!hasPerm('perm_setting')) { area.innerHTML = '<div style="padding:40px;text-align:center;color:var(--rd)">권한 설정에 접근할 수 없습니다.</div>'; return; }
+  if (!PERM_MAP) await loadPermMap();
+
+  const headCols = GRADES.map(g => {
+    const sub = g==='master' ? '(나)' : g==='vice' ? '(팀장)' : g==='dept' ? '(유관부서)' : '';
+    return `<th style="padding:11px 8px;text-align:center;width:84px">${GRADE_LABEL[g]}${sub?'<br><span style="font-size:10px;opacity:.8">'+sub+'</span>':''}</th>`;
+  }).join('');
+
+  let rows = '';
+  PERM_DEFS.forEach(grp => {
+    rows += `<tr><td colspan="${GRADES.length+1}" style="padding:11px 12px 5px;font-size:11px;font-weight:700;color:var(--brm);letter-spacing:1px;background:var(--cr)">${grp.group}</td></tr>`;
+    grp.items.forEach(it => {
+      rows += `<tr><td style="padding:9px 12px;border-bottom:0.5px solid var(--crm);font-size:13px">${it.label}</td>`;
+      GRADES.forEach(g => {
+        const on = (g==='master') ? true : !!(PERM_MAP[it.key] && PERM_MAP[it.key][g]);
+        const locked = (g==='master'); // 총괄 열 잠금
+        const bg = on ? '#2D6A4F' : '#fff';
+        const bc = on ? '#2D6A4F' : '#D9C9B3';
+        const kb = on ? '#fff' : '#B09070';
+        const kl = on ? '18px' : '2px';
+        const op = locked ? 'opacity:.45;cursor:not-allowed' : 'cursor:pointer';
+        const click = locked ? '' : `onclick="togglePermCell(this)" data-key="${it.key}" data-grade="${g}"`;
+        rows += `<td style="text-align:center;padding:9px 8px;border-bottom:0.5px solid var(--crm)">
+          <span ${click} data-on="${on?1:0}" style="display:inline-block;width:38px;height:22px;background:${bg};border:1.5px solid ${bc};border-radius:11px;position:relative;${op}">
+          <span style="position:absolute;top:2px;left:${kl};width:16px;height:16px;border-radius:50%;background:${kb};transition:left .15s"></span></span></td>`;
+      });
+      rows += `</tr>`;
+    });
+  });
+
+  area.innerHTML = `
+    <div class="page-header"><div class="page-title">권한 설정</div><div class="page-sub">역할별로 사용 가능한 기능을 켜고 끌 수 있습니다 (총괄만 조정 가능)</div></div>
+    <div style="overflow-x:auto;background:#fff;border:0.5px solid var(--crd);border-radius:12px;padding:6px">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:680px">
+      <thead><tr style="background:var(--brm);color:#fff">
+        <th style="padding:11px 12px;text-align:left">기능 / 권한</th>${headCols}
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;flex-wrap:wrap;gap:10px">
+      <div style="font-size:12px;color:var(--th)">＊ 총괄 열은 항상 모든 권한이 켜져 있어 수정할 수 없습니다.</div>
+      <button class="btn-submit" onclick="savePermSettings()"><i class="ti ti-device-floppy"></i> 설정 저장</button>
+    </div>`;
+}
+
+function togglePermCell(el) {
+  const on = el.dataset.on === '1';
+  el.dataset.on = on ? '0' : '1';
+  el.style.background = on ? '#fff' : '#2D6A4F';
+  el.style.borderColor = on ? '#D9C9B3' : '#2D6A4F';
+  const knob = el.firstElementChild;
+  knob.style.left = on ? '2px' : '18px';
+  knob.style.background = on ? '#B09070' : '#fff';
+}
+
+async function savePermSettings() {
+  if (!hasPerm('perm_setting')) { alert('권한이 없습니다.'); return; }
+  const cells = document.querySelectorAll('[data-key][data-grade]');
+  const rows = [];
+  cells.forEach(c => {
+    rows.push({ grade: c.dataset.grade, perm_key: c.dataset.key, enabled: c.dataset.on === '1' });
+  });
+  // upsert (grade,perm_key 유니크)
+  const { error } = await sb.from('role_permissions').upsert(rows, { onConflict: 'grade,perm_key' });
+  if (error) { alert('저장 오류: ' + error.message); return; }
+  await loadPermMap();
+  applyMenuPermissions();
+  alert('권한 설정이 저장되었습니다.');
+}
+
 // 인원현황 수정 권한: 총괄 마스터(운영총괄) 또는 인사팀만
 function canEditStaff() {
   if (!currentUser) return false;
-  return currentUser.is_master === true || currentUser.role === 'hr';
+  return hasPerm('staff_edit');
 }
 
 function canSeeReq(r) {
@@ -2675,7 +2882,7 @@ function canSeeReq(r) {
 }
 // 신청 작성 권한
 function canWriteReq() {
-  return currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.is_master);
+  return currentUser && hasPerm('req_write');
 }
 
 // ── 신청 목록 ────────────────────────────────────────────────────
