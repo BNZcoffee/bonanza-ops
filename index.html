@@ -491,12 +491,28 @@ async function loadCats() {
   updateNotifDot();
 }
 
+function visibleCats() {
+  const grade = userGrade(currentUser);
+  const isAdminView = (grade === 'master' || grade === 'vice');
+  return allCats.filter(c => {
+    // 숨김 게시판: 총괄·부총괄만 (관리 목적)
+    if (c.hidden && !isAdminView) return false;
+    // 열람 권한(read_perm)
+    if (!isAdminView) {
+      const rp = c.read_perm || 'all';
+      if (rp === 'dept' && !(currentUser.part && currentUser.part === c.dept)) return false;
+      if (rp === 'manager' && grade === 'staff') return false;
+    }
+    return true;
+  });
+}
 function renderCatNav() {
   const area = document.getElementById('catNavArea');
-  area.innerHTML = allCats.map(c => {
+  area.innerHTML = visibleCats().map(c => {
     const ic = c.icon || 'ti-folder';
+    const hideMark = c.hidden ? ' <span style="font-size:9px;color:var(--th)">(숨김)</span>' : '';
     return `<button class="nav-btn" onclick="switchCat(${c.id},'${c.name}')" id="nav-cat-${c.id}">
-      <i class="ti ${ic}"></i> ${c.name}
+      <i class="ti ${ic}"></i> ${c.name}${hideMark}
       <span class="nav-new" id="newBadge-${c.id}" style="display:none">N</span>
     </button>`;
   }).join('');
@@ -553,26 +569,47 @@ function switchCat(id, name) {
 
 function canSee(post) {
   if (!currentUser) return false;
-  if (currentUser.role === 'admin') return true;
-  if (post.status && post.status !== 'published') return false;
+  if (post.status && post.status !== 'published') {
+    // 미발행은 작성자·총괄·부총괄만
+    if (currentUser.is_master || currentUser.is_vice_master || post.author_id === currentUser.id) {} else return false;
+  }
+  const grade = userGrade(currentUser);
+  if (grade === 'master' || grade === 'vice') return true;  // 총괄·부총괄 전체 열람
   const cat = allCats.find(c => c.id === post.category_id);
   if (cat) {
-    if (cat.name === '구매팀' && currentUser.role !== 'purchase') return false;
-    if (cat.name === '인사팀' && currentUser.role !== 'hr') return false;
+    // 게시판 열람 권한(read_perm)
+    const rp = cat.read_perm || 'all';
+    if (rp === 'dept') {
+      // 해당 부서만: 부서담당의 part가 cat.dept와 일치해야
+      if (!(currentUser.part && (currentUser.part === cat.dept))) return false;
+    } else if (rp === 'manager') {
+      if (grade === 'staff') return false;  // 매니저 이상만
+    }
   }
-  if (post.access === 'manager' && currentUser.role === 'barista') return false;
-  if (post.access === 'manager' && currentUser.role === 'pastry') return false;
+  // 글 자체의 access (전직원/매니저이상)
+  if (post.access === 'manager' && grade === 'staff') return false;
   return true;
 }
 
+function canWriteCatObj(cat) {
+  if (!currentUser || !cat) return false;
+  const grade = userGrade(currentUser);
+  if (grade === 'master') return true;
+  if (!hasPerm('notice_write')) return false;  // 공지 작성 권한 자체가 없으면 불가
+  const wp = cat.write_perm || 'dept_lead';
+  if (wp === 'master') return grade === 'master';
+  if (wp === 'all_admin') return ['vice','dept','master'].includes(grade);  // 모든 관리자
+  if (wp === 'dept_lead') return ['vice','master'].includes(grade) || (grade==='dept' && (!cat.dept || cat.dept==='공용' || currentUser.part===cat.dept));
+  if (wp === 'dept_only') {
+    if (grade==='master'||grade==='vice') return true;
+    return grade==='dept' && currentUser.part && currentUser.part===cat.dept;
+  }
+  return false;
+}
 function canWrite() {
   if (!currentUser) return false;
-  if (currentUser.role === 'admin') return true;
   const cat = allCats.find(c => c.id === currentCatId);
-  if (!cat) return false;
-  if (cat.name === '구매팀' && currentUser.role === 'purchase') return true;
-  if (cat.name === '인사팀' && currentUser.role === 'hr') return true;
-  return false;
+  return canWriteCatObj(cat);
 }
 
 // ── PAGES ─────────────────────────────────────────
@@ -622,6 +659,8 @@ function goPage(page) {
     const nb = document.getElementById('nav-perm');
     if (nb) nb.classList.add('active');
     renderPermSettings(area);
+  } else if (page === 'boardsettings') {
+    renderBoardSettings(area);
   } else if (page === 'profile') {
     renderProfile(area);
   } else if (page === 'saved') {
@@ -657,7 +696,7 @@ async function renderBoard(area) {
   const filtered = (posts || []).filter(p => canSee(p) && (!q || p.title.toLowerCase().includes(q) || p.body.toLowerCase().includes(q)));
   const week = new Date(Date.now() - 7*24*60*60*1000).toISOString();
 
-  const catTabs = allCats.map(c =>
+  const catTabs = visibleCats().map(c =>
     `<button class="tab-btn${c.id===currentCatId?' active':''}" onclick="switchCat(${c.id},'${c.name}')">${c.name}</button>`
   ).join('');
   const adminBtn = currentUser.role==='admin' ? `<button class="tab-manage" onclick="openCatModal()"><i class="ti ti-settings"></i> 카테고리 관리</button>` : '';
@@ -2094,6 +2133,10 @@ function openCatModal() {
       `<option value="${ic.v}"${(c.icon||'ti-folder')===ic.v?' selected':''}>${ic.l}</option>`
     ).join('');
     return `<div class="tag-item" style="align-items:center;gap:6px">
+      <span style="display:flex;flex-direction:column">
+        <i class="ti ti-chevron-up" onclick="moveCat(${c.id},-1)" style="cursor:pointer;color:var(--th);font-size:13px"></i>
+        <i class="ti ti-chevron-down" onclick="moveCat(${c.id},1)" style="cursor:pointer;color:var(--th);font-size:13px"></i>
+      </span>
       <select id="ci-${i}" data-id="${c.id}" style="border:0.5px solid var(--crd);border-radius:6px;padding:3px 4px;font-size:12px;background:var(--cr)">${opts}</select>
       <input value="${c.name}" id="cat-f-${i}" data-id="${c.id}" style="flex:1;border:0.5px solid var(--crd);border-radius:6px;padding:6px 10px;font-size:13px;outline:none"/>
       <button onclick="deleteCat(${c.id})" style="background:none;border:none;color:var(--rd);cursor:pointer;padding:4px 6px"><i class="ti ti-trash"></i></button>
@@ -2121,6 +2164,30 @@ async function deleteCat(id) {
   closeCatModal();
   await loadCats();
 }
+async function moveCat(id, dir) {
+  // 모달에 입력 중인 이름·아이콘 먼저 저장 (순서변경 시 입력값 보존)
+  const inputs = document.querySelectorAll('[id^="cat-f-"]');
+  for (const inp of inputs) {
+    const cid = inp.dataset.id;
+    if (!cid) continue;
+    const name = inp.value.trim();
+    const sel = document.querySelector('#ci-' + inp.id.replace('cat-f-',''));
+    const icon = sel ? sel.value : 'ti-folder';
+    if (name) await sb.from('categories').update({name, icon}).eq('id', parseInt(cid));
+  }
+  // 순서 교환
+  const sorted = [...allCats].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+  const idx = sorted.findIndex(c => c.id === id);
+  const swap = idx + dir;
+  if (swap < 0 || swap >= sorted.length) return;
+  const a = sorted[idx], b = sorted[swap];
+  const ao = a.sort_order||0, bo = b.sort_order||0;
+  await sb.from('categories').update({sort_order: bo}).eq('id', a.id);
+  await sb.from('categories').update({sort_order: ao}).eq('id', b.id);
+  await loadCats();
+  openCatModal();
+}
+
 async function saveCats() {
   const nameInputs = document.querySelectorAll('[id^="cat-f-"]');
   const iconInputs = document.querySelectorAll('[id^="ci-"]');
@@ -2343,7 +2410,7 @@ async function renderAll(area) {
   const {data:posts} = await q;
   const filtered = (posts||[]).filter(p=>canSee(p));
   const week = new Date(Date.now()-7*864e5).toISOString();
-  const tabs = allCats.map(c =>
+  const tabs = visibleCats().map(c =>
     `<button class="tab-btn" onclick="switchCat(${c.id},'${c.name}')">${c.name}</button>`
   ).join('');
   const adminBtn = currentUser.role==='admin' ? `<button class="tab-manage" onclick="openCatModal()"><i class="ti ti-settings"></i> 카테고리 관리</button>` : '';
@@ -2475,7 +2542,12 @@ async function renderAppSettings(area){
       <div class="setting-row"><div><div class="setting-title">마지막 업데이트</div><div class="setting-sub">${APP_UPDATED_AT?fmtDateTime(APP_UPDATED_AT):'-'}</div></div></div>
       <div class="setting-row"><div><div class="setting-title">데이터베이스</div><div class="setting-sub">Supabase (한국 리전)</div></div></div>
       <div class="setting-row"><div><div class="setting-title">호스팅</div><div class="setting-sub">GitHub Pages — bnzcoffee.github.io/bonanza-ops</div></div></div>
-    </div>`;
+    </div>
+    ${hasPerm('cat_manage_full') ? `<div class="notif-card" style="margin-bottom:12px">
+      <div class="section-label" style="margin-bottom:8px">게시판(카테고리) 설정</div>
+      <div style="font-size:13px;color:var(--ts);margin-bottom:10px;line-height:1.6">게시판별 이름·순서·담당 부서·작성 권한·열람 권한·색상·숨김을 한 화면에서 관리합니다.</div>
+      <button class="btn-new" onclick="goPage('boardsettings')"><i class="ti ti-layout-list"></i> 게시판 설정 열기</button>
+    </div>` : ''}`;
   setTimeout(()=>{
     const picker=document.getElementById('cfg-cpicker');
     const hex=document.getElementById('cfg-color');
@@ -2593,10 +2665,8 @@ async function saveProfile(){
 
 function canWriteCat(catName){
   if(!currentUser) return false;
-  if(currentUser.role==='admin') return true;
-  if(catName==='구매팀'&&currentUser.role==='purchase') return true;
-  if(catName==='인사팀'&&currentUser.role==='hr') return true;
-  return false;
+  const cat = allCats.find(c => c.name === catName);
+  return canWriteCatObj(cat);
 }
 
 // ── CSS (추가분) ─────────────────────────────────────────────────
@@ -2929,6 +2999,137 @@ function hasPerm(permKey, u) {
     return PERM_DEFAULT[permKey] ? !!PERM_DEFAULT[permKey][idx] : false;
   }
   return !!PERM_MAP[permKey][grade];
+}
+
+// ── 게시판 설정 화면 (총괄·부총괄) ──────────────
+const BOARD_COLORS = ['#3B2314','#A0622A','#1A4B7A','#534AB7','#2D6A4F','#A0291E'];
+const WRITE_PERM_OPTS = [['dept_lead','부서담당 이상'],['dept_only','해당 부서 담당'],['all_admin','모든 관리자'],['master','총괄만']];
+const READ_PERM_OPTS = [['all','전 직원'],['manager','매니저 이상'],['dept','해당 부서만']];
+
+async function renderBoardSettings(area) {
+  if (!hasPerm('cat_manage_full')) { area.innerHTML = '<div style="padding:40px;text-align:center;color:var(--rd)">게시판 설정 권한이 없습니다.</div>'; return; }
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const { data: cats } = await sb.from('categories').select('*').order('sort_order');
+  // 부서 옵션 (parts에서)
+  const { data: parts } = await sb.from('parts').select('name').order('sort_order');
+  const deptOpts = ['', '공용'].concat((parts||[]).map(p=>p.name));
+
+  const rows = (cats||[]).map((c,i) => boardSettingRow(c, i, cats.length, deptOpts)).join('');
+  area.innerHTML = `
+    <div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage('appsettings')"><i class="ti ti-arrow-left"></i> 앱 관리</button></div>
+    <div class="page-header"><div class="page-title">게시판(카테고리) 설정</div><div class="page-sub">게시판별 이름·순서·권한·색상·숨김 관리</div></div>
+    <div id="boardSetList">${rows}</div>
+    <button class="btn-new" style="width:100%;margin-top:6px" onclick="addBoardSetting()"><i class="ti ti-plus"></i> 새 게시판 추가</button>`;
+}
+
+function boardSettingRow(c, i, total, deptOpts) {
+  const dimStyle = c.hidden ? 'opacity:.6' : '';
+  const hiddenTag = c.hidden ? '<span style="font-size:10px;font-weight:700;background:var(--crm);color:var(--ts);border-radius:8px;padding:2px 8px;margin-left:6px">숨김</span>' : '';
+  const deptSel = deptOpts.map(d => `<option value="${d}"${(c.dept||'')===d?' selected':''}>${d||'-'}</option>`).join('');
+  const writeSel = WRITE_PERM_OPTS.map(([v,l]) => `<option value="${v}"${(c.write_perm||'dept_lead')===v?' selected':''}>${l}</option>`).join('');
+  const readSel = READ_PERM_OPTS.map(([v,l]) => `<option value="${v}"${(c.read_perm||'all')===v?' selected':''}>${l}</option>`).join('');
+  const colorChips = BOARD_COLORS.map(col => `<span onclick="setBoardColor(${c.id},'${col}')" data-cat="${c.id}" class="bcolor-${c.id}" style="width:22px;height:22px;border-radius:5px;background:${col};cursor:pointer;border:${(c.color||'#3B2314')===col?'2px solid var(--tm)':'0.5px solid #ccc'};display:inline-block"></span>`).join('');
+  const hToggle = boardHideToggle(c.id, c.hidden);
+  return `<div class="notif-card" id="bset-${c.id}" style="margin-bottom:10px;${dimStyle}">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <span style="display:flex;flex-direction:column">
+        <i class="ti ti-chevron-up" onclick="moveBoardSetting(${c.id},-1)" style="cursor:pointer;color:var(--th);font-size:14px"></i>
+        <i class="ti ti-chevron-down" onclick="moveBoardSetting(${c.id},1)" style="cursor:pointer;color:var(--th);font-size:14px"></i>
+      </span>
+      <span style="width:12px;height:12px;border-radius:3px;background:${c.color||'#3B2314'};flex-shrink:0" id="bdot-${c.id}"></span>
+      <input class="form-input" id="bname-${c.id}" value="${(c.name||'').replace(/"/g,'&quot;')}" style="flex:1;padding:7px 10px;font-weight:600"/>
+      ${hiddenTag}
+      <button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);padding:5px 9px" onclick="deleteBoardSetting(${c.id})"><i class="ti ti-trash"></i></button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label style="font-size:11px;font-weight:600;color:var(--ts);display:block;margin-bottom:3px">담당 부서</label>
+        <select class="form-input" id="bdept-${c.id}" style="padding:7px 10px;font-size:13px">${deptSel}</select></div>
+      <div><label style="font-size:11px;font-weight:600;color:var(--ts);display:block;margin-bottom:3px">작성 권한</label>
+        <select class="form-input" id="bwrite-${c.id}" style="padding:7px 10px;font-size:13px">${writeSel}</select></div>
+      <div><label style="font-size:11px;font-weight:600;color:var(--ts);display:block;margin-bottom:3px">열람 권한</label>
+        <select class="form-input" id="bread-${c.id}" style="padding:7px 10px;font-size:13px">${readSel}</select></div>
+      <div><label style="font-size:11px;font-weight:600;color:var(--ts);display:block;margin-bottom:3px">색상</label>
+        <div style="display:flex;gap:5px;align-items:center;padding-top:3px">${colorChips}</div></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:12px;padding-top:10px;border-top:0.5px solid var(--crm)">
+      ${hToggle}
+      <div style="flex:1"><div style="font-size:13px;color:var(--tm);font-weight:500">게시판 표시</div><div style="font-size:11px;color:var(--th)">끄면 직원에게 숨겨집니다 (자료 보존·준비중 게시판)</div></div>
+      <button class="btn-cancel-sm" onclick="saveBoardSetting(${c.id})"><i class="ti ti-device-floppy"></i> 저장</button>
+    </div>
+  </div>`;
+}
+
+function boardHideToggle(id, hidden) {
+  const on = !hidden; // 표시=on
+  const bg = on ? '#2D6A4F' : '#fff';
+  const bc = on ? '#2D6A4F' : '#D9C9B3';
+  const kb = on ? '#fff' : '#B09070';
+  const kl = on ? '18px' : '2px';
+  return `<span onclick="toggleBoardHide(this)" data-id="${id}" data-on="${on?1:0}" style="display:inline-block;width:38px;height:22px;background:${bg};border:1.5px solid ${bc};border-radius:11px;position:relative;cursor:pointer;flex-shrink:0">
+    <span style="position:absolute;top:2px;left:${kl};width:16px;height:16px;border-radius:50%;background:${kb};transition:left .15s"></span></span>`;
+}
+function toggleBoardHide(el) {
+  const on = el.dataset.on === '1';
+  el.dataset.on = on ? '0' : '1';
+  el.style.background = on ? '#fff' : '#2D6A4F';
+  el.style.borderColor = on ? '#D9C9B3' : '#2D6A4F';
+  const knob = el.firstElementChild;
+  knob.style.left = on ? '2px' : '18px';
+  knob.style.background = on ? '#B09070' : '#fff';
+}
+// 색상 선택 (임시 보관 후 저장 시 반영)
+const boardColorPick = {};
+function setBoardColor(id, col) {
+  boardColorPick[id] = col;
+  document.getElementById('bdot-'+id).style.background = col;
+  document.querySelectorAll('.bcolor-'+id).forEach(s => {
+    s.style.border = (s.style.background === col || rgbToHex(s.style.background) === col) ? '2px solid var(--tm)' : '0.5px solid #ccc';
+  });
+}
+function rgbToHex(rgb) {
+  const m = rgb.match(/\d+/g); if (!m) return rgb;
+  return '#' + m.slice(0,3).map(x=>parseInt(x).toString(16).padStart(2,'0')).join('').toUpperCase();
+}
+
+async function saveBoardSetting(id) {
+  const name = document.getElementById('bname-'+id).value.trim();
+  if (!name) { alert('게시판 이름을 입력해주세요.'); return; }
+  const dept = document.getElementById('bdept-'+id).value;
+  const write_perm = document.getElementById('bwrite-'+id).value;
+  const read_perm = document.getElementById('bread-'+id).value;
+  const hideEl = document.querySelector('[data-id="'+id+'"][data-on]');
+  const hidden = hideEl ? hideEl.dataset.on === '0' : false;
+  const color = boardColorPick[id] || undefined;
+  const payload = { name, dept, write_perm, read_perm, hidden };
+  if (color) payload.color = color;
+  const { error } = await sb.from('categories').update(payload).eq('id', id);
+  if (error) { alert('저장 오류: ' + error.message); return; }
+  await loadCats();
+  alert('저장되었습니다.');
+}
+async function addBoardSetting() {
+  const { data: existing } = await sb.from('categories').select('sort_order').order('sort_order',{ascending:false}).limit(1);
+  const nextOrder = (existing && existing.length) ? (existing[0].sort_order + 1) : 1;
+  await sb.from('categories').insert({name:'새 게시판', icon:'ti-folder', sort_order:nextOrder, color:'#3B2314', write_perm:'dept_lead', read_perm:'all', hidden:false});
+  await loadCats();
+  renderBoardSettings(document.getElementById('contentArea'));
+}
+async function deleteBoardSetting(id) {
+  if (!confirm('이 게시판을 삭제할까요?\n\n＊ 게시판에 작성된 공지가 있다면 함께 보이지 않게 됩니다.\n＊ 보관이 목적이면 삭제 대신 "게시판 표시"를 꺼주세요.')) return;
+  await sb.from('categories').delete().eq('id', id);
+  await loadCats();
+  renderBoardSettings(document.getElementById('contentArea'));
+}
+async function moveBoardSetting(id, dir) {
+  const sorted = [...allCats].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+  const idx = sorted.findIndex(c => c.id === id);
+  const swap = idx + dir;
+  if (swap < 0 || swap >= sorted.length) return;
+  const a = sorted[idx], b = sorted[swap];
+  await sb.from('categories').update({sort_order: b.sort_order||0}).eq('id', a.id);
+  await sb.from('categories').update({sort_order: a.sort_order||0}).eq('id', b.id);
+  await loadCats();
+  renderBoardSettings(document.getElementById('contentArea'));
 }
 
 // ── 권한 설정 화면 ──────────────────────────────
