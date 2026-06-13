@@ -218,18 +218,31 @@ textarea.form-input{min-height:120px;resize:vertical}
 .setting-sub{font-size:11px;color:var(--th);margin-top:2px}
 .notif-card{background:#fff;border:0.5px solid var(--crd);border-radius:12px;padding:18px;margin-bottom:12px}
 @media(max-width:768px){
-  #mainScreen{flex-direction:column}
-  .sidebar{width:100%;min-height:auto;flex-direction:row;padding:0;border-right:none;border-bottom:0.5px solid var(--crd);overflow-x:auto;flex-shrink:0}
-  .sidebar-section{display:flex;flex-direction:row;padding:0;margin-bottom:0;align-items:center}
-  .sidebar-label{display:none}
-  .nav-btn{padding:10px 8px;border-radius:0;font-size:12px;white-space:nowrap;border-bottom:2px solid transparent;flex-shrink:0}
-  .nav-btn.active{background:none;border-bottom-color:var(--br);color:var(--br)}
-  .nav-btn i{display:none}
-  .sidebar-footer{display:none}
-  #adminNav,#requestNav{flex-direction:row}
-  .content{padding:14px}
-  .board-tabs{flex-wrap:nowrap;overflow-x:auto}
+  /* 햄버거 토글 방식: 사이드바를 화면 밖에 두고, 열면 슬라이드 인 */
+  .hamburger-btn{display:block!important}
+  #mainScreen{flex-direction:row;position:relative}
+  .sidebar{position:fixed;top:50px;left:0;bottom:0;width:74%;max-width:280px;z-index:120;
+    transform:translateX(-100%);transition:transform .25s ease;box-shadow:2px 0 16px rgba(0,0,0,.15);
+    overflow-y:auto;min-height:auto;border-right:0.5px solid var(--crd);background:#fff}
+  .sidebar.open{transform:translateX(0)}
+  .sidebar-overlay{display:none;position:fixed;top:50px;left:0;right:0;bottom:0;background:rgba(43,26,14,.4);z-index:110}
+  .sidebar-overlay.open{display:block}
+  .content{padding:14px;width:100%}
+  .board-tabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
   .tab-btn{white-space:nowrap;flex-shrink:0}
+  .topbar{padding:0 12px}
+  .logo{font-size:13px}
+  .user-badge{display:none}
+  .topbar-btn{padding:4px 8px}
+  /* 콘텐츠 내부 그리드/표 가로 넘침 방지 */
+  .form-grid{grid-template-columns:1fr!important}
+  .stats-grid{grid-template-columns:1fr 1fr!important}
+  table{font-size:12px}
+  .page-title{font-size:18px}
+}
+@media(max-width:768px){
+  /* 스크롤 시에도 본문이 사이드바에 가리지 않도록 */
+  body{overflow-x:hidden}
 }
 
 .staff-list-table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;border:0.5px solid var(--crd)}
@@ -256,7 +269,10 @@ textarea.form-input{min-height:120px;resize:vertical}
 
 <!-- TOPBAR -->
 <div class="topbar" id="topbar">
-  <div class="logo" onclick="goPage('all')" style="cursor:pointer">Bonanza Coffee — 운영 매뉴얼</div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <button class="hamburger-btn" id="hamburgerBtn" onclick="toggleSidebar()" aria-label="메뉴" style="display:none;background:none;border:none;color:#fff;cursor:pointer;padding:4px"><i class="ti ti-menu-2" style="font-size:22px"></i></button>
+    <div class="logo" onclick="goPage('all')" style="cursor:pointer">Bonanza Coffee — 운영 매뉴얼</div>
+  </div>
   <div class="topbar-right">
     <button class="topbar-btn" onclick="toggleNotifPanel()" aria-label="알림">
       <i class="ti ti-bell"></i>
@@ -313,6 +329,7 @@ textarea.form-input{min-height:120px;resize:vertical}
       <i class="ti ti-chevron-right" style="font-size:12px;color:var(--th);margin-left:auto"></i>
     </div>
   </nav>
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
   <div class="content" id="contentArea" oncontextmenu="return false" ondragstart="return false"></div>
 </div>
 
@@ -614,6 +631,7 @@ function canWrite() {
 
 // ── PAGES ─────────────────────────────────────────
 function goPage(page) {
+  if (window.innerWidth <= 768) closeSidebar();
   currentPage = page;
   const area = document.getElementById('contentArea');
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -2796,6 +2814,20 @@ async function downloadManualPdf() {
   w.document.close();
   // 렌더 후 인쇄 다이얼로그 (PDF로 저장 선택 가능)
   setTimeout(() => { w.focus(); w.print(); }, 600);
+}
+
+function toggleSidebar() {
+  const sb = document.querySelector('.sidebar');
+  const ov = document.getElementById('sidebarOverlay');
+  if (!sb) return;
+  const open = sb.classList.toggle('open');
+  if (ov) ov.classList.toggle('open', open);
+}
+function closeSidebar() {
+  const sb = document.querySelector('.sidebar');
+  const ov = document.getElementById('sidebarOverlay');
+  if (sb) sb.classList.remove('open');
+  if (ov) ov.classList.remove('open');
 }
 
 function goManualEdit() {
