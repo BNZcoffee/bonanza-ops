@@ -852,7 +852,7 @@ async function renderPostDetail(area) {
       const isVid = vidExts.includes(ext);
       let preview = '';
       if (isImg) {
-        preview = `<div class="wm-wrap" style="margin:6px 0 10px"><div class="watermark">${wmText}&nbsp;&nbsp;&nbsp;${wmText}&nbsp;&nbsp;&nbsp;${wmText}</div><img src="${a.file_url}" style="max-width:100%;border-radius:8px;border:0.5px solid var(--crd);display:block;-webkit-user-drag:none;user-select:none;pointer-events:none" loading="lazy" oncontextmenu="return false" ondragstart="return false"/></div>`;
+        preview = `<div class="wm-wrap" style="margin:6px 0 10px;cursor:zoom-in" onclick="openImageZoom('${a.file_url}')"><div class="watermark">${wmText}&nbsp;&nbsp;&nbsp;${wmText}&nbsp;&nbsp;&nbsp;${wmText}</div><img src="${a.file_url}" style="max-width:100%;border-radius:8px;border:0.5px solid var(--crd);display:block;-webkit-user-drag:none;user-select:none;pointer-events:none" loading="lazy" oncontextmenu="return false" ondragstart="return false"/><div style="position:absolute;bottom:8px;right:8px;background:rgba(43,26,14,.6);color:#fff;font-size:11px;padding:3px 8px;border-radius:6px;pointer-events:none"><i class="ti ti-zoom-in"></i> 탭하여 확대</div></div>`;
       } else if (isVid) {
         preview = `<video src="${a.file_url}" controls controlslist="nodownload" style="max-width:100%;border-radius:8px;border:0.5px solid var(--crd);margin:6px 0 10px;display:block"></video>`;
       }
@@ -915,6 +915,7 @@ async function renderPostDetail(area) {
 
   const catNameForEdit = allCats.find(c=>c.id===p.category_id)?.name||'';
   const editBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openEditPost(${p.id})"><i class="ti ti-edit"></i> 수정</button>` : '';
+  const deletePostBtn = canDeletePost(p) ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px;color:var(--rd);border-color:var(--rd)" onclick="deletePost(${p.id})"><i class="ti ti-trash"></i> 삭제</button>` : '';
   const remindBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px;color:var(--or,#B85C00);border-color:var(--or,#B85C00)" onclick="openRemindModal(${p.id})"><i class="ti ti-bell-ringing"></i> 리마인드</button>` : '';
 
   area.innerHTML = `
@@ -928,6 +929,7 @@ async function renderPostDetail(area) {
           <span>열람: ${accLbl}</span>
           <span style="margin-left:auto;display:flex;gap:8px">
             ${editBtn}
+            ${deletePostBtn}
             ${remindBtn}
             <button class="btn-cancel-sm" id="favBtn" style="font-size:12px;padding:5px 10px;${isFav?'color:var(--gd);border-color:var(--gd)':''}" onclick="toggleFav(${p.id})"><i class="ti ti-bookmark${isFav?'-filled':''}"></i> ${isFav?'저장됨':'저장'}</button>
             <button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openShareModal(${p.id})"><i class="ti ti-share"></i> 링크 공유</button>
@@ -944,6 +946,61 @@ async function renderPostDetail(area) {
       ${readListHtml}
       ${cmtHtml}
     </div>`;
+}
+
+// 이미지 확대 뷰어 (워터마크 유지 — 캡처 시에도 워터마크 표시, 핀치 줌 가능)
+function openImageZoom(url) {
+  if (!currentUser) return;
+  const wmText = `${currentUser.code} ${currentUser.name} ${currentUser.store}`;
+  // 기존 뷰어 제거
+  const old = document.getElementById('imgZoomOverlay');
+  if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'imgZoomOverlay';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(20,12,6,.92);display:flex;align-items:center;justify-content:center;touch-action:pinch-zoom;overflow:auto';
+  ov.setAttribute('oncontextmenu','return false');
+  // 워터마크 다수 + 이미지 (이미지 위에 워터마크 오버레이)
+  let wmTiles = '';
+  for (let i=0;i<40;i++){ wmTiles += `<div style="color:rgba(255,255,255,.16);font-size:14px;font-weight:700;transform:rotate(-28deg);white-space:nowrap;letter-spacing:2px">${wmText}</div>`; }
+  ov.innerHTML = `
+    <div style="position:absolute;inset:0;display:grid;grid-template-columns:repeat(3,1fr);gap:60px 30px;align-content:center;justify-items:center;pointer-events:none;z-index:2">${wmTiles}</div>
+    <img src="${url}" style="max-width:96vw;max-height:92vh;object-fit:contain;z-index:1;-webkit-user-drag:none;user-select:none" oncontextmenu="return false" ondragstart="return false"/>
+    <button onclick="document.getElementById('imgZoomOverlay').remove()" style="position:fixed;top:14px;right:14px;z-index:3;background:rgba(255,255,255,.15);border:none;color:#fff;width:40px;height:40px;border-radius:50%;font-size:20px;cursor:pointer">✕</button>
+    <div style="position:fixed;bottom:16px;left:0;right:0;text-align:center;color:rgba(255,255,255,.7);font-size:12px;z-index:3;pointer-events:none">두 손가락으로 확대 · 빈 곳을 탭하면 닫힙니다</div>`;
+  // 배경 탭하면 닫기 (이미지 제외)
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
+async function deletePost(postId) {
+  // 권한 재확인 (대상 글 로드)
+  const { data: post } = await sb.from('posts').select('*').eq('id', postId).single();
+  if (!post) { alert('게시글을 찾을 수 없습니다.'); return; }
+  if (!canDeletePost(post)) { alert('이 게시글을 삭제할 권한이 없습니다. (작성자·부총괄·총괄만 가능)'); return; }
+
+  // 1차 확인
+  if (!confirm('이 게시글을 삭제하시겠습니까?\n\n＊ 삭제하면 복구할 수 없습니다.\n＊ 첨부파일·댓글·확인 기록도 함께 삭제됩니다.')) return;
+
+  // 2차 확인: 본인 이름 입력 (실수 방지)
+  const typed = prompt('실수 방지를 위해 본인 이름을 입력해주세요.\n(' + currentUser.name + ')');
+  if (typed === null) return;  // 취소
+  if (typed.trim() !== currentUser.name) { alert('이름이 일치하지 않아 삭제를 취소했습니다.'); return; }
+
+  // 연관 데이터 삭제 후 게시글 삭제
+  try {
+    await sb.from('attachments').delete().eq('post_id', postId);
+    await sb.from('comments').delete().eq('post_id', postId);
+    await sb.from('post_reads').delete().eq('post_id', postId);
+    await sb.from('post_favorites').delete().eq('post_id', postId);
+    await sb.from('post_reminders').delete().eq('post_id', postId);
+    const { error } = await sb.from('posts').delete().eq('id', postId);
+    if (error) { alert('삭제 오류: ' + error.message); return; }
+    alert('게시글이 삭제되었습니다.');
+    updateNotifDot();
+    goPage('board');
+  } catch(e) {
+    alert('삭제 중 오류가 발생했습니다: ' + e.message);
+  }
 }
 
 async function confirmRead(postId) {
@@ -1760,7 +1817,7 @@ async function openEditUser(userId){
       <div><label class="form-label">총괄 마스터</label>
         <label style="display:flex;align-items:center;gap:8px;padding:9px 0;font-size:13px;color:var(--tm);cursor:pointer">
           <input type="checkbox" id="eu_master" ${u?.is_master?'checked':''} style="width:auto"/>
-          전체 권한 (이사·대표·운영총괄)
+          총괄 (전체 권한)
         </label>
       </div>
       <div><label class="form-label">부총괄</label>
@@ -2862,7 +2919,8 @@ async function downloadManualPdf() {
     @page { margin: 18mm 15mm; }
     * { box-sizing:border-box; }
     body { font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif; color:#2A1A0E; line-height:1.7; font-size:12pt; position:relative; }
-    .wm { position:fixed; top:45%; left:0; right:0; text-align:center; font-size:40pt; color:rgba(160,98,42,0.08); transform:rotate(-25deg); z-index:-1; white-space:nowrap; pointer-events:none; }
+    .wm { position:fixed; top:0; left:0; right:0; bottom:0; z-index:-1; pointer-events:none; overflow:hidden; }
+    .wm-row { position:absolute; width:200%; text-align:center; font-size:13pt; color:rgba(160,98,42,0.07); transform:rotate(-28deg); white-space:nowrap; letter-spacing:2px; }
     .cover { text-align:center; padding:40mm 0 30mm; border-bottom:2px solid #C8963C; margin-bottom:10mm; page-break-after:always; }
     .cover .brand { font-size:11pt; letter-spacing:3px; color:#6B3E2A; }
     .cover h1 { font-size:26pt; color:#3B2314; margin:6mm 0; }
@@ -2877,7 +2935,7 @@ async function downloadManualPdf() {
     ul { margin:4px 0 8px 18px; }
     .foot { margin-top:10mm; padding-top:4mm; border-top:0.5px solid #D9C9B3; font-size:9pt; color:#B09070; text-align:center; }
   </style></head><body>
-    <div class="wm">${wm}　　${wm}</div>
+    <div class="wm">${Array.from({length:14}).map((_,i)=>`<div class="wm-row" style="top:${i*8}%;left:-50%">${(wm+'　　　').repeat(6)}</div>`).join('')}</div>
     <div class="cover">
       <div class="brand">BONANZA COFFEE KOREA</div>
       <h1>운영 매뉴얼<br><span style="font-size:16pt">${audLabel}</span></h1>
@@ -3371,6 +3429,14 @@ function canSeeReq(r) {
   return false;
 }
 // 신청 작성 권한
+// 게시글 삭제 권한: 작성자 본인 / 부총괄 / 총괄
+function canDeletePost(post) {
+  if (!currentUser || !post) return false;
+  const grade = userGrade(currentUser);
+  if (grade === 'master' || grade === 'vice') return true;
+  return post.author_id === currentUser.id;  // 작성자 본인
+}
+
 function canWriteReq() {
   return currentUser && hasPerm('req_write');
 }
