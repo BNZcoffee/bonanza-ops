@@ -2851,24 +2851,47 @@ function canSeeAdminManual() {
   if (!currentUser) return false;
   return hasPerm('manual_read_admin');
 }
+// 매뉴얼 3파트 열람 권한
+// user(매장직원용): 전원 / dept(부서담당용): 부서담당+부총괄+총괄 / admin(총괄·부총괄용): 부총괄+총괄
+function canSeeManual(aud) {
+  if (!currentUser) return false;
+  const grade = userGrade(currentUser);
+  if (aud === 'user') return true;
+  if (aud === 'dept') return ['dept','vice','master'].includes(grade);
+  if (aud === 'admin') return ['vice','master'].includes(grade);
+  return false;
+}
+// 열람 가능한 매뉴얼 파트 목록
+function availableManualAudiences() {
+  return [['user','매장 직원용'],['dept','부서담당용'],['admin','총괄·부총괄용']].filter(([a]) => canSeeManual(a));
+}
 
 // 현재 보고 있는 매뉴얼 대상 (user/admin)
 let manualAudience = 'user';
 
 async function renderManual(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  const showAdmin = canSeeAdminManual();
-  // 기본 탭: 매장 직원은 user 고정
-  if (!showAdmin) manualAudience = 'user';
+  // 열람 가능한 파트 목록 (권한별)
+  const auds = availableManualAudiences();
+  // 현재 선택된 파트가 열람 불가하면 첫 파트로
+  if (!auds.find(([a]) => a === manualAudience)) manualAudience = auds[0][0];
 
   const { data: sections } = await sb.from('manual_sections')
     .select('*').eq('audience', manualAudience).order('sort_order');
 
-  const tabBar = showAdmin ? `
-    <div style="display:flex;gap:8px;margin-bottom:16px">
-      <button class="tab-btn${manualAudience==='user'?' active':''}" onclick="manualAudience='user';renderManual(document.getElementById('contentArea'))">매장 직원용</button>
-      <button class="tab-btn${manualAudience==='admin'?' active':''}" onclick="manualAudience='admin';renderManual(document.getElementById('contentArea'))">관리자용</button>
+  // 파트가 2개 이상일 때만 탭 표시
+  const tabBar = auds.length > 1 ? `
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      ${auds.map(([a,label]) => `<button class="tab-btn${manualAudience===a?' active':''}" onclick="manualAudience='${a}';renderManual(document.getElementById('contentArea'))">${label}</button>`).join('')}
     </div>` : '';
+
+  // 웹 매뉴얼(그림 포함) 링크 배너
+  const webManualUrl = 'https://bnzcoffee.github.io/bonanza-ops/manual.html';
+  const webBanner = `<a href="${webManualUrl}" target="_blank" style="display:flex;align-items:center;gap:10px;background:var(--gnb);border:0.5px solid var(--gn);border-radius:10px;padding:11px 14px;margin-bottom:16px;text-decoration:none;color:#1d4d38">
+    <i class="ti ti-photo" style="font-size:18px"></i>
+    <div style="flex:1"><div style="font-size:13px;font-weight:600">화면 예시 그림이 포함된 웹 설명서 보기</div><div style="font-size:11px;opacity:.8">새 창에서 열립니다 · 항상 최신 버전</div></div>
+    <i class="ti ti-external-link" style="font-size:15px"></i>
+  </a>`;
 
   let body = '';
   if (!sections || !sections.length) {
@@ -2894,6 +2917,7 @@ async function renderManual(area) {
       <div style="display:flex;gap:6px">${pdfBtn}${editBtn}</div>
     </div>
     ${tabBar}
+    ${webBanner}
     ${body}`;
 }
 
@@ -2983,9 +3007,9 @@ async function renderManualEdit(area) {
   const { data: sections } = await sb.from('manual_sections')
     .select('*').eq('audience', manualEditAudience).order('sort_order');
 
-  const tabBar = `<div style="display:flex;gap:8px;margin-bottom:16px">
-    <button class="tab-btn${manualEditAudience==='user'?' active':''}" onclick="manualEditAudience='user';renderManualEdit(document.getElementById('contentArea'))">매장 직원용</button>
-    <button class="tab-btn${manualEditAudience==='admin'?' active':''}" onclick="manualEditAudience='admin';renderManualEdit(document.getElementById('contentArea'))">관리자용</button>
+  const editParts = [['user','매장 직원용'],['dept','부서담당용'],['admin','총괄·부총괄용']];
+  const tabBar = `<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+    ${editParts.map(([a,label]) => `<button class="tab-btn${manualEditAudience===a?' active':''}" onclick="manualEditAudience='${a}';renderManualEdit(document.getElementById('contentArea'))">${label}</button>`).join('')}
   </div>`;
 
   const secList = (sections||[]).map((s, i) => `
