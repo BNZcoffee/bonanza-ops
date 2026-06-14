@@ -3200,6 +3200,9 @@ function userGrade(u) {
   return 'staff';
 }
 
+// 개인 예외 권한 저장소 { user_id: { perm_key: bool } } — 현재 로그인 사용자 것만
+let MY_PERM_OVERRIDE = {};
+
 // 권한 맵 로드 (로그인 후 호출)
 async function loadPermMap() {
   PERM_MAP = {};
@@ -3208,19 +3211,31 @@ async function loadPermMap() {
     PERM_MAP[it.key] = {};
     GRADES.forEach((gr, i) => { PERM_MAP[it.key][gr] = PERM_DEFAULT[it.key] ? !!PERM_DEFAULT[it.key][i] : false; });
   }));
-  // DB 저장값으로 덮어쓰기
+  // DB 저장값으로 덮어쓰기 (등급별)
   try {
     const { data } = await sb.from('role_permissions').select('*');
     (data||[]).forEach(row => {
       if (PERM_MAP[row.perm_key]) PERM_MAP[row.perm_key][row.grade] = !!row.enabled;
     });
   } catch(e) { /* 테이블 없으면 기본값 사용 */ }
+  // 현재 사용자의 개인 예외 권한 로드
+  MY_PERM_OVERRIDE = {};
+  try {
+    if (currentUser) {
+      const { data: up } = await sb.from('user_permissions').select('perm_key,enabled').eq('user_id', currentUser.id);
+      (up||[]).forEach(row => { MY_PERM_OVERRIDE[row.perm_key] = !!row.enabled; });
+    }
+  } catch(e) { /* 테이블 없으면 무시 */ }
 }
 
-// 권한 판단 (총괄은 항상 true)
+// 권한 판단 (총괄은 항상 true, 개인 예외가 등급 기본값보다 우선)
 function hasPerm(permKey, u) {
   const grade = userGrade(u);
   if (grade === 'master') return true;  // 총괄은 모든 권한
+  // 개인 예외 권한 (현재 로그인 사용자 본인에 대해서만 적용)
+  if ((!u || u === currentUser) && MY_PERM_OVERRIDE && Object.prototype.hasOwnProperty.call(MY_PERM_OVERRIDE, permKey)) {
+    return MY_PERM_OVERRIDE[permKey];
+  }
   if (!PERM_MAP || !PERM_MAP[permKey]) {
     // 맵 미로드 시 기본값
     const idx = GRADES.indexOf(grade);
@@ -3404,6 +3419,16 @@ async function renderPermSettings(area) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;flex-wrap:wrap;gap:10px">
       <div style="font-size:12px;color:var(--th)">＊ 총괄 열은 항상 모든 권한이 켜져 있어 수정할 수 없습니다.</div>
       <button class="btn-submit" onclick="savePermSettings()"><i class="ti ti-device-floppy"></i> 설정 저장</button>
+    </div>
+
+    <div class="notif-card" style="margin-top:22px">
+      <div class="section-label" style="margin-bottom:6px">개인별 예외 권한</div>
+      <div style="font-size:13px;color:var(--ts);margin-bottom:12px;line-height:1.6">특정 직원에게 등급 기본 권한과 다르게 기능을 <b>추가하거나 제거</b>할 수 있습니다. (예: 인사팀 담당에게 인원 현황 수정 권한 부여)<br>개인 예외는 해당 직원의 등급 기본값보다 우선 적용됩니다.</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+        <div class="search-box" style="flex:1"><i class="ti ti-search" style="color:var(--th)"></i><input id="permUserSearch" placeholder="직원 이름 검색..." oninput="searchPermUser()" autocomplete="off"/></div>
+      </div>
+      <div id="permUserResults"></div>
+      <div id="permUserDetail"></div>
     </div>`;
 }
 
@@ -3431,6 +3456,127 @@ async function savePermSettings() {
   applyMenuPermissions();
   alert('권한 설정이 저장되었습니다.');
 }
+
+// ── 개인별 예외 권한 ──────────────────────────────
+let permSelectedUser = null;
+
+async function searchPermUser() {
+  const q = (document.getElementById('permUserSearch')?.value || '').trim();
+  const box = document.getElementById('permUserResults');
+  if (!box) return;
+  if (q.length < 1) { box.innerHTML = ''; return; }
+  const { data } = await sb.from('users').select('id,name,store,role,part,is_master,is_vice_master,active').ilike('name', '%'+q+'%').limit(10);
+  if (!data || !data.length) { box.innerHTML = '<div style="font-size:13px;color:var(--th);padding:8px">검색 결과가 없습니다.</div>'; return; }
+  box.innerHTML = data.map(u => `<div onclick="selectPermUser('${u.id}')" style="display:flex;align-items:center;gap:8px;padding:9px 10px;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:5px;cursor:pointer;background:#fff">
+    <span style="font-weight:600;font-size:13px">${u.name}</span>
+    <span style="font-size:11px;color:var(--th)">${u.store||''} · ${GRADE_LABEL[userGrade(u)]}</span>
+    ${!u.active?'<span style="font-size:10px;color:var(--rd)">(퇴사)</span>':''}
+    <i class="ti ti-chevron-right" style="margin-left:auto;color:var(--th)"></i>
+  </div>`).join('');
+}
+
+async function selectPermUser(userId) {
+  const { data: u } = await sb.from('users').select('*').eq('id', userId).single();
+  if (!u) return;
+  permSelectedUser = u;
+  document.getElementById('permUserResults').innerHTML = '';
+  document.getElementById('permUserSearch').value = u.name;
+  // 이 직원의 개인 예외 권한 로드
+  const { data: overrides } = await sb.from('user_permissions').select('perm_key,enabled').eq('user_id', userId);
+  const ovMap = {};
+  (overrides||[]).forEach(o => { ovMap[o.perm_key] = !!o.enabled; });
+  const grade = userGrade(u);
+  const gi = GRADES.indexOf(grade);
+
+  let rows = '';
+  PERM_DEFS.forEach(grp => {
+    rows += `<tr><td colspan="3" style="padding:9px 10px 4px;font-size:11px;font-weight:700;color:var(--brm);background:var(--cr)">${grp.group}</td></tr>`;
+    grp.items.forEach(it => {
+      const base = PERM_MAP[it.key] ? !!PERM_MAP[it.key][grade] : (PERM_DEFAULT[it.key]?!!PERM_DEFAULT[it.key][gi]:false);
+      const hasOv = Object.prototype.hasOwnProperty.call(ovMap, it.key);
+      const effective = hasOv ? ovMap[it.key] : base;
+      // 상태 표시: 기본 / 예외추가 / 예외제거
+      let stateLabel = '';
+      if (hasOv && ovMap[it.key] !== base) {
+        stateLabel = ovMap[it.key] ? '<span style="font-size:9px;color:var(--gn);font-weight:700">예외 추가</span>' : '<span style="font-size:9px;color:var(--rd);font-weight:700">예외 제거</span>';
+      }
+      const on = effective;
+      const bg = on ? '#2D6A4F' : '#fff';
+      const bc = on ? '#2D6A4F' : '#D9C9B3';
+      const kb = on ? '#fff' : '#B09070';
+      const kl = on ? '18px' : '2px';
+      rows += `<tr>
+        <td style="padding:8px 10px;border-bottom:0.5px solid var(--crm);font-size:13px">${it.label}<div style="font-size:10px;color:var(--th)">기본: ${base?'허용':'차단'} ${stateLabel}</div></td>
+        <td style="padding:8px;border-bottom:0.5px solid var(--crm);text-align:right">
+          <span onclick="togglePermUserCell(this,'${it.key}',${base})" data-key="${it.key}" data-on="${on?1:0}" data-base="${base?1:0}" style="display:inline-block;width:38px;height:22px;background:${bg};border:1.5px solid ${bc};border-radius:11px;position:relative;cursor:pointer">
+          <span style="position:absolute;top:2px;left:${kl};width:16px;height:16px;border-radius:50%;background:${kb};transition:left .15s"></span></span>
+        </td>
+      </tr>`;
+    });
+  });
+
+  document.getElementById('permUserDetail').innerHTML = `
+    <div style="border:0.5px solid var(--crd);border-radius:10px;padding:14px;margin-top:10px;background:var(--cr)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div><span style="font-weight:600">${u.name}</span> <span style="font-size:12px;color:var(--th)">${u.store||''} · 등급: ${GRADE_LABEL[grade]}</span></div>
+        <button class="btn-cancel-sm" style="padding:4px 8px" onclick="closePermUser()"><i class="ti ti-x"></i></button>
+      </div>
+      <div style="font-size:11px;color:var(--th);margin-bottom:8px">토글을 등급 기본값과 다르게 바꾸면 개인 예외로 저장됩니다. 기본값과 같게 두면 예외가 해제됩니다.</div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><tbody>${rows}</tbody></table></div>
+      <div style="text-align:right;margin-top:12px">
+        <button class="btn-submit" style="font-size:13px;padding:8px 18px" onclick="saveUserPerms()"><i class="ti ti-device-floppy"></i> 개인 권한 저장</button>
+      </div>
+    </div>`;
+}
+
+function togglePermUserCell(el, key, base) {
+  const on = el.dataset.on === '1';
+  el.dataset.on = on ? '0' : '1';
+  el.style.background = on ? '#fff' : '#2D6A4F';
+  el.style.borderColor = on ? '#D9C9B3' : '#2D6A4F';
+  el.firstElementChild.style.left = on ? '2px' : '18px';
+  el.firstElementChild.style.background = on ? '#B09070' : '#fff';
+}
+
+function closePermUser() {
+  permSelectedUser = null;
+  document.getElementById('permUserDetail').innerHTML = '';
+  document.getElementById('permUserSearch').value = '';
+}
+
+async function saveUserPerms() {
+  if (!permSelectedUser) return;
+  if (!hasPerm('perm_setting')) { alert('권한이 없습니다.'); return; }
+  const cells = document.querySelectorAll('#permUserDetail [data-key]');
+  const toUpsert = [];
+  const toDelete = [];
+  cells.forEach(c => {
+    const on = c.dataset.on === '1';
+    const base = c.dataset.base === '1';
+    if (on !== base) {
+      // 기본값과 다르면 예외로 저장
+      toUpsert.push({ user_id: permSelectedUser.id, perm_key: c.dataset.key, enabled: on });
+    } else {
+      // 기본값과 같으면 예외 해제(삭제)
+      toDelete.push(c.dataset.key);
+    }
+  });
+  try {
+    if (toUpsert.length) {
+      const { error } = await sb.from('user_permissions').upsert(toUpsert, { onConflict: 'user_id,perm_key' });
+      if (error) { alert('저장 오류: ' + error.message); return; }
+    }
+    for (const key of toDelete) {
+      await sb.from('user_permissions').delete().eq('user_id', permSelectedUser.id).eq('perm_key', key);
+    }
+    // 본인 권한을 바꾼 경우 즉시 반영
+    if (permSelectedUser.id === currentUser.id) { await loadPermMap(); applyMenuPermissions(); }
+    alert('개인 권한이 저장되었습니다.');
+  } catch(e) {
+    alert('저장 중 오류: ' + e.message);
+  }
+}
+
 
 // 인원현황 수정 권한: 총괄 마스터(운영총괄) 또는 인사팀만
 function canEditStaff() {
