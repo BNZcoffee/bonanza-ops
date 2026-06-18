@@ -319,6 +319,7 @@ textarea.form-input{min-height:120px;resize:vertical}
     <div class="sidebar-section" id="requestNav" style="display:none">
       <div class="sidebar-label">업무 신청</div>
       <button class="nav-btn" onclick="goPage('requests')" id="nav-requests"><i class="ti ti-clipboard-list"></i> 업무 신청<span class="nav-new" id="reqNavBadge" style="display:none">N</span></button>
+      <button class="nav-btn" onclick="goPage('reqarchive')" id="nav-reqarchive"><i class="ti ti-archive"></i> 완료 내역</button>
       <button class="nav-btn" onclick="goPage('reqadmin')" id="nav-reqadmin" style="display:none"><i class="ti ti-settings-automation"></i> 신청 유형 관리</button>
     </div>
     <div class="sidebar-section" id="adminNav" style="display:none">
@@ -703,6 +704,10 @@ function goPage(page) {
     const nb = document.getElementById('nav-requests');
     if (nb) nb.classList.add('active');
     renderRequests(area);
+  } else if (page === 'reqarchive') {
+    const nb = document.getElementById('nav-reqarchive');
+    if (nb) nb.classList.add('active');
+    renderReqArchive(area);
   } else if (page === 'reqnew') {
     renderReqNew(area);
   } else if (page === 'reqdetail') {
@@ -3378,6 +3383,9 @@ function applyMenuPermissions() {
   show('adminNav', anyAdmin);
   // 업무 신청 섹션
   show('requestNav', hasPerm('req_write') || hasPerm('req_process'));
+  // 완료 내역: 매니저·관리자 전원 열람 (매장 일반 직원 제외)
+  const arcCanView = currentUser.is_master || currentUser.role === 'admin' || currentUser.role === 'manager' || !!currentUser.part || currentUser.is_vice_master;
+  show('nav-reqarchive', arcCanView);
   show('nav-reqadmin', hasPerm('req_type_manage'));
   // 개별 메뉴
   show('nav-staff', hasPerm('staff_view'));
@@ -3814,6 +3822,71 @@ function canWriteReq() {
 }
 
 // ── 신청 목록 ────────────────────────────────────────────────────
+let arcType = '';   // 완료내역 유형 필터
+let arcStore = '';  // 완료내역 매장 필터
+let arcQ = '';      // 완료내역 검색
+
+// 완료 내역 아카이브 — 모든 매니저·관리자 열람, 유형·매장 필터
+async function renderReqArchive(area) {
+  // 열람 권한: 매니저 + 관리자(운영팀/부서담당/부총괄/총괄). 매장 일반 직원은 제외
+  const g = userGrade(currentUser);
+  const canView = currentUser.is_master || currentUser.role === 'admin' || currentUser.role === 'manager' || !!currentUser.part || currentUser.is_vice_master;
+  if (!canView) {
+    area.innerHTML = '<div class="page-header"><div class="page-title">완료 내역</div></div><div style="text-align:center;padding:50px;color:var(--th)">열람 권한이 없습니다.</div>';
+    return;
+  }
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const [{ data: reqs }, { data: types }, { data: stores }] = await Promise.all([
+    sb.from('requests').select('*, request_types(name, icon), parts(name)').eq('status','done').order('completed_at', {ascending:false}).order('created_at', {ascending:false}),
+    sb.from('request_types').select('*').order('sort_order'),
+    sb.from('store_options').select('*').order('sort_order')
+  ]);
+  let list = reqs || [];
+
+  // 필터 적용
+  if (arcType) list = list.filter(r => String(r.type_id) === String(arcType));
+  if (arcStore) list = list.filter(r => r.store === arcStore);
+  if (arcQ) {
+    const q = arcQ.toLowerCase();
+    list = list.filter(r => {
+      if ((r.title||'').toLowerCase().includes(q)) return true;
+      const fd = r.form_data || {};
+      return Object.values(fd).some(v => String(v).toLowerCase().includes(q));
+    });
+  }
+
+  const typeOpts = '<option value="">전체 유형</option>' + (types||[]).map(t => `<option value="${t.id}"${String(arcType)===String(t.id)?' selected':''}>${t.name}</option>`).join('');
+  const storeOpts = '<option value="">전체 매장</option>' + (stores||[]).map(s => `<option value="${s.name}"${arcStore===s.name?' selected':''}>${s.name}</option>`).join('');
+
+  const cards = list.length ? list.map(r => {
+    const tname = r.request_types ? r.request_types.name : '기타';
+    const tico = r.request_types && r.request_types.icon ? r.request_types.icon : 'ti-clipboard-check';
+    const cdate = (r.completed_at || r.created_at || '').slice(0,10);
+    return `<div class="post-card" onclick="openReqById(${r.id})" style="cursor:pointer">
+      <div class="post-card-top">
+        <span class="post-title-txt"><i class="ti ${tico}" style="color:var(--bl);margin-right:5px"></i>${r.title||tname}</span>
+        <span class="badge-access" style="background:var(--gnb);color:var(--gn)">완료</span>
+      </div>
+      <div class="post-meta">
+        <span><i class="ti ti-building-store" style="font-size:12px;vertical-align:-1px"></i> ${r.store||'-'}</span>
+        <span><i class="ti ti-tag" style="font-size:12px;vertical-align:-1px"></i> ${tname}</span>
+        <span><i class="ti ti-calendar-check" style="font-size:12px;vertical-align:-1px"></i> ${cdate}</span>
+      </div>
+    </div>`;
+  }).join('') : '<div style="text-align:center;padding:46px;color:var(--th);font-size:14px">완료된 업무 내역이 없습니다.</div>';
+
+  area.innerHTML = `
+    <div class="page-header"><div class="page-title">완료 내역</div><div class="page-sub">처리 완료된 업무를 모아봅니다 · 유사 사례 참고용 (총 ${list.length}건)</div></div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <select class="form-input" style="flex:1;min-width:130px" onchange="arcType=this.value;renderReqArchive(document.getElementById('contentArea'))">${typeOpts}</select>
+      <select class="form-input" style="flex:1;min-width:130px" onchange="arcStore=this.value;renderReqArchive(document.getElementById('contentArea'))">${storeOpts}</select>
+    </div>
+    <div class="search-box" style="margin-bottom:14px"><i class="ti ti-search" style="color:var(--th)"></i><input id="arcSearch" placeholder="완료 내역 검색 (내용·항목)" value="${arcQ}" oninput="arcQ=this.value;clearTimeout(window.__arcT);window.__arcT=setTimeout(()=>renderReqArchive(document.getElementById('contentArea')),350)"/></div>
+    <div class="post-list">${cards}</div>`;
+  // 검색창 포커스 유지
+  setTimeout(()=>{ const s=document.getElementById('arcSearch'); if(s && arcQ){ s.focus(); s.setSelectionRange(s.value.length,s.value.length);} }, 30);
+}
+
 async function renderRequests(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
   const { data: reqs } = await sb.from('requests')
