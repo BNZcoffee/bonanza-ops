@@ -100,6 +100,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--cr);color:var(
 .wm-wrap{position:relative;user-select:none;-webkit-user-select:none}
 .watermark{position:absolute;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center;z-index:2;opacity:.055;font-size:13px;font-weight:700;color:var(--br);transform:rotate(-30deg);white-space:nowrap;letter-spacing:2px}
 .detail-body{font-size:14px;line-height:1.8;color:var(--tm);margin-bottom:18px;position:relative;z-index:1;white-space:pre-wrap}
+.detail-body img{max-width:100%;height:auto;border-radius:8px}
+.ql-editor img{cursor:pointer}
 .attach-label{font-size:11px;font-weight:700;color:var(--th);letter-spacing:1px;text-transform:uppercase;margin-bottom:7px}
 .attach-file{display:inline-flex;align-items:center;gap:5px;background:var(--cr);border:0.5px solid var(--crd);border-radius:8px;padding:5px 10px;font-size:12px;color:var(--ts);cursor:pointer;margin:3px 3px 0 0;text-decoration:none}
 .section-label{font-size:11px;font-weight:700;color:var(--th);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px}
@@ -864,7 +866,7 @@ async function renderPostDetail(area) {
         <i class="ti ${ico}" style="font-size:20px;flex-shrink:0;color:var(--bl)"></i>
         <span style="flex:1;font-size:13px;font-weight:500;color:var(--bl);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.file_name}</span>
         <span style="font-size:10px;font-weight:700;background:var(--blb);color:var(--bl);border-radius:4px;padding:2px 6px;flex-shrink:0">${ext.toUpperCase()}</span>
-        ${isImg ? '' : `<a href="${a.file_url}" target="_blank" title="새 탭에서 보기" style="color:var(--th);text-decoration:none;flex-shrink:0"><i class="ti ti-eye" style="font-size:16px"></i></a>`}
+        ${isImg ? '' : `<button onclick="openFilePreview('${a.file_url}','${(a.file_name||'').replace(/'/g,"\\'")}')" title="미리보기" style="background:none;border:none;cursor:pointer;color:var(--th);flex-shrink:0;padding:0"><i class="ti ti-eye" style="font-size:16px"></i></button>`}
         <button onclick="downloadFile('${a.file_url}','${a.file_name.replace(/'/g,"\\'")}')" title="저장" style="background:none;border:none;cursor:pointer;color:var(--bl);flex-shrink:0;padding:0"><i class="ti ti-download" style="font-size:16px"></i></button>
       </div>${preview}`;
     }).join('');
@@ -972,6 +974,39 @@ function openImageZoom(url) {
     <button onclick="document.getElementById('imgZoomOverlay').remove()" style="position:fixed;top:14px;right:14px;z-index:3;background:rgba(255,255,255,.15);border:none;color:#fff;width:40px;height:40px;border-radius:50%;font-size:20px;cursor:pointer">✕</button>
     <div style="position:fixed;bottom:16px;left:0;right:0;text-align:center;color:rgba(255,255,255,.7);font-size:12px;z-index:3;pointer-events:none">두 손가락으로 확대 · 빈 곳을 탭하면 닫힙니다</div>`;
   // 배경 탭하면 닫기 (이미지 제외)
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
+// 첨부파일 앱 내 팝업 미리보기 (PDF는 iframe, 미리보기 불가 형식은 다운로드 안내)
+function openFilePreview(url, fname) {
+  if (!currentUser) return;
+  const ext = (fname||'').split('.').pop().toLowerCase();
+  const old = document.getElementById('filePreviewOverlay');
+  if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'filePreviewOverlay';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(20,12,6,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:50px 12px 16px';
+  const safeName = (fname||'첨부파일').replace(/</g,'&lt;');
+  const dlName = (fname||'').replace(/'/g,"\\'");
+  let inner = '';
+  if (ext === 'pdf') {
+    // PDF는 iframe으로 앱 내 미리보기
+    inner = `<iframe src="${url}#toolbar=0" style="width:min(96vw,900px);height:84vh;background:#fff;border:none;border-radius:10px" title="${safeName}"></iframe>`;
+  } else {
+    // Word/Excel/한글 등은 브라우저 직접 미리보기 불가 → 다운로드 안내
+    inner = `<div style="background:#fff;border-radius:14px;padding:32px 26px;max-width:340px;text-align:center">
+      <i class="ti ti-file-text" style="font-size:46px;color:var(--bl)"></i>
+      <div style="font-weight:600;margin:12px 0 6px;word-break:break-all">${safeName}</div>
+      <div style="font-size:13px;color:var(--ts);line-height:1.6;margin-bottom:18px">이 형식(${ext.toUpperCase()})은 화면 미리보기를 지원하지 않습니다. 파일을 저장해 확인해주세요.</div>
+      <button onclick="downloadFile('${url}','${dlName}')" class="btn-submit" style="padding:10px 20px"><i class="ti ti-download"></i> 파일 저장</button>
+    </div>`;
+  }
+  ov.innerHTML = `
+    <div style="position:fixed;top:14px;left:0;right:0;text-align:center;color:#fff;font-size:13px;font-weight:500;z-index:3;pointer-events:none;padding:0 60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${safeName}</div>
+    ${inner}
+    <button onclick="document.getElementById('filePreviewOverlay').remove()" style="position:fixed;top:10px;right:14px;z-index:4;background:rgba(255,255,255,.15);border:none;color:#fff;width:40px;height:40px;border-radius:50%;font-size:20px;cursor:pointer">\u2715</button>
+    <div style="position:fixed;bottom:14px;left:0;right:0;text-align:center;color:rgba(255,255,255,.6);font-size:12px;z-index:3;pointer-events:none">빈 곳을 탭하면 닫힙니다</div>`;
   ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
   document.body.appendChild(ov);
 }
@@ -1146,8 +1181,56 @@ function renderNewPost(area, ex) {
       placeholder:'공지 내용을 입력하세요...'
     });
     if(ex && ex.body) nQuill.root.innerHTML = ex.body;
+    // 본문 이미지 클릭 시 크기 조정 팝업
+    nQuill.root.addEventListener('click', (e)=>{
+      if(e.target && e.target.tagName === 'IMG'){
+        e.preventDefault();
+        showImgResizeMenu(e.target);
+      }
+    });
   }
   setTimeout(tryInitQ, 150);
+}
+
+// 본문 이미지 크기 조정 메뉴
+function showImgResizeMenu(img){
+  const old = document.getElementById('imgResizeMenu');
+  if(old) old.remove();
+  const menu = document.createElement('div');
+  menu.id = 'imgResizeMenu';
+  menu.style.cssText = 'position:fixed;z-index:10000;background:#fff;border:1px solid var(--crd);border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:10px;display:flex;flex-direction:column;gap:6px;min-width:180px';
+  const sizes = [['작게','25%'],['중간','50%'],['크게','75%'],['꽉 채우기','100%']];
+  let btns = sizes.map(([label,w])=>
+    `<button onclick="setImgWidth('${w}')" style="display:flex;justify-content:space-between;align-items:center;background:var(--cr);border:0.5px solid var(--crd);border-radius:8px;padding:9px 12px;font-size:13px;cursor:pointer;font-family:inherit"><span>${label}</span><span style="color:var(--th);font-size:11px">${w}</span></button>`
+  ).join('');
+  menu.innerHTML = `<div style="font-size:11px;color:var(--th);padding:2px 4px 4px">이미지 크기 선택</div>${btns}
+    <button onclick="setImgWidth('')" style="background:none;border:none;color:var(--brm);font-size:12px;cursor:pointer;padding:6px 4px 2px;text-align:center">원본 크기로</button>`;
+  document.body.appendChild(menu);
+  // 위치: 이미지 근처(화면 안에 들어오도록)
+  const r = img.getBoundingClientRect();
+  let top = r.top + 8, left = r.left + 8;
+  const mw = 200, mh = 280;
+  if(left + mw > window.innerWidth) left = window.innerWidth - mw - 10;
+  if(top + mh > window.innerHeight) top = window.innerHeight - mh - 10;
+  if(top < 10) top = 10;
+  menu.style.top = top + 'px';
+  menu.style.left = left + 'px';
+  window.__resizeTargetImg = img;
+  // 바깥 클릭 시 닫기
+  setTimeout(()=>{
+    const close = (ev)=>{ if(!menu.contains(ev.target)){ menu.remove(); document.removeEventListener('click', close); } };
+    document.addEventListener('click', close);
+  }, 50);
+}
+
+function setImgWidth(w){
+  const img = window.__resizeTargetImg;
+  if(img){
+    if(w){ img.style.width = w; img.style.height = 'auto'; img.setAttribute('width', w); }
+    else { img.style.width = ''; img.style.height = ''; img.removeAttribute('width'); }
+  }
+  const menu = document.getElementById('imgResizeMenu');
+  if(menu) menu.remove();
 }
 
 // 이미지 자동 압축 (최대 1600px, JPEG 0.72) — 용량 절감
@@ -3989,7 +4072,7 @@ async function renderReqDetail(area) {
         return '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:4px">' +
           '<i class="ti ti-paperclip" style="color:var(--bl)"></i>' +
           '<span style="flex:1;font-size:13px;color:var(--bl)">' + a.file_name + '</span>' +
-          '<a href="' + a.file_url + '" target="_blank" style="color:var(--th)"><i class="ti ti-eye"></i></a>' +
+          '<button onclick="openFilePreview(\'' + a.file_url + '\',\'' + (a.file_name||'').replace(/'/g,"\\'") + '\')" title="미리보기" style="background:none;border:none;cursor:pointer;color:var(--th);padding:0"><i class="ti ti-eye"></i></button>' +
           '<button onclick="downloadFile(\'' + a.file_url + '\',\'' + a.file_name.replace(/'/g,"\\'") + '\')" style="background:none;border:none;color:var(--bl);cursor:pointer"><i class="ti ti-download"></i></button>' +
         '</div>';
       }).join('') + '</div>';
