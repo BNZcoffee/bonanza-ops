@@ -3809,6 +3809,15 @@ function canSeeReq(r) {
   if (currentUser.role === 'manager' && r.store === currentUser.store) return true;
   // 본사 담당자: 자기 파트 신청 전부
   if (currentUser.part && r.part_name === currentUser.part) return true;
+  // 공동 진행 파트: 신청 유형에 공동 파트로 지정된 파트의 담당자도 열람·처리
+  if (currentUser.part) {
+    const types = window.__reqTypes || window.__reqTypesAdmin || [];
+    const ty = types.find(x => x.id === r.type_id);
+    if (ty && Array.isArray(ty.co_parts) && ty.co_parts.length) {
+      const myPart = (window.__parts || []).find(p => p.name === currentUser.part);
+      if (myPart && ty.co_parts.map(Number).includes(Number(myPart.id))) return true;
+    }
+  }
   // 담당자 본인
   if (r.assignee_id === currentUser.id) return true;
   // 개별 열람 허용된 직원 (교육 등 목적)
@@ -4000,9 +4009,14 @@ async function renderReqArchive(area) {
 
 async function renderRequests(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  const { data: reqs } = await sb.from('requests')
-    .select('*, request_types(name, icon), parts(name)')
-    .order('created_at', {ascending:false});
+  const [{ data: reqs }, { data: _allTypes }, { data: _allParts }] = await Promise.all([
+    sb.from('requests').select('*, request_types(name, icon), parts(name)').order('created_at', {ascending:false}),
+    sb.from('request_types').select('*'),
+    sb.from('parts').select('id,name')
+  ]);
+  // 공동 파트 판정에 필요한 캐시 보장
+  window.__reqTypes = _allTypes || window.__reqTypes || [];
+  window.__parts = _allParts || window.__parts || [];
 
   // part_name 평탄화
   (reqs||[]).forEach(r => { r.part_name = r.parts ? r.parts.name : null; });
@@ -4595,6 +4609,11 @@ function editReqType(typeId) {
   editingFields = t ? JSON.parse(JSON.stringify(t.form_fields||[])) : [];
 
   const partOpts = parts.map(p => '<option value="'+p.id+'"'+(t&&t.part_id===p.id?' selected':'')+'>'+p.name+'</option>').join('');
+  const curCoParts = (t && Array.isArray(t.co_parts)) ? t.co_parts.map(String) : [];
+  const coPartChecks = parts.map(p =>
+    '<label style="display:inline-flex;align-items:center;gap:5px;border:0.5px solid var(--crd);border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;background:'+(curCoParts.includes(String(p.id))?'var(--crm)':'#fff')+'">' +
+    '<input type="checkbox" class="rt-copart" value="'+p.id+'"'+(curCoParts.includes(String(p.id))?' checked':'')+' style="margin:0"/> '+p.name+'</label>'
+  ).join('');
   const userOpts = '<option value="">미지정</option>' + users.map(u => '<option value="'+u.id+'"'+(t&&t.default_assignee_id===u.id?' selected':'')+'>'+u.name+(u.part?' ['+u.part+']':'')+'</option>').join('');
 
   document.querySelector('#catModal .modal-inner').classList.add('wide');
@@ -4606,6 +4625,9 @@ function editReqType(typeId) {
       '<div><label class="form-label">기본 담당자</label><select class="form-input" id="rt_assignee">' + userOpts + '</select></div>' +
       '<div><label class="form-label">아이콘</label><input class="form-input" id="rt_icon" value="' + (t?t.icon||'ti-file-text':'ti-file-text') + '"/></div>' +
     '</div>' +
+    '<div style="margin-bottom:10px"><label class="form-label">공동 진행 파트 (선택)</label>' +
+      '<div style="font-size:11px;color:var(--th);margin-bottom:6px">담당 파트 외에 함께 열람·처리할 파트를 추가로 지정합니다. 예: 인테리어 보수 → 시설팀 + 구매팀</div>' +
+      '<div id="rt_coparts" style="display:flex;flex-wrap:wrap;gap:6px">' + coPartChecks + '</div></div>' +
     '<div class="form-row"><label class="form-label">신청 방법 안내 (가이드)</label>' +
       '<textarea class="form-input" id="rt_guide" style="min-height:50px" placeholder="신청 시 직원에게 보여줄 안내문">' + (t?t.guide||'':'') + '</textarea></div>' +
     '<div class="form-label" style="margin-top:10px">입력 항목</div>' +
@@ -4649,8 +4671,9 @@ async function saveReqType() {
   const icon = document.getElementById('rt_icon').value.trim() || 'ti-file-text';
   const guide = document.getElementById('rt_guide').value.trim();
   const fields = editingFields.filter(f => f.label.trim());
+  const coParts = Array.from(document.querySelectorAll('.rt-copart:checked')).map(c => parseInt(c.value)).filter(v => v && v !== partId);
 
-  const payload = {name, part_id: partId, default_assignee_id: assigneeId, icon, guide, form_fields: fields};
+  const payload = {name, part_id: partId, default_assignee_id: assigneeId, icon, guide, form_fields: fields, co_parts: coParts};
   let error;
   if (editingTypeId) {
     ({error} = await sb.from('request_types').update(payload).eq('id', editingTypeId));
