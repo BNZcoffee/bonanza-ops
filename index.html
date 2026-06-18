@@ -320,6 +320,7 @@ textarea.form-input{min-height:120px;resize:vertical}
       <div class="sidebar-label">업무 신청</div>
       <button class="nav-btn" onclick="goPage('requests')" id="nav-requests"><i class="ti ti-clipboard-list"></i> 업무 신청<span class="nav-new" id="reqNavBadge" style="display:none">N</span></button>
       <button class="nav-btn" onclick="goPage('reqarchive')" id="nav-reqarchive"><i class="ti ti-archive"></i> 완료 내역</button>
+      <button class="nav-btn" onclick="goPage('reqstats')" id="nav-reqstats" style="display:none"><i class="ti ti-chart-bar"></i> 처리 통계</button>
       <button class="nav-btn" onclick="goPage('reqadmin')" id="nav-reqadmin" style="display:none"><i class="ti ti-settings-automation"></i> 신청 유형 관리</button>
     </div>
     <div class="sidebar-section" id="adminNav" style="display:none">
@@ -708,6 +709,10 @@ function goPage(page) {
     const nb = document.getElementById('nav-reqarchive');
     if (nb) nb.classList.add('active');
     renderReqArchive(area);
+  } else if (page === 'reqstats') {
+    const nb = document.getElementById('nav-reqstats');
+    if (nb) nb.classList.add('active');
+    renderReqStats(area);
   } else if (page === 'reqnew') {
     renderReqNew(area);
   } else if (page === 'reqdetail') {
@@ -3386,6 +3391,8 @@ function applyMenuPermissions() {
   // 완료 내역: 매니저·관리자 전원 열람 (매장 일반 직원 제외)
   const arcCanView = currentUser.is_master || currentUser.role === 'admin' || currentUser.role === 'manager' || !!currentUser.part || currentUser.is_vice_master;
   show('nav-reqarchive', arcCanView);
+  // 처리 통계: 신청 처리 권한자(운영팀·부서담당·부총괄·총괄)
+  show('nav-reqstats', hasPerm('req_process'));
   show('nav-reqadmin', hasPerm('req_type_manage'));
   // 개별 메뉴
   show('nav-staff', hasPerm('staff_view'));
@@ -3826,6 +3833,110 @@ let arcType = '';   // 완료내역 유형 필터
 let arcStore = '';  // 완료내역 매장 필터
 let arcQ = '';      // 완료내역 검색
 
+let reqStatsMonth = '';  // YYYY-MM (빈값=이번 달)
+
+// 처리 통계 — 담당자별 이번 달 처리 현황 (관리자용)
+async function renderReqStats(area) {
+  if (!hasPerm('req_process')) {
+    area.innerHTML = '<div class="page-header"><div class="page-title">처리 통계</div></div><div style="text-align:center;padding:50px;color:var(--th)">열람 권한이 없습니다.</div>';
+    return;
+  }
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+
+  // 기준 월 계산
+  const now = new Date();
+  let y, mo;
+  if (reqStatsMonth) { const p = reqStatsMonth.split('-'); y = +p[0]; mo = +p[1]-1; }
+  else { y = now.getFullYear(); mo = now.getMonth(); }
+  const mStart = new Date(y, mo, 1).toISOString();
+  const mEnd = new Date(y, mo+1, 1).toISOString();
+  const inMonth = (iso) => iso && iso >= mStart && iso < mEnd;
+
+  const [{ data: reqs }, { data: users }] = await Promise.all([
+    sb.from('requests').select('*'),
+    sb.from('users').select('id,name,store,part,role,active')
+  ]);
+  const all = reqs || [];
+
+  // 담당자별 집계 (이번 달 기준)
+  // 처리(완료/반려): 담당자(assignee) 기준 / 접수: 작성자(author) 기준
+  const byUser = {};
+  const ensure = (uid) => { if(!byUser[uid]) byUser[uid] = {done:0, rejected:0, inprog:0, submitted:0}; return byUser[uid]; };
+  all.forEach(r => {
+    // 이번 달 완료
+    if (r.status === 'done' && inMonth(r.completed_at || r.updated_at) && r.assignee_id) ensure(r.assignee_id).done++;
+    // 이번 달 반려 (반려시각 근사: updated_at)
+    if (r.status === 'rejected' && inMonth(r.updated_at) && r.assignee_id) ensure(r.assignee_id).rejected++;
+    // 현재 진행 중 (담당자)
+    if (r.status === 'in_progress' && r.assignee_id) ensure(r.assignee_id).inprog++;
+  });
+  // 매니저별 이번 달 접수(올린 신청)
+  const byAuthor = {};
+  all.forEach(r => { if (inMonth(r.created_at) && r.author_id) { byAuthor[r.author_id] = (byAuthor[r.author_id]||0)+1; } });
+
+  const uMap = {}; (users||[]).forEach(u => uMap[u.id] = u);
+
+  // 담당자 통계 행 (처리 권한 있는 사람들 = part 보유 or admin)
+  const handlerIds = Object.keys(byUser).sort((a,b)=> (byUser[b].done+byUser[b].rejected) - (byUser[a].done+byUser[a].rejected));
+  const handlerRows = handlerIds.length ? handlerIds.map(uid => {
+    const u = uMap[uid]; if(!u) return '';
+    const s = byUser[uid];
+    return '<tr>' +
+      '<td style="padding:9px 10px;border-bottom:0.5px solid var(--crm);font-size:13px;font-weight:600">' + (u.name||'?') + ' <span style="font-weight:400;color:var(--th);font-size:11px">' + (u.part||u.store||'') + '</span></td>' +
+      '<td style="padding:9px 10px;border-bottom:0.5px solid var(--crm);text-align:center;color:var(--gn);font-weight:600">' + s.done + '</td>' +
+      '<td style="padding:9px 10px;border-bottom:0.5px solid var(--crm);text-align:center;color:var(--rd)">' + s.rejected + '</td>' +
+      '<td style="padding:9px 10px;border-bottom:0.5px solid var(--crm);text-align:center;color:var(--bl)">' + s.inprog + '</td>' +
+      '</tr>';
+  }).join('') : '<tr><td colspan="4" style="padding:20px;text-align:center;color:var(--th)">이번 달 처리 내역이 없습니다.</td></tr>';
+
+  // 매니저별 접수 행
+  const authorIds = Object.keys(byAuthor).sort((a,b)=>byAuthor[b]-byAuthor[a]);
+  const authorRows = authorIds.length ? authorIds.map(uid => {
+    const u = uMap[uid]; if(!u) return '';
+    return '<tr>' +
+      '<td style="padding:9px 10px;border-bottom:0.5px solid var(--crm);font-size:13px;font-weight:600">' + (u.name||'?') + ' <span style="font-weight:400;color:var(--th);font-size:11px">' + (u.store||u.part||'') + '</span></td>' +
+      '<td style="padding:9px 10px;border-bottom:0.5px solid var(--crm);text-align:center;font-weight:600">' + byAuthor[uid] + '</td>' +
+      '</tr>';
+  }).join('') : '<tr><td colspan="2" style="padding:20px;text-align:center;color:var(--th)">이번 달 접수 내역이 없습니다.</td></tr>';
+
+  // 전체 요약
+  const totalDone = Object.values(byUser).reduce((a,b)=>a+b.done,0);
+  const totalRej = Object.values(byUser).reduce((a,b)=>a+b.rejected,0);
+  const totalSub = Object.values(byAuthor).reduce((a,b)=>a+b,0);
+
+  // 월 선택 옵션 (최근 6개월)
+  let monthOpts = '';
+  for (let i=0;i<6;i++){
+    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    const val = d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2);
+    const cur = (reqStatsMonth||(now.getFullYear()+'-'+('0'+(now.getMonth()+1)).slice(-2)));
+    monthOpts += '<option value="'+val+'"'+(cur===val?' selected':'')+'>'+d.getFullYear()+'년 '+(d.getMonth()+1)+'월</option>';
+  }
+
+  area.innerHTML =
+    '<div class="page-header"><div class="page-title">처리 통계</div><div class="page-sub">담당자별 업무 처리 현황 (월 1일~말일 기준)</div></div>' +
+    '<div style="margin-bottom:14px"><select class="form-input" style="max-width:200px" onchange="reqStatsMonth=this.value;renderReqStats(document.getElementById(\'contentArea\'))">'+monthOpts+'</select></div>' +
+    '<div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:18px">' +
+      '<div class="stat-card" style="background:var(--gnb)"><div class="stat-num" style="color:var(--gn)">'+totalDone+'</div><div class="stat-lbl">처리 완료</div></div>' +
+      '<div class="stat-card" style="background:var(--rdb)"><div class="stat-num" style="color:var(--rd)">'+totalRej+'</div><div class="stat-lbl">반려</div></div>' +
+      '<div class="stat-card"><div class="stat-num">'+totalSub+'</div><div class="stat-lbl">신규 접수</div></div>' +
+    '</div>' +
+    '<div class="notif-card" style="margin-bottom:16px"><div class="section-label" style="margin-bottom:10px">담당자별 처리 현황</div>' +
+      '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">' +
+      '<thead><tr style="background:var(--cr)">' +
+        '<th style="padding:9px 10px;text-align:left;font-size:11px;color:var(--th)">담당자</th>' +
+        '<th style="padding:9px 10px;text-align:center;font-size:11px;color:var(--gn)">완료</th>' +
+        '<th style="padding:9px 10px;text-align:center;font-size:11px;color:var(--rd)">반려</th>' +
+        '<th style="padding:9px 10px;text-align:center;font-size:11px;color:var(--bl)">진행 중</th>' +
+      '</tr></thead><tbody>' + handlerRows + '</tbody></table></div></div>' +
+    '<div class="notif-card"><div class="section-label" style="margin-bottom:10px">매니저별 신청 접수 (이번 달 올린 건수)</div>' +
+      '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">' +
+      '<thead><tr style="background:var(--cr)">' +
+        '<th style="padding:9px 10px;text-align:left;font-size:11px;color:var(--th)">매니저</th>' +
+        '<th style="padding:9px 10px;text-align:center;font-size:11px;color:var(--th)">신청 건수</th>' +
+      '</tr></thead><tbody>' + authorRows + '</tbody></table></div></div>';
+}
+
 // 완료 내역 아카이브 — 모든 매니저·관리자 열람, 유형·매장 필터
 async function renderReqArchive(area) {
   // 열람 권한: 매니저 + 관리자(운영팀/부서담당/부총괄/총괄). 매장 일반 직원은 제외
@@ -3895,6 +4006,37 @@ async function renderRequests(area) {
 
   // part_name 평탄화
   (reqs||[]).forEach(r => { r.part_name = r.parts ? r.parts.name : null; });
+
+  // 이번 달(1일~말일) 본인 통계
+  const _now = new Date();
+  const _mStart = new Date(_now.getFullYear(), _now.getMonth(), 1).toISOString();
+  const _mEnd = new Date(_now.getFullYear(), _now.getMonth()+1, 1).toISOString();
+  const inThisMonth = (iso) => iso && iso >= _mStart && iso < _mEnd;
+  let myStatCard = '';
+  const allReqs = reqs || [];
+  if (currentUser.role === 'manager') {
+    // 매니저: 내가 올린 신청 (이번 달 접수일 기준)
+    const mine = allReqs.filter(r => r.author_id === currentUser.id && inThisMonth(r.created_at));
+    const done = mine.filter(r => r.status === 'done').length;
+    const rej = mine.filter(r => r.status === 'rejected').length;
+    const prog = mine.filter(r => r.status === 'in_progress' || r.status === 'submitted').length;
+    myStatCard = '<div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">' +
+      '<div class="stat-card"><div class="stat-num">' + mine.length + '</div><div class="stat-lbl">이번 달 신청</div></div>' +
+      '<div class="stat-card" style="background:var(--blb)"><div class="stat-num" style="color:var(--bl)">' + prog + '</div><div class="stat-lbl">진행 중</div></div>' +
+      '<div class="stat-card" style="background:var(--gnb)"><div class="stat-num" style="color:var(--gn)">' + done + '</div><div class="stat-lbl">완료</div></div>' +
+      '<div class="stat-card" style="background:var(--rdb)"><div class="stat-num" style="color:var(--rd)">' + rej + '</div><div class="stat-lbl">반려</div></div>' +
+      '</div>';
+  } else if (currentUser.part || currentUser.role === 'admin' || currentUser.is_master) {
+    // 담당자/관리자: 내가 처리(담당)한 신청 (이번 달 완료 기준)
+    const handled = allReqs.filter(r => r.assignee_id === currentUser.id);
+    const doneThis = handled.filter(r => r.status === 'done' && inThisMonth(r.completed_at || r.updated_at)).length;
+    const progNow = handled.filter(r => r.status === 'in_progress').length;
+    myStatCard = '<div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">' +
+      '<div class="stat-card" style="background:var(--blb)"><div class="stat-num" style="color:var(--bl)">' + progNow + '</div><div class="stat-lbl">내 담당 진행 중</div></div>' +
+      '<div class="stat-card" style="background:var(--gnb)"><div class="stat-num" style="color:var(--gn)">' + doneThis + '</div><div class="stat-lbl">이번 달 처리 완료</div></div>' +
+      '<div class="stat-card"><div class="stat-num">' + handled.length + '</div><div class="stat-lbl">전체 담당 누적</div></div>' +
+      '</div>';
+  }
   let visible = (reqs||[]).filter(canSeeReq);
 
   // 탭 필터
@@ -3944,6 +4086,7 @@ async function renderRequests(area) {
   area.innerHTML =
     '<div class="page-header"><div class="page-title">업무 신청</div>' +
     '<div class="page-sub">' + scopeLabel + ' 기준으로 신청 내역을 확인합니다</div></div>' +
+    myStatCard +
     '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">' +
       tabBtn('mine','전체') + tabBtn('in_progress','진행 중') + tabBtn('done','완료') + tabBtn('rejected','반려') +
       '<div style="margin-left:auto">' + newBtn + '</div>' +
