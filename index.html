@@ -944,7 +944,7 @@ async function renderPostDetail(area) {
       </div>
       <div class="wm-wrap">
         <div class="watermark">${wmText}&nbsp;&nbsp;&nbsp;${wmText}&nbsp;&nbsp;&nbsp;${wmText}</div>
-        <div class="detail-body" onselectstart="return false">${p.body}</div>
+        <div class="detail-body" id="detailBodyContent" onselectstart="return false">${p.body}</div>
       </div>
       ${attachHtml}
       ${refHtml}
@@ -952,6 +952,18 @@ async function renderPostDetail(area) {
       ${readListHtml}
       ${cmtHtml}
     </div>`;
+  // 본문 이미지 탭하면 확대 보기 (작게 넣은 이미지도 크게 볼 수 있게)
+  setTimeout(()=>{
+    const bodyEl = document.getElementById('detailBodyContent');
+    if(bodyEl){
+      bodyEl.querySelectorAll('img').forEach(im=>{
+        im.style.cursor='zoom-in';
+        im.addEventListener('click', ()=>openImageZoom(im.getAttribute('src')));
+        im.setAttribute('oncontextmenu','return false');
+        im.setAttribute('ondragstart','return false');
+      });
+    }
+  }, 60);
 }
 
 // 이미지 확대 뷰어 (워터마크 유지 — 캡처 시에도 워터마크 표시, 핀치 줌 가능)
