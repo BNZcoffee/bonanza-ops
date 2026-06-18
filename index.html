@@ -1898,6 +1898,25 @@ async function getNextCode(){
   return 'BCK-'+String(max+1).padStart(3,'0');
 }
 
+// 오피스/관리자 코드 직접 입력 토글
+function toggleOfficeCode(checked){
+  const inp = document.getElementById('eu_code');
+  if(!inp) return;
+  if(checked){
+    inp.disabled = false;
+    inp.placeholder = '실명 또는 코드 직접 입력 (예: 이선우, office-hong)';
+    inp.style.background = 'var(--cr)';
+    inp.style.color = 'var(--tm)';
+    inp.focus();
+  } else {
+    inp.disabled = true;
+    inp.value = '';
+    inp.placeholder = '자동 부여 (BCK-순번)';
+    inp.style.background = 'var(--crm)';
+    inp.style.color = 'var(--ts)';
+  }
+}
+
 let editingUserId = null;
 async function openEditUser(userId){
   editingUserId = userId;
@@ -1922,6 +1941,11 @@ async function openEditUser(userId){
   document.getElementById('catList').innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div><label class="form-label">이름 *</label><input class="form-input" id="eu_name" value="${u?.name||''}" placeholder="홍길동"/></div>
+      <div><label class="form-label">계정 코드</label>
+        ${editingUserId
+          ? `<input class="form-input" value="${u?.code||''}" disabled style="background:var(--crm);color:var(--ts)"/>`
+          : `<input class="form-input" id="eu_code" placeholder="자동 부여 (BCK-순번)" disabled style="background:var(--crm);color:var(--ts)"/>`}
+      </div>
       <div><label class="form-label">직급 *</label>
         <select class="form-input" id="eu_role">
           ${['manager','barista','pastry','purchase','hr','admin'].map(r=>`<option value="${r}"${u?.role===r?' selected':''}>${roleLbl[r]}</option>`).join('')}
@@ -1951,6 +1975,12 @@ async function openEditUser(userId){
       <div><label class="form-label">본사 파트 <span style="font-size:10px;color:var(--th)">(업무 신청 담당)</span></label>
         <select class="form-input" id="eu_part">${partOpts}</select>
       </div>
+      ${!editingUserId ? `<div style="grid-column:1/-1"><label class="form-label">계정 코드 방식</label>
+        <label style="display:flex;align-items:center;gap:8px;padding:9px 0;font-size:13px;color:var(--tm);cursor:pointer">
+          <input type="checkbox" id="eu_office" onchange="toggleOfficeCode(this.checked)" style="width:auto"/>
+          오피스·관리자 인력 (실명 등 코드 직접 입력) — 미체크 시 매장 직원으로 BCK-순번 자동 부여
+        </label>
+      </div>` : ''}
       <div><label class="form-label">총괄 마스터</label>
         <label style="display:flex;align-items:center;gap:8px;padding:9px 0;font-size:13px;color:var(--tm);cursor:pointer">
           <input type="checkbox" id="eu_master" ${u?.is_master?'checked':''} style="width:auto"/>
@@ -2014,11 +2044,18 @@ async function submitEditUser(){
   if(editingUserId){
     ({error} = await sb.from('users').update(payload).eq('id',editingUserId));
   } else {
-    newCode = await getNextCode();
+    const officeChecked = document.getElementById('eu_office')?.checked;
+    const manualCode = (document.getElementById('eu_code')?.value || '').trim();
+    if(officeChecked){
+      if(!manualCode){ alert('오피스·관리자 인력은 계정 코드를 직접 입력해주세요.'); return; }
+      newCode = manualCode;
+    } else {
+      newCode = await getNextCode();
+    }
     const initPw = pw || initPwFromCode(newCode);
     ({error} = await sb.from('users').insert({...payload,code:newCode,password_hash:initPw}));
     if(!error) {
-      alert('직원이 등록되었습니다.\n\n직원 코드: '+newCode+'\n초기 비밀번호: '+initPw+'\n\n초기 비밀번호는 위 규칙(bnz+코드숫자)으로 부여됩니다.');
+      alert('직원이 등록되었습니다.\n\n계정 코드: '+newCode+'\n초기 비밀번호: '+initPw);
     }
   }
   if(error){alert('오류: '+error.message);return;}
