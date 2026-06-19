@@ -2072,7 +2072,7 @@ async function openEditUser(userId){
           ? `<input class="form-input" value="${u?.code||''}" disabled style="background:var(--crm);color:var(--ts)"/>`
           : `<input class="form-input" id="eu_code" placeholder="자동 부여 (BCK-순번)" disabled style="background:var(--crm);color:var(--ts)"/>`}
       </div>
-      <div><label class="form-label">직급 *</label>
+      <div><label class="form-label">직위 *</label>
         <select class="form-input" id="eu_role">
           ${['manager','barista','pastry','purchase','hr','admin'].map(r=>`<option value="${r}"${u?.role===r?' selected':''}>${roleLbl[r]}</option>`).join('')}
         </select>
@@ -2081,11 +2081,6 @@ async function openEditUser(userId){
         <select class="form-input" id="eu_store">
           ${storeOpts||`<option value="${u?.store||''}">${u?.store||''}</option>`}
           <option value="__custom">직접 입력...</option>
-        </select>
-      </div>
-      <div><label class="form-label">직위</label>
-        <select class="form-input" id="eu_position">
-          ${posOpts}
         </select>
       </div>
       <div id="eu_custom_wrap" style="display:none">
@@ -2158,13 +2153,14 @@ async function submitEditUser(){
   const retire = document.getElementById('eu_retire')?.value||null;
   const pw = document.getElementById('eu_pw')?.value.trim();
   const part = document.getElementById('eu_part')?.value || null;
-  const position = document.getElementById('eu_position')?.value || '';
+  const posEl = document.getElementById('eu_position'); const position = posEl ? posEl.value : undefined;
   const isMaster = document.getElementById('eu_master')?.checked || false;
   const isVice = document.getElementById('eu_vice')?.checked || false;
   if(!name||!store){alert('이름과 소속매장은 필수입니다.');return;}
   const today = new Date().toISOString().slice(0,10);
   const active = !retire || (retire >= today);
-  const payload = {name,role,store,phone:phone||null,email:email||null,hire_date:hire,retire_date:retire,active,part,position,is_master:isMaster, is_vice_master: isVice};
+  const payload = {name,role,store,phone:phone||null,email:email||null,hire_date:hire,retire_date:retire,active,part,is_master:isMaster, is_vice_master: isVice};
+  if (position !== undefined) payload.position = position;  // 직위 칸이 있을 때만 반영(없으면 기존값 유지)
   if(pw) payload.password_hash = pw;
   let error, newCode;
   if(editingUserId){
