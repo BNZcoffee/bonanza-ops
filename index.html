@@ -1760,10 +1760,9 @@ async function submitPost(isDraft=false) {
 // ── STAFF ─────────────────────────────────────────
 async function renderStaff(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  const [{data:users},{data:stores},{data:positions}] = await Promise.all([
+  const [{data:users},{data:stores}] = await Promise.all([
     sb.from('users').select('*').order('code'),
-    sb.from('store_options').select('*').order('sort_order'),
-    sb.from('position_options').select('*').order('sort_order')
+    sb.from('store_options').select('*').order('sort_order')
   ]);
   const today = new Date().toISOString().slice(0,10);
 
@@ -1782,7 +1781,7 @@ async function renderStaff(area) {
     <tr id="urow-${u.id}">
       <td><input type="checkbox" class="uchk" data-id="${u.id}" onclick="toggleUserSel('${u.id}',this.checked)"></td>
       <td><span class="staff-role ${roleCls[u.role]||''}" style="font-size:10px">${roleLbl[u.role]||u.role}</span></td>
-      <td style="font-weight:600">${u.name}${u.position?` <span style="font-weight:400;font-size:11px;color:var(--brm);background:var(--crm);border-radius:8px;padding:1px 7px;margin-left:4px">${u.position}</span>`:''}</td>
+      <td style="font-weight:600">${u.name}</td>
       <td>${u.store}</td>
       <td style="font-family:monospace;font-size:11px;color:var(--th)">${u.code}</td>
       <td style="color:var(--th)">${u.phone||'-'}</td>
@@ -1800,11 +1799,7 @@ async function renderStaff(area) {
   let selStaff = new Set();
   window.__selStaff = selStaff;
   const storeOpts = (stores||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join('');
-  const positionList = (positions||[]).map(p=>
-    `<div id="popt-${p.id}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)">
-      <span style="flex:1;font-size:13px">${p.name}</span>
-      <button onclick="delPosition(${p.id},'popt-${p.id}')" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-trash"></i></button>
-    </div>`).join('');
+  
   const storeList = (stores||[]).map(s=>
     `<div id="sopt-${s.id}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)">
       <span style="flex:1;font-size:13px">${s.name}</span>
@@ -1852,7 +1847,7 @@ async function renderStaff(area) {
         ${canEditStaff() ? `
         <button class="btn-new" style="background:var(--brm)" onclick="openEditUser(null)"><i class="ti ti-user-plus"></i> 직원 추가</button>
         <button class="btn-new" style="background:var(--gn)" onclick="openStoreManager()"><i class="ti ti-building"></i> 매장 관리</button>
-        <button class="btn-new" style="background:var(--brm);display:none" onclick="openPositionManager()"><i class="ti ti-id-badge-2"></i> 직위 관리</button>
+        
         <button class="btn-new" onclick="openBulkImport()"><i class="ti ti-table-import"></i> 일괄 등록</button>
         ` : '<span style="font-size:12px;color:var(--th);align-self:center">조회 전용 (수정 권한: 운영총괄·인사팀)</span>'}
       </div>
@@ -1871,18 +1866,7 @@ async function renderStaff(area) {
       </div>
     </div>
 
-    <!-- 직위 관리 패널 -->
-    <div id="posMgrPanel" style="display:none;background:#fff;border:0.5px solid var(--crd);border-radius:12px;padding:16px;margin-bottom:14px">
-      <div style="font-size:14px;font-weight:600;margin-bottom:12px;display:flex;justify-content:space-between">
-        직위 목록 관리
-        <button onclick="document.getElementById('posMgrPanel').style.display='none'" style="background:none;border:none;cursor:pointer;color:var(--th)"><i class="ti ti-x"></i></button>
-      </div>
-      <div id="posListBox">${positionList||'<div style="color:var(--th);font-size:13px">등록된 직위 없음</div>'}</div>
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <input class="form-input" id="newPosInp" placeholder="새 직위 입력 (예: 점장, 과장, 팀장, 담당)" onkeydown="if(event.key==='Enter')addPosition()"/>
-        <button class="btn-submit" style="padding:8px 16px;font-size:13px;white-space:nowrap" onclick="addPosition()">추가</button>
-      </div>
-    </div>
+    
 
     <!-- 직원 테이블 -->
     <div id="staffTableWrap" style="overflow-x:auto">
@@ -2046,14 +2030,11 @@ function toggleOfficeCode(checked){
 let editingUserId = null;
 async function openEditUser(userId){
   editingUserId = userId;
-  const [{data:u},{data:stores},{data:partList},{data:posList}] = await Promise.all([
+  const [{data:u},{data:stores},{data:partList}] = await Promise.all([
     userId ? sb.from('users').select('*').eq('id',userId).single() : Promise.resolve({data:null}),
     sb.from('store_options').select('*').order('sort_order'),
-    sb.from('parts').select('*').order('sort_order'),
-    sb.from('position_options').select('*').order('sort_order')
+    sb.from('parts').select('*').order('sort_order')
   ]);
-  const posOpts = '<option value="">미지정</option>' + (posList||[]).map(p=>
-    `<option value="${p.name}"${u&&u.position===p.name?' selected':''}>${p.name}</option>`).join('');
   const partOpts = '<option value="">미지정</option>' + (partList||[]).map(p=>
     `<option value="${p.name}"${u?.part===p.name?' selected':''}>${p.name}</option>`
   ).join('');
@@ -2153,14 +2134,12 @@ async function submitEditUser(){
   const retire = document.getElementById('eu_retire')?.value||null;
   const pw = document.getElementById('eu_pw')?.value.trim();
   const part = document.getElementById('eu_part')?.value || null;
-  const posEl = document.getElementById('eu_position'); const position = posEl ? posEl.value : undefined;
   const isMaster = document.getElementById('eu_master')?.checked || false;
   const isVice = document.getElementById('eu_vice')?.checked || false;
   if(!name||!store){alert('이름과 소속매장은 필수입니다.');return;}
   const today = new Date().toISOString().slice(0,10);
   const active = !retire || (retire >= today);
   const payload = {name,role,store,phone:phone||null,email:email||null,hire_date:hire,retire_date:retire,active,part,is_master:isMaster, is_vice_master: isVice};
-  if (position !== undefined) payload.position = position;  // 직위 칸이 있을 때만 반영(없으면 기존값 유지)
   if(pw) payload.password_hash = pw;
   let error, newCode;
   if(editingUserId){
@@ -2265,35 +2244,7 @@ async function delStore(id, elemId){
   document.getElementById(elemId)?.remove();
 }
 
-window.openPositionManager = function(){
-  const p = document.getElementById('posMgrPanel');
-  if(p) p.style.display = p.style.display==='none' ? 'block' : 'none';
-};
 
-async function addPosition(){
-  const inp = document.getElementById('newPosInp');
-  const name = inp?.value.trim();
-  if(!name) return;
-  const {data:all} = await sb.from('position_options').select('sort_order').order('sort_order',{ascending:false}).limit(1);
-  const {data,error} = await sb.from('position_options').insert({name,sort_order:(all?.[0]?.sort_order||0)+1}).select().single();
-  if(error){alert(error.message.includes('unique')?'이미 존재하는 직위입니다.':error.message);return;}
-  if(inp) inp.value='';
-  const box = document.getElementById('posListBox');
-  if(box){
-    if(box.children.length===1 && box.textContent.includes('없음')) box.innerHTML='';
-    const d=document.createElement('div');
-    d.id='popt-'+data.id;
-    d.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)';
-    d.innerHTML=`<span style="flex:1;font-size:13px">${name}</span><button onclick="delPosition(${data.id},'popt-${data.id}')" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-trash"></i></button>`;
-    box.appendChild(d);
-  }
-}
-
-async function delPosition(id, elemId){
-  if(!confirm('직위을 삭제할까요?\n\n＊ 이미 이 직위으로 지정된 직원의 직위 표시만 사라지고, 직원 정보 자체는 유지됩니다.')) return;
-  await sb.from('position_options').delete().eq('id',id);
-  document.getElementById(elemId)?.remove();
-}
 
 async function openBulkImport(){
   // 일괄 등록 모달 열기
