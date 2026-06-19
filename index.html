@@ -3375,8 +3375,13 @@ async function renderManual(area) {
       </button>
       <div id="msec-body-${s.id}" class="manual-body" style="display:none;font-size:14px;line-height:1.8;color:var(--tm);padding:0 16px 16px">${s.body||''}</div>
     </div>`).join('');
-    body = `<div style="background:#fff;border:0.5px solid var(--crd);border-radius:12px;padding:16px 20px;margin-bottom:18px">
-        <div style="font-size:11px;font-weight:700;color:var(--th);letter-spacing:1px;margin-bottom:8px">목차</div>${toc}</div>${secs}`;
+    body = `<div style="background:var(--crm);border:0.5px solid var(--crd);border-radius:10px;margin-bottom:18px;overflow:hidden">
+        <button onclick="toggleManualToc()" style="width:100%;text-align:left;background:none;border:none;cursor:pointer;padding:11px 16px;display:flex;align-items:center;justify-content:space-between;font-family:inherit">
+          <span style="font-size:12px;font-weight:700;color:var(--brm);letter-spacing:1px"><i class="ti ti-list" style="font-size:14px;vertical-align:-2px;margin-right:5px"></i>목차</span>
+          <i class="ti ti-chevron-down" id="manualTocChev" style="font-size:16px;color:var(--th);transition:transform .2s"></i>
+        </button>
+        <div id="manualTocBody" style="display:none;padding:0 16px 12px">${toc}</div>
+      </div>${secs}`;
   }
 
   const editBtn = canEditManual() ? `<button class="btn-cancel-sm" onclick="goManualEdit()"><i class="ti ti-edit"></i> 편집</button>` : '';
@@ -3396,6 +3401,16 @@ async function renderManual(area) {
 let manualEditAudience = 'user';
 
 // 매뉴얼 PDF 다운로드 (인쇄 → PDF 저장, 워터마크 + 목차)
+// 목차 접기/펼치기
+function toggleManualToc() {
+  const body = document.getElementById('manualTocBody');
+  const chev = document.getElementById('manualTocChev');
+  if (!body) return;
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  if (chev) chev.style.transform = open ? 'rotate(0deg)' : 'rotate(180deg)';
+}
+
 // 설명서 섹션 접기/펼치기
 function toggleManualSection(id) {
   const body = document.getElementById('msec-body-'+id);
