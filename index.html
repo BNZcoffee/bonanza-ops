@@ -367,6 +367,16 @@ textarea.form-input{min-height:120px;resize:vertical}
 </div>
 
 <!-- CAT MODAL -->
+<div class="modal-bg" id="roleMgrModal">
+  <div class="modal-inner" style="width:380px;max-width:94vw">
+    <div class="modal-title"><i class="ti ti-id-badge-2"></i> 직위 관리</div>
+    <div id="roleMgrBody"></div>
+    <div style="text-align:right;margin-top:14px">
+      <button class="btn-cancel-sm" onclick="document.getElementById('roleMgrModal').classList.remove('open')">닫기</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-bg" id="catModal">
   <div class="modal-inner">
     <div class="modal-title" id="catModalTitle">게시판 카테고리 관리</div>
@@ -415,8 +425,137 @@ const SUPABASE_URL = 'https://fhwiihbtlspeckmgnlax.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZod2lpaGJ0bHNwZWNrbWdubGF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MzQxMjcsImV4cCI6MjA5NjMxMDEyN30.izRHlmKaKLBSY78eSNMpyt-mGw0Whlt6XIAoNjp5Aqo';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const roleLbl = {admin:'운영팀',manager:'매니저',barista:'바리스타',pastry:'파티쉐',purchase:'구매팀',hr:'인사팀'};
-const roleCls = {admin:'role-admin',manager:'role-manager',barista:'role-barista',pastry:'role-pastry',purchase:'role-purchase',hr:'role-hr'};
+// 직위(role) 라벨·색상 — 기본값(폴백). 실제로는 role_options 테이블에서 로드해 덮어씀
+let roleLbl = {admin:'운영팀',manager:'매니저',barista:'바리스타',pastry:'파티쉐',purchase:'구매팀',hr:'인사팀'};
+let roleCls = {admin:'role-admin',manager:'role-manager',barista:'role-barista',pastry:'role-pastry',purchase:'role-purchase',hr:'role-hr'};
+// 권한 시스템 핵심 직위(코드값 고정, 삭제 불가)
+const CORE_ROLES = ['admin','manager'];
+let roleOptions = [];  // [{role_key,label,is_core,sort_order}]
+
+// 직위 목록을 DB에서 로드해 roleLbl 갱신
+async function loadRoleOptions() {
+  const { data } = await sb.from('role_options').select('*').order('sort_order');
+  if (data && data.length) {
+    roleOptions = data;
+    const lbl = {};
+    data.forEach(r => { lbl[r.role_key] = r.label; });
+    // 핵심 직위는 폴백 라벨 보장
+    if (!lbl.admin) lbl.admin = '운영팀';
+    if (!lbl.manager) lbl.manager = '매니저';
+    roleLbl = lbl;
+  } else {
+    // 테이블이 비었으면 기본 6개로 간주
+    roleOptions = [
+      {role_key:'admin',label:'운영팀',is_core:true,sort_order:1},
+      {role_key:'manager',label:'매니저',is_core:true,sort_order:2},
+      {role_key:'barista',label:'바리스타',is_core:false,sort_order:3},
+      {role_key:'pastry',label:'파티쉐',is_core:false,sort_order:4},
+      {role_key:'purchase',label:'구매팀',is_core:false,sort_order:5},
+      {role_key:'hr',label:'인사팀',is_core:false,sort_order:6},
+    ];
+  }
+}
+
+// 직위 select 옵션 HTML 생성 (현재 선택값 표시)
+function roleSelectOptions(selectedRole) {
+  return roleOptions.map(r =>
+    `<option value="${r.role_key}"${selectedRole===r.role_key?' selected':''}>${r.label}</option>`
+  ).join('');
+}
+
+// ── 직위 관리 ──────────────────────────────────
+function isMasterUser() {
+  return currentUser && (currentUser.is_master === true);
+}
+
+async function openRoleManager() {
+  await loadRoleOptions();
+  renderRoleManagerModal();
+  document.getElementById('roleMgrModal').classList.add('open');
+}
+
+function renderRoleManagerModal() {
+  const rows = roleOptions.map(r => {
+    const core = CORE_ROLES.includes(r.role_key);
+    const lock = core ? '<i class="ti ti-lock" style="color:var(--th);font-size:14px"></i>' : '';
+    // 핵심 직위는 총괄만 수정 가능
+    const canEdit = !core || isMasterUser();
+    const editBtn = canEdit
+      ? `<button onclick="editRoleName('${r.role_key}')" style="background:none;border:none;cursor:pointer;color:var(--brm)" title="이름 수정"><i class="ti ti-edit"></i></button>`
+      : '';
+    const delBtn = (!core)
+      ? `<button onclick="deleteRole('${r.role_key}')" style="background:none;border:none;cursor:pointer;color:var(--rd)" title="삭제"><i class="ti ti-trash"></i></button>`
+      : '';
+    return `<div class="tag-item" style="justify-content:space-between" id="role-row-${r.role_key}">
+      <div style="display:flex;align-items:center;gap:7px;flex:1">
+        ${lock}
+        <span style="font-size:13px;font-weight:600">${r.label}</span>
+        <span style="font-size:10px;color:var(--th);font-family:monospace;background:var(--cr);border-radius:5px;padding:1px 6px">${r.role_key}</span>
+      </div>
+      <div style="display:flex;gap:6px">${editBtn}${delBtn}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('roleMgrBody').innerHTML = `
+    <div class="tag-list">${rows}</div>
+    <div style="border-top:0.5px solid var(--crd);margin-top:12px;padding-top:12px">
+      <div style="font-size:12px;font-weight:600;color:var(--ts);margin-bottom:7px">새 직위 추가</div>
+      <input class="form-input" id="newRoleLabel" placeholder="직위 이름 (예: 슈퍼바이저)" style="margin-bottom:6px"/>
+      <input class="form-input" id="newRoleKey" placeholder="권한키 (영문 소문자, 예: supervisor)" style="margin-bottom:6px"/>
+      <div style="font-size:11px;color:var(--th);margin-bottom:8px">＊ 새 직위는 매장 일반 직원 수준 권한으로 동작합니다. 권한키는 영문 소문자로 입력하세요.</div>
+      <button class="btn-submit" style="width:100%" onclick="addRole()"><i class="ti ti-plus"></i> 직위 추가</button>
+    </div>`;
+}
+
+async function editRoleName(roleKey) {
+  const r = roleOptions.find(x => x.role_key === roleKey);
+  if (!r) return;
+  const core = CORE_ROLES.includes(roleKey);
+  // 핵심 직위는 총괄만
+  if (core && !isMasterUser()) { alert('이 직위는 총괄(마스터) 계정만 변경할 수 있습니다.'); return; }
+  // 핵심 직위 변경 시 경고
+  if (core) {
+    const ok = confirm('주의: 이 직위는 권한 시스템의 핵심입니다.\n\n표시 이름만 바뀌고 내부 권한키(' + roleKey + ')는 그대로 유지됩니다. 권한에는 영향을 주지 않습니다.\n\n계속하시겠습니까?');
+    if (!ok) return;
+  }
+  const newLabel = prompt('직위 이름을 입력하세요:', r.label);
+  if (newLabel === null) return;
+  const label = newLabel.trim();
+  if (!label) { alert('이름을 입력해주세요.'); return; }
+  const { error } = await sb.from('role_options').update({ label }).eq('role_key', roleKey);
+  if (error) { alert('수정 오류: ' + error.message); return; }
+  await loadRoleOptions();
+  renderRoleManagerModal();
+  renderStaff(document.getElementById('contentArea'));
+}
+
+async function addRole() {
+  const label = document.getElementById('newRoleLabel').value.trim();
+  let key = document.getElementById('newRoleKey').value.trim().toLowerCase();
+  if (!label || !key) { alert('직위 이름과 권한키를 모두 입력해주세요.'); return; }
+  if (!/^[a-z_]+$/.test(key)) { alert('권한키는 영문 소문자와 밑줄(_)만 사용할 수 있습니다.'); return; }
+  if (roleOptions.some(r => r.role_key === key)) { alert('이미 존재하는 권한키입니다.'); return; }
+  const maxSort = roleOptions.reduce((m,r)=>Math.max(m, r.sort_order||0), 0);
+  const { error } = await sb.from('role_options').insert({ role_key:key, label, is_core:false, sort_order:maxSort+1 });
+  if (error) { alert('추가 오류: ' + error.message); return; }
+  await loadRoleOptions();
+  renderRoleManagerModal();
+}
+
+async function deleteRole(roleKey) {
+  if (CORE_ROLES.includes(roleKey)) { alert('핵심 직위는 삭제할 수 없습니다.'); return; }
+  // 이 직위를 쓰는 직원 확인
+  const { data: users } = await sb.from('users').select('id,name').eq('role', roleKey);
+  if (users && users.length > 0) {
+    alert('이 직위로 지정된 직원이 ' + users.length + '명 있습니다.\n먼저 해당 직원들의 직위를 다른 직위로 변경한 후 삭제해주세요.');
+    return;
+  }
+  if (!confirm('이 직위를 삭제할까요?')) return;
+  const { error } = await sb.from('role_options').delete().eq('role_key', roleKey);
+  if (error) { alert('삭제 오류: ' + error.message); return; }
+  await loadRoleOptions();
+  renderRoleManagerModal();
+}
 
 let currentUser = null;
 let currentPage = 'board';
@@ -572,7 +711,8 @@ async function loginAs(user) {
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('mainScreen').style.display = 'flex';
   document.getElementById('topbar').style.display = 'flex';
-  // 권한 맵 로드 (메뉴 표시 판단 전에 먼저)
+  // 직위 라벨 + 권한 맵 로드 (메뉴 표시 판단 전에 먼저)
+  await loadRoleOptions();
   await loadPermMap();
   applyMenuPermissions();
   document.getElementById('sidebarInfoTxt').textContent = user.store + ' · ' + user.name;
@@ -1847,7 +1987,7 @@ async function renderStaff(area) {
         ${canEditStaff() ? `
         <button class="btn-new" style="background:var(--brm)" onclick="openEditUser(null)"><i class="ti ti-user-plus"></i> 직원 추가</button>
         <button class="btn-new" style="background:var(--gn)" onclick="openStoreManager()"><i class="ti ti-building"></i> 매장 관리</button>
-        
+        <button class="btn-new" style="background:var(--brm)" onclick="openRoleManager()"><i class="ti ti-id-badge-2"></i> 직위 관리</button>
         <button class="btn-new" onclick="openBulkImport()"><i class="ti ti-table-import"></i> 일괄 등록</button>
         ` : '<span style="font-size:12px;color:var(--th);align-self:center">조회 전용 (수정 권한: 운영총괄·인사팀)</span>'}
       </div>
@@ -2055,7 +2195,7 @@ async function openEditUser(userId){
       </div>
       <div><label class="form-label">직위 *</label>
         <select class="form-input" id="eu_role">
-          ${['manager','barista','pastry','purchase','hr','admin'].map(r=>`<option value="${r}"${u?.role===r?' selected':''}>${roleLbl[r]}</option>`).join('')}
+          ${roleSelectOptions(u?.role)}
         </select>
       </div>
       <div><label class="form-label">소속 매장 *</label>
