@@ -306,6 +306,20 @@ textarea.form-input{min-height:120px;resize:vertical}
   </div>
 </div>
 
+<!-- 최초 비밀번호 설정 -->
+<div id="pwSetScreen" style="display:none;position:fixed;inset:0;background:var(--cr);z-index:120;align-items:center;justify-content:center">
+  <div class="login-card">
+    <div class="login-logo">Bonanza Coffee Korea</div>
+    <div class="login-sub">최초 비밀번호 설정</div>
+    <div id="pwSetWelcome" style="font-size:13px;color:var(--ts);margin-bottom:14px;line-height:1.6"></div>
+    <input type="password" id="pwSet1" placeholder="새 비밀번호 (4자 이상)" />
+    <input type="password" id="pwSet2" placeholder="새 비밀번호 다시 입력" />
+    <button class="btn-login" onclick="doSetPassword()">비밀번호 설정 완료</button>
+    <div class="login-err" id="pwSetErr"></div>
+    <div style="font-size:11px;color:var(--th);margin-top:10px;line-height:1.5">설정한 비밀번호는 본인만 알 수 있습니다. 잊으면 운영팀에 재설정을 요청하세요.</div>
+  </div>
+</div>
+
 <!-- MAIN -->
 <div id="mainScreen">
   <nav class="sidebar">
@@ -426,10 +440,10 @@ async function doLogin() {
   const err = document.getElementById('loginErr');
   err.textContent = '확인 중...';
 
+  // 코드로 먼저 조회 (최초 비밀번호 설정 분기를 위해)
   const { data, error } = await sb.from('users')
     .select('*')
     .eq('code', code)
-    .eq('password_hash', pw)
     .single();
 
   if (error || !data) { err.textContent = '직원 코드 또는 비밀번호를 확인해주세요.'; return; }
@@ -440,6 +454,18 @@ async function doLogin() {
     await sb.from('users').update({active:false}).eq('id', data.id);
     err.textContent = '접근 권한이 만료된 계정입니다.'; return;
   }
+  // 입사일 전이면 차단 (입사일 당일부터 로그인 가능)
+  if (data.hire_date && data.hire_date > today) {
+    err.textContent = '입사일(' + data.hire_date + ')부터 로그인할 수 있습니다.'; return;
+  }
+  // 최초 비밀번호 설정이 안 된 계정: 비밀번호 설정 화면으로
+  if (!data.pw_set) {
+    // 코드만 맞으면 비밀번호 설정 화면 진입 (초기 비번 입력 불필요)
+    openPwSetScreen(data);
+    return;
+  }
+  // 비밀번호 확인
+  if (data.password_hash !== pw) { err.textContent = '직원 코드 또는 비밀번호를 확인해주세요.'; return; }
 
   try {
     if (document.getElementById('autoLogin').checked) {
@@ -449,6 +475,96 @@ async function doLogin() {
     }
   } catch(e) {}
   loginAs(data);
+}
+
+// 최초 비밀번호 설정 화면 진입
+let pwSetUser = null;
+function openPwSetScreen(user) {
+  pwSetUser = user;
+  document.getElementById('loginScreen').style.display = 'none';
+  const scr = document.getElementById('pwSetScreen');
+  scr.style.display = 'flex';
+  document.getElementById('pwSetWelcome').textContent = (user.name||'') + '님, 환영합니다. 처음 접속하셨습니다. 앞으로 사용할 비밀번호를 직접 설정해 주세요.';
+  document.getElementById('pwSet1').value = '';
+  document.getElementById('pwSet2').value = '';
+  document.getElementById('pwSetErr').textContent = '';
+  setTimeout(()=>document.getElementById('pwSet1').focus(), 100);
+}
+
+// 비밀번호 설정 완료
+async function doSetPassword() {
+  const p1 = document.getElementById('pwSet1').value.trim();
+  const p2 = document.getElementById('pwSet2').value.trim();
+  const err = document.getElementById('pwSetErr');
+  if (p1.length < 4) { err.textContent = '비밀번호는 4자 이상으로 설정해 주세요.'; return; }
+  if (p1 !== p2) { err.textContent = '두 비밀번호가 일치하지 않습니다. 다시 확인해 주세요.'; return; }
+  err.textContent = '설정 중...';
+  const { error } = await sb.from('users').update({ password_hash: p1, pw_set: true }).eq('id', pwSetUser.id);
+  if (error) { err.textContent = '설정 중 오류가 발생했습니다: ' + error.message; return; }
+  pwSetUser.password_hash = p1;
+  pwSetUser.pw_set = true;
+  // 설정 완료 → 바로 로그인
+  document.getElementById('pwSetScreen').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+  loginAs(pwSetUser);
+}
+
+// 신규 계정 안내 메일 생성 (등록 후)
+function showAccountGuide(acc) {
+  const appUrl = 'https://bnzcoffee.github.io/bonanza-ops/';
+  const hireLine = acc.hire_date ? ('입사일(' + acc.hire_date + ')부터') : '오늘부터';
+  const subject = '[보난자커피] 운영 매뉴얼 앱 계정 안내';
+  const bodyLines = [
+    '안녕하세요, 보난자커피 운영팀입니다.',
+    '',
+    '보난자커피 운영 매뉴얼 앱 계정이 생성되었습니다.',
+    '',
+    '■ 내 계정 코드: ' + acc.code,
+    '■ 로그인 가능일: ' + hireLine,
+    '',
+    '[ 처음 접속하는 방법 ]',
+    '1. 아래 주소로 접속합니다.',
+    '   ' + appUrl,
+    '2. 위 계정 코드를 입력하고, 안내에 따라 비밀번호를 직접 설정합니다. (최초 1회, 같은 비밀번호 2번 입력)',
+    '3. 설정한 비밀번호로 로그인하면 완료됩니다.',
+    '',
+    '[ 휴대폰 홈 화면에 추가 (앱처럼 사용) ]',
+    '· 아이폰(Safari): 공유 버튼 → "웹 앱으로 열기" 체크 해제 → "홈 화면에 추가"',
+    '· 안드로이드(Chrome): 점 세 개(⋮) → "홈 화면에 추가"',
+    '',
+    '문의는 운영팀으로 연락 주세요. 감사합니다.',
+    '보난자커피 운영팀'
+  ];
+  const body = bodyLines.join('\n');
+  const emailTo = acc.email || '';
+  const mailto = 'mailto:' + encodeURIComponent(emailTo) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+
+  const old = document.getElementById('acctGuideModal');
+  if (old) old.remove();
+  const m = document.createElement('div');
+  m.id = 'acctGuideModal';
+  m.className = 'modal-bg open';
+  m.innerHTML = '<div class="modal-inner" style="width:440px;max-width:94vw">' +
+    '<div class="modal-title"><i class="ti ti-mail"></i> 계정 등록 완료 — 본인에게 안내</div>' +
+    '<div style="font-size:13px;color:var(--ts);margin-bottom:10px;line-height:1.6">계정이 생성되었습니다. 아래 안내를 <b>' + (acc.name||'') + '</b>님 본인에게만 전달하세요. 초기 비밀번호는 없으며, 본인이 첫 접속 시 직접 설정합니다.</div>' +
+    '<div style="background:var(--cr);border:0.5px solid var(--crd);border-radius:8px;padding:6px 10px;margin-bottom:10px;font-size:12px">' +
+      '<div>계정 코드: <b>' + acc.code + '</b></div>' +
+      '<div>등록 이메일: <b>' + (emailTo || '(미입력)') + '</b></div>' +
+    '</div>' +
+    '<textarea id="acctGuideText" class="form-input" style="min-height:150px;font-size:12px;line-height:1.5" readonly>' + body.replace(/</g,'&lt;') + '</textarea>' +
+    '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">' +
+      '<button class="btn-submit" style="flex:1" onclick="copyAcctGuide()"><i class="ti ti-copy"></i> 안내문 복사</button>' +
+      (emailTo ? '<a class="btn-submit" style="flex:1;text-align:center;text-decoration:none;background:var(--gn)" href="' + mailto + '"><i class="ti ti-mail-forward"></i> 메일 작성 열기</a>' : '') +
+    '</div>' +
+    '<div style="text-align:right;margin-top:10px"><button class="btn-cancel-sm" onclick="document.getElementById(\'acctGuideModal\').remove()">닫기</button></div>' +
+    '</div>';
+  document.body.appendChild(m);
+}
+
+function copyAcctGuide() {
+  const t = document.getElementById('acctGuideText');
+  if (!t) return;
+  navigator.clipboard.writeText(t.value).then(()=>alert('안내문이 복사되었습니다. 본인에게 전달하세요.'));
 }
 
 async function loginAs(user) {
@@ -2062,10 +2178,11 @@ async function submitEditUser(){
     } else {
       newCode = await getNextCode();
     }
-    const initPw = pw || initPwFromCode(newCode);
-    ({error} = await sb.from('users').insert({...payload,code:newCode,password_hash:initPw}));
+    // 최초 비밀번호 설정 방식: pw_set=false로 등록(직원이 첫 로그인 시 직접 설정)
+    const tempPw = initPwFromCode(newCode);
+    ({error} = await sb.from('users').insert({...payload,code:newCode,password_hash:tempPw,pw_set:false}));
     if(!error) {
-      alert('직원이 등록되었습니다.\n\n계정 코드: '+newCode+'\n초기 비밀번호: '+initPw);
+      showAccountGuide({code:newCode, name:payload.name, email:payload.email, hire_date:payload.hire_date});
     }
   }
   if(error){alert('오류: '+error.message);return;}
