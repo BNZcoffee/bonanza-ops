@@ -3367,10 +3367,13 @@ async function renderManual(area) {
       (canEditManual() ? '<br><br><button class="btn-new" onclick="goPage(\'manualedit\')"><i class="ti ti-edit"></i> 설명서 편집하기</button>' : '') + '</div>';
   } else {
     // 목차
-    const toc = sections.map(s => `<a onclick="document.getElementById('msec-${s.id}').scrollIntoView({behavior:'smooth'})" style="display:block;padding:6px 0;color:var(--brm);cursor:pointer;font-size:14px;border-bottom:0.5px solid var(--crm)">${s.title}</a>`).join('');
-    const secs = sections.map(s => `<div id="msec-${s.id}" style="margin-bottom:24px;scroll-margin-top:20px">
-      <h2 style="font-size:18px;color:var(--br);border-bottom:2px solid var(--gd);padding-bottom:6px;margin-bottom:12px">${s.title}</h2>
-      <div style="font-size:14px;line-height:1.8;color:var(--tm)" class="manual-body">${s.body||''}</div>
+    const toc = sections.map(s => `<a onclick="openManualSection(${s.id})" style="display:block;padding:6px 0;color:var(--brm);cursor:pointer;font-size:14px;border-bottom:0.5px solid var(--crm)">${s.title}</a>`).join('');
+    const secs = sections.map(s => `<div id="msec-${s.id}" class="manual-acc" style="margin-bottom:10px;scroll-margin-top:14px;background:#fff;border:0.5px solid var(--crd);border-radius:10px;overflow:hidden">
+      <button onclick="toggleManualSection(${s.id})" style="width:100%;text-align:left;background:none;border:none;cursor:pointer;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;font-family:inherit">
+        <span style="font-size:15px;font-weight:600;color:var(--br)">${s.title}</span>
+        <i class="ti ti-chevron-down acc-chevron" id="msec-chev-${s.id}" style="font-size:18px;color:var(--th);transition:transform .2s"></i>
+      </button>
+      <div id="msec-body-${s.id}" class="manual-body" style="display:none;font-size:14px;line-height:1.8;color:var(--tm);padding:0 16px 16px">${s.body||''}</div>
     </div>`).join('');
     body = `<div style="background:#fff;border:0.5px solid var(--crd);border-radius:12px;padding:16px 20px;margin-bottom:18px">
         <div style="font-size:11px;font-weight:700;color:var(--th);letter-spacing:1px;margin-bottom:8px">목차</div>${toc}</div>${secs}`;
@@ -3393,6 +3396,29 @@ async function renderManual(area) {
 let manualEditAudience = 'user';
 
 // 매뉴얼 PDF 다운로드 (인쇄 → PDF 저장, 워터마크 + 목차)
+// 설명서 섹션 접기/펼치기
+function toggleManualSection(id) {
+  const body = document.getElementById('msec-body-'+id);
+  const chev = document.getElementById('msec-chev-'+id);
+  if (!body) return;
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  if (chev) chev.style.transform = open ? 'rotate(0deg)' : 'rotate(180deg)';
+}
+
+// 목차 클릭: 해당 섹션 펼치고 이동
+function openManualSection(id) {
+  const body = document.getElementById('msec-body-'+id);
+  const chev = document.getElementById('msec-chev-'+id);
+  if (body && body.style.display === 'none') {
+    body.style.display = 'block';
+    if (chev) chev.style.transform = 'rotate(180deg)';
+  }
+  const sec = document.getElementById('msec-'+id);
+  if (sec) sec.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+
 async function downloadManualPdf() {
   if (!hasPerm('manual_pdf')) { alert('PDF 다운로드 권한이 없습니다.'); return; }
   const aud = manualAudience;
