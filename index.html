@@ -1852,7 +1852,7 @@ async function renderStaff(area) {
         ${canEditStaff() ? `
         <button class="btn-new" style="background:var(--brm)" onclick="openEditUser(null)"><i class="ti ti-user-plus"></i> 직원 추가</button>
         <button class="btn-new" style="background:var(--gn)" onclick="openStoreManager()"><i class="ti ti-building"></i> 매장 관리</button>
-        <button class="btn-new" style="background:var(--brm)" onclick="openPositionManager()"><i class="ti ti-id-badge-2"></i> 직위 관리</button>
+        <button class="btn-new" style="background:var(--brm);display:none" onclick="openPositionManager()"><i class="ti ti-id-badge-2"></i> 직위 관리</button>
         <button class="btn-new" onclick="openBulkImport()"><i class="ti ti-table-import"></i> 일괄 등록</button>
         ` : '<span style="font-size:12px;color:var(--th);align-self:center">조회 전용 (수정 권한: 운영총괄·인사팀)</span>'}
       </div>
