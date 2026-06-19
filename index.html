@@ -1825,7 +1825,7 @@ async function renderStaff(area) {
         ${storeOpts}
       </select>
       <select id="filterRole" onchange="applyStaffFilter()" style="border:0.5px solid var(--crd);border-radius:8px;padding:8px 12px;font-size:13px;background:#fff;color:var(--tm);cursor:pointer;min-width:110px">
-        <option value="">전체 직급</option>
+        <option value="">전체 직위</option>
         <option value="admin">운영팀</option>
         <option value="manager">매니저</option>
         <option value="barista">바리스타</option>
@@ -1873,7 +1873,7 @@ async function renderStaff(area) {
       <table class="staff-list-table" id="staffTable">
         <thead><tr>
           <th><input type="checkbox" onclick="selAllUsers(this)"></th>
-          <th onclick="sortStaff('role')" style="cursor:pointer">직급 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
+          <th onclick="sortStaff('role')" style="cursor:pointer">직위 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
           <th onclick="sortStaff('name')" style="cursor:pointer">이름 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
           <th onclick="sortStaff('store')" style="cursor:pointer">매장 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
           <th onclick="sortStaff('code')" style="cursor:pointer">코드 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
@@ -2253,14 +2253,14 @@ async function openBulkImport(){
   document.getElementById('catList').innerHTML=`
     <div class="hint-box" style="background:var(--gnb);border:0.5px solid var(--gn);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--gn);margin-bottom:12px">
       아래 표에 직접 입력하거나, Google Sheets/Excel에서 복사 후 이름 첫 셀 클릭 → Cmd+V 붙여넣기<br>
-      직급: <strong>매니저/바리스타/파티쉐/구매팀/인사팀</strong> | 날짜: YYYY-MM-DD | 초기 비밀번호: 자동(bnz+코드숫자)
+      직위: <strong>매니저/바리스타/파티쉐/구매팀/인사팀</strong> | 날짜: YYYY-MM-DD | 초기 비밀번호: 자동(bnz+코드숫자)
     </div>
     <div style="overflow-x:auto;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:8px">
       <table style="width:100%;border-collapse:collapse">
         <thead><tr style="background:var(--crm)">
           <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd)">이름*</th>
           <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd)">소속매장*</th>
-          <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd)">직급*</th>
+          <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd)">직위*</th>
           <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd)">입사일</th>
           <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts)">퇴사일</th>
           <th style="width:30px"></th>
@@ -2341,7 +2341,7 @@ async function submitBulk(){
     if(!name){errors.push((i+1)+'행: 이름 없음');return;}
     if(!store){errors.push((i+1)+'행: 매장 없음');return;}
     const role=roleMap[roleKor];
-    if(!role){errors.push((i+1)+'행: 직급 오류('+roleKor+')');return;}
+    if(!role){errors.push((i+1)+'행: 직위 오류('+roleKor+')');return;}
     valid.push({name,store,role,hire,retire,active:!retire||(retire>=today)});
   });
   const errEl=document.getElementById('bulkErr');
