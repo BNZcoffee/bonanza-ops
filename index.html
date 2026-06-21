@@ -359,7 +359,11 @@ textarea.form-input{min-height:120px;resize:vertical}
       <input type="password" id="pwSet2" placeholder="새 비밀번호 다시 입력" />
       <button class="btn-login" onclick="doSetPassword()">비밀번호 설정 완료</button>
       <div class="login-err" id="pwSetErr"></div>
-      <div style="font-size:11px;color:var(--th);margin-top:10px;line-height:1.5">설정한 비밀번호는 본인만 알 수 있습니다. 잊으면 운영팀에 재설정을 요청하세요.</div>
+      <div style="font-size:11px;color:var(--th);margin-top:10px;line-height:1.6;text-align:left;background:var(--crm);border-radius:8px;padding:9px 11px">
+        ⚠️ 이 앱은 <strong>사내 업무용</strong>입니다.<br>
+        인터넷 뱅킹·SNS 등 타 서비스와 <strong>동일한 비밀번호 사용을 지양</strong>해 주세요.<br>
+        <span style="color:var(--th)">설정한 비밀번호는 본인만 알 수 있으며, 분실 시 운영팀에 재설정을 요청하세요.</span>
+      </div>
     </div>
 
   </div>
@@ -916,6 +920,8 @@ function copyAcctGuide() {
 
 async function loginAs(user) {
   currentUser = user;
+  // 마지막 로그인 일시 기록 (비동기, 실패해도 로그인 진행)
+  sb.from('users').update({ last_login_at: new Date().toISOString() }).eq('id', user.id).then(()=>{});
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('mainScreen').style.display = 'flex';
   document.getElementById('topbar').style.display = 'flex';
