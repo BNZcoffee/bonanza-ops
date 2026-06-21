@@ -296,8 +296,17 @@ textarea.form-input{min-height:120px;resize:vertical}
   <div class="login-card">
     <div class="login-logo">Bonanza Coffee Korea</div>
     <div class="login-sub">운영 매뉴얼 시스템</div>
-    <input type="text" id="loginCode" placeholder="직원 코드 (예: BCK-001)" />
-    <input type="password" id="loginPw" placeholder="비밀번호" />
+    <div style="font-size:11px;color:var(--th);margin-bottom:14px;line-height:1.6;text-align:left;background:var(--cr);border-radius:8px;padding:8px 11px">
+      ID : 본인 이름 &nbsp;|&nbsp; 입사일 선택<br>PW : <strong>bnz1234</strong> (첫 로그인 후 변경 필수)
+    </div>
+    <input type="text" id="loginName" placeholder="이름 (예: 홍길동)" autocomplete="name" />
+    <input type="date" id="loginHire" style="width:100%;border:0.5px solid var(--crd);border-radius:8px;padding:10px 14px;font-size:14px;color:var(--tm);background:var(--cr);margin-bottom:10px;outline:none;font-family:inherit" />
+    <input type="password" id="loginPw" placeholder="비밀번호" autocomplete="current-password" />
+    <!-- 동명이인 분기: 코드 추가 입력 -->
+    <div id="dupCodeRow" style="display:none">
+      <div style="font-size:12px;color:var(--rd);margin-bottom:6px;text-align:left">동일 이름·입사일 계정이 여러 개입니다. 운영팀에서 안내받은 직원 코드를 입력해 주세요.</div>
+      <input type="text" id="loginCodeFallback" placeholder="직원 코드 (예: BCK-012)" style="text-transform:uppercase" />
+    </div>
     <label class="autologin-row">
       <input type="checkbox" id="autoLogin" style="width:auto;margin:0"> 자동 로그인
     </label>
@@ -578,19 +587,50 @@ function fmtDateTime(s){if(!s)return '';return toKST(s).slice(0,16).replace('T',
 function daysAgo(s){return Math.floor((new Date()-new Date(s))/864e5);}
 
 // ── AUTH ──────────────────────────────────────────
+const INIT_PW = 'bnz1234'; // 공통 초기 비밀번호
+
 async function doLogin() {
-  const code = document.getElementById('loginCode').value.trim().toUpperCase();
-  const pw = document.getElementById('loginPw').value.trim();
-  const err = document.getElementById('loginErr');
+  const name = (document.getElementById('loginName')?.value||'').trim();
+  const hire = (document.getElementById('loginHire')?.value||'').trim();   // yyyy-mm-dd
+  const pw   = (document.getElementById('loginPw')?.value||'').trim();
+  const err  = document.getElementById('loginErr');
   err.textContent = '확인 중...';
 
-  // 코드로 먼저 조회 (최초 비밀번호 설정 분기를 위해)
-  const { data, error } = await sb.from('users')
-    .select('*')
-    .eq('code', code)
-    .single();
+  if (!name) { err.textContent = '이름을 입력해 주세요.'; return; }
+  if (!hire) { err.textContent = '입사일을 선택해 주세요.'; return; }
+  if (!pw)   { err.textContent = '비밀번호를 입력해 주세요.'; return; }
 
-  if (error || !data) { err.textContent = '직원 코드 또는 비밀번호를 확인해주세요.'; return; }
+  // 이름 + 입사일로 조회
+  const { data: rows, error } = await sb.from('users')
+    .select('*')
+    .eq('name', name)
+    .eq('hire_date', hire);
+
+  if (error || !rows || rows.length === 0) {
+    err.textContent = '일치하는 계정이 없습니다. 이름 또는 입사일을 확인해 주세요.'; return;
+  }
+
+  let data;
+
+  if (rows.length === 1) {
+    // 단일 매칭
+    document.getElementById('dupCodeRow').style.display = 'none';
+    data = rows[0];
+  } else {
+    // 동명이인: 코드 추가 입력 필요
+    const codeRow = document.getElementById('dupCodeRow');
+    const codeInput = document.getElementById('loginCodeFallback');
+    const codeVal = (codeInput?.value||'').trim().toUpperCase();
+    if (!codeVal) {
+      codeRow.style.display = '';
+      codeInput.focus();
+      err.textContent = '';
+      return;
+    }
+    data = rows.find(r => r.code === codeVal);
+    if (!data) { err.textContent = '직원 코드가 일치하지 않습니다.'; return; }
+  }
+
   if (!data.active) { err.textContent = '비활성화된 계정입니다. 운영팀에 문의해 주세요.'; return; }
 
   const today = new Date().toISOString().slice(0,10);
@@ -602,20 +642,23 @@ async function doLogin() {
   if (data.hire_date && data.hire_date > today) {
     err.textContent = '입사일(' + data.hire_date + ')부터 로그인할 수 있습니다.'; return;
   }
-  // 최초 비밀번호 설정이 안 된 계정: 비밀번호 설정 화면으로
+
+  // 최초 비밀번호 미설정 계정: 초기비번(bnz1234) 확인 후 설정 화면으로
   if (!data.pw_set) {
-    // 코드만 맞으면 비밀번호 설정 화면 진입 (초기 비번 입력 불필요)
+    if (pw !== INIT_PW) { err.textContent = '첫 로그인 비밀번호는 bnz1234 입니다.'; return; }
     openPwSetScreen(data);
     return;
   }
-  // 비밀번호 확인
-  if (data.password_hash !== pw) { err.textContent = '직원 코드 또는 비밀번호를 확인해주세요.'; return; }
+
+  // 일반 로그인: 비밀번호 확인
+  if (data.password_hash !== pw) { err.textContent = '비밀번호가 맞지 않습니다.'; return; }
 
   try {
     if (document.getElementById('autoLogin').checked) {
-      localStorage.setItem('bck_auto', JSON.stringify({code, pw}));
+      // 자동 로그인 저장: name+hire+pw 형식으로 저장
+      localStorage.setItem('bck_auto', JSON.stringify({name, hire, pw, code: data.code}));
     } else {
-      localStorage.removeItem('bck_auto');  // 체크 해제 시 자동 로그인 정보 삭제
+      localStorage.removeItem('bck_auto');
     }
   } catch(e) {}
   loginAs(data);
@@ -769,9 +812,16 @@ async function doLogout() {
   document.getElementById('mainScreen').style.display = 'none';
   document.getElementById('topbar').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
-  document.getElementById('loginCode').value = '';
-  document.getElementById('loginPw').value = '';
-  document.getElementById('loginErr').textContent = '';
+  const nameEl = document.getElementById('loginName');
+  const hireEl = document.getElementById('loginHire');
+  const pwEl   = document.getElementById('loginPw');
+  const errEl  = document.getElementById('loginErr');
+  const dupRow = document.getElementById('dupCodeRow');
+  if (nameEl) nameEl.value = '';
+  if (hireEl) hireEl.value = '';
+  if (pwEl)   pwEl.value = '';
+  if (errEl)  errEl.textContent = '';
+  if (dupRow) dupRow.style.display = 'none';
 }
 
 // ── CATEGORIES ────────────────────────────────────
@@ -5003,23 +5053,36 @@ document.addEventListener('click', e => {
 (async () => {
   try {
     const saved = JSON.parse(localStorage.getItem('bck_auto')||'null');
-    if (saved && saved.code) {
-      // 로그인 화면 입력란 미리 채우기 + 체크박스 켜두기 (자동로그인 실패해도 다시 안 쓰게)
-      const codeEl = document.getElementById('loginCode');
-      const pwEl = document.getElementById('loginPw');
-      const autoEl = document.getElementById('autoLogin');
-      if (codeEl) codeEl.value = saved.code;
-      if (pwEl) pwEl.value = saved.pw || '';
-      if (autoEl) autoEl.checked = true;
-      // 자동 로그인 시도
-      if (saved.pw) {
-        const { data } = await sb.from('users').select('*').eq('code',saved.code).eq('password_hash',saved.pw).eq('active',true).single();
-        if (data) {
-          const today = new Date().toISOString().slice(0,10);
-          if (!(data.retire_date && data.retire_date <= today)) {
-            await loginAs(data);
-          }
-        }
+    if (!saved) return;
+
+    // 자동 로그인 화면 입력 미리 채우기
+    const nameEl = document.getElementById('loginName');
+    const hireEl = document.getElementById('loginHire');
+    const pwEl   = document.getElementById('loginPw');
+    const autoEl = document.getElementById('autoLogin');
+    if (nameEl && saved.name) nameEl.value = saved.name;
+    if (hireEl && saved.hire) hireEl.value = saved.hire;
+    if (pwEl   && saved.pw)   pwEl.value   = saved.pw;
+    if (autoEl) autoEl.checked = true;
+
+    // 자동 로그인 시도 (name + hire + pw 방식)
+    if (saved.name && saved.hire && saved.pw) {
+      let data = null;
+      if (saved.code) {
+        // 코드로 먼저 직접 조회 (빠르고 정확)
+        const { data: d } = await sb.from('users').select('*').eq('code', saved.code).eq('active', true).single();
+        if (d && d.name === saved.name && d.hire_date === saved.hire && d.password_hash === saved.pw) data = d;
+      }
+      if (!data) {
+        const { data: rows } = await sb.from('users').select('*').eq('name', saved.name).eq('hire_date', saved.hire).eq('active', true);
+        data = (rows||[]).find(r => r.password_hash === saved.pw) || null;
+      }
+      if (data) {
+        const today = new Date().toISOString().slice(0,10);
+        if (!data.pw_set) return; // 비번 미설정 계정은 자동 로그인 건너뜀
+        if (data.retire_date && data.retire_date <= today) return;
+        if (data.hire_date && data.hire_date > today) return;
+        await loginAs(data);
       }
     }
   } catch(e) {}
