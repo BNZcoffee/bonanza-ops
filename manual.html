@@ -31,11 +31,21 @@ body{font-family:'Segoe UI',-apple-system,system-ui,sans-serif;background:var(--
 .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:13px;color:var(--ts)}
 .logout{background:none;border:0.5px solid var(--crd);border-radius:7px;padding:5px 12px;font-size:12px;color:var(--ts);cursor:pointer}
 h2.sec{font-size:20px;font-weight:600;color:var(--br);margin:28px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--gd);scroll-margin-top:70px}
-.toc{background:#fff;border:1px solid var(--crd);border-radius:14px;padding:18px 22px;margin:14px 0}
-.toc-title{font-size:13px;font-weight:700;color:var(--th);letter-spacing:1px;text-transform:uppercase;margin-bottom:10px}
-.toc a{display:block;padding:6px 0;color:var(--brm);text-decoration:none;font-size:14px;border-bottom:1px solid var(--crm);cursor:pointer}
+/* 목차 토글 (연한 배경으로 섹션과 구분) */
+.toc{background:var(--crm);border:1px solid var(--crd);border-radius:12px;margin:14px 0;overflow:hidden}
+.toc-head{width:100%;text-align:left;background:none;border:none;cursor:pointer;padding:13px 18px;display:flex;align-items:center;justify-content:space-between;font-family:inherit}
+.toc-title{font-size:12px;font-weight:700;color:var(--brm);letter-spacing:1px;text-transform:uppercase}
+.toc-body{display:none;padding:0 18px 14px}
+.toc a{display:block;padding:6px 0;color:var(--brm);text-decoration:none;font-size:14px;border-bottom:1px solid var(--crd);cursor:pointer}
 .toc a:last-child{border-bottom:none}
 .toc a:hover{color:var(--br);font-weight:600}
+.toc-chev{font-size:16px;color:var(--th);transition:transform .2s}
+/* 섹션 아코디언 */
+.acc{background:#fff;border:1px solid var(--crd);border-radius:12px;margin-bottom:10px;overflow:hidden}
+.acc-head{width:100%;text-align:left;background:none;border:none;cursor:pointer;padding:15px 18px;display:flex;align-items:center;justify-content:space-between;font-family:inherit}
+.acc-title{font-size:16px;font-weight:600;color:var(--br)}
+.acc-chev{font-size:18px;color:var(--th);transition:transform .2s}
+.acc-body{display:none;padding:0 18px 18px}
 .mbody{font-size:14px;line-height:1.8;color:var(--tm)}
 .mbody ul{margin:8px 0 12px 22px}
 .mbody b{color:var(--brm)}
@@ -133,18 +143,39 @@ async function render(){
   if(!secs||!secs.length){
     body='<div class="loading">등록된 내용이 없습니다.</div>';
   }else{
-    const toc=secs.map((s,i)=>`<a onclick="document.getElementById('s${i}').scrollIntoView({behavior:\'smooth\'})">${s.title}</a>`).join('');
+    const toc=secs.map((s,i)=>`<a onclick="openSec(${i})">${s.title}</a>`).join('');
     const sections=secs.map((s,i)=>{
       const img=IMG_MAP[s.title];
       const figure=img?`<div class="figure">${img}<div class="figcap">${s.title} — 화면 예시</div></div>`:'';
-      return `<section id="s${i}"><h2 class="sec">${s.title}</h2><div class="mbody">${s.body||''}</div>${figure}</section>`;
+      return `<div class="acc" id="s${i}">
+        <button class="acc-head" onclick="toggleSec(${i})"><span class="acc-title">${s.title}</span><i class="ti ti-chevron-down acc-chev" id="chev${i}"></i></button>
+        <div class="acc-body" id="body${i}"><div class="mbody">${s.body||''}</div>${figure}</div>
+      </div>`;
     }).join('');
-    body=`<div class="toc"><div class="toc-title">목차</div>${toc}</div>${sections}`;
+    body=`<div class="toc">
+      <button class="toc-head" onclick="toggleToc()"><span class="toc-title">📑 목차</span><i class="ti ti-chevron-down toc-chev" id="tocChev"></i></button>
+      <div class="toc-body" id="tocBody">${toc}</div>
+    </div>${sections}`;
   }
   c.innerHTML=topbar+tabBar+`<div class="updated">이 설명서는 앱의 사용 설명서와 항상 같은 내용입니다. 여기에는 화면 예시 그림이 함께 표시됩니다.</div>`+body+`<div class="foot">보난자커피 운영 매뉴얼 · 내부 자료</div>`;
 }
 
 function gradeLabel(g){return {master:'총괄',vice:'부총괄',dept:'부서담당',manager:'매니저',staff:'매장직원'}[g]||g;}
+function toggleToc(){
+  var b=document.getElementById('tocBody'), c=document.getElementById('tocChev');
+  if(!b)return; var open=b.style.display!=='none';
+  b.style.display=open?'none':'block'; if(c)c.style.transform=open?'rotate(0deg)':'rotate(180deg)';
+}
+function toggleSec(i){
+  var b=document.getElementById('body'+i), c=document.getElementById('chev'+i);
+  if(!b)return; var open=b.style.display!=='none';
+  b.style.display=open?'none':'block'; if(c)c.style.transform=open?'rotate(0deg)':'rotate(180deg)';
+}
+function openSec(i){
+  var b=document.getElementById('body'+i), c=document.getElementById('chev'+i);
+  if(b&&b.style.display==='none'){ b.style.display='block'; if(c)c.style.transform='rotate(180deg)'; }
+  var s=document.getElementById('s'+i); if(s)s.scrollIntoView({behavior:'smooth',block:'start'});
+}
 function logout(){ me=null; document.getElementById('content').style.display='none'; document.getElementById('loginBox').style.display='block'; document.getElementById('code').value=''; document.getElementById('pw').value=''; document.getElementById('loginErr').textContent=''; document.getElementById('verBadge').textContent='로그인 후 이용'; }
 
 document.addEventListener('keydown',e=>{ if(e.key==='Enter'&&document.getElementById('loginBox').style.display!=='none') doLogin(); });
