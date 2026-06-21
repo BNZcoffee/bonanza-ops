@@ -309,7 +309,7 @@ textarea.form-input{min-height:120px;resize:vertical}
       <input type="text" id="loginCodeFallback" placeholder="직원 코드 (예: BCK-012)" style="text-transform:uppercase" />
     </div>
     <label class="autologin-row">
-      <input type="checkbox" id="autoLogin" style="width:auto;margin:0"> 자동 로그인
+      <input type="checkbox" id="autoLogin" style="width:auto;margin:0"> 이름·입사일 기억하기
     </label>
     <button class="btn-login" onclick="doLogin()">로그인</button>
     <div class="login-err" id="loginErr"></div>
@@ -691,8 +691,8 @@ async function doLogin() {
 
   try {
     if (document.getElementById('autoLogin').checked) {
-      // 자동 로그인 저장: name+hire+pw 형식으로 저장
-      localStorage.setItem('bck_auto', JSON.stringify({name, hire, pw, code: data.code}));
+      // 이름+입사일만 저장 (비밀번호는 저장하지 않음)
+      localStorage.setItem('bck_auto', JSON.stringify({name, hire, code: data.code}));
     } else {
       localStorage.removeItem('bck_auto');
     }
@@ -5210,41 +5210,22 @@ document.addEventListener('click', e => {
   }
 });
 
-(async () => {
+(() => {
   try {
     const saved = JSON.parse(localStorage.getItem('bck_auto')||'null');
     if (!saved) return;
-
-    // 자동 로그인 화면 입력 미리 채우기
+    // 이름·입사일 자동 채우기 (비밀번호는 항상 직접 입력)
     const nameEl = document.getElementById('loginName');
     const hireEl = document.getElementById('loginHire');
-    const pwEl   = document.getElementById('loginPw');
     const autoEl = document.getElementById('autoLogin');
     if (nameEl && saved.name) nameEl.value = saved.name;
     if (hireEl && saved.hire) hireEl.value = saved.hire;
-    if (pwEl   && saved.pw)   pwEl.value   = saved.pw;
     if (autoEl) autoEl.checked = true;
-
-    // 자동 로그인 시도 (name + hire + pw 방식)
-    if (saved.name && saved.hire && saved.pw) {
-      let data = null;
-      if (saved.code) {
-        // 코드로 먼저 직접 조회 (빠르고 정확)
-        const { data: d } = await sb.from('users').select('*').eq('code', saved.code).eq('active', true).single();
-        if (d && d.name === saved.name && d.hire_date === saved.hire && d.password_hash === saved.pw) data = d;
-      }
-      if (!data) {
-        const { data: rows } = await sb.from('users').select('*').eq('name', saved.name).eq('hire_date', saved.hire).eq('active', true);
-        data = (rows||[]).find(r => r.password_hash === saved.pw) || null;
-      }
-      if (data) {
-        const today = new Date().toISOString().slice(0,10);
-        if (!data.pw_set) return; // 비번 미설정 계정은 자동 로그인 건너뜀
-        if (data.retire_date && data.retire_date <= today) return;
-        if (data.hire_date && data.hire_date > today) return;
-        await loginAs(data);
-      }
-    }
+    // 비밀번호 칸으로 포커스
+    setTimeout(() => {
+      const pwEl = document.getElementById('loginPw');
+      if (pwEl) pwEl.focus();
+    }, 150);
   } catch(e) {}
 })();
 </script>
