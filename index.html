@@ -12,6 +12,7 @@
 <link rel="apple-touch-icon" id="appleTouchIcon" href="">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <link href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.snow.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.js"></script>
 <style>
@@ -315,17 +316,52 @@ textarea.form-input{min-height:120px;resize:vertical}
   </div>
 </div>
 
-<!-- 최초 비밀번호 설정 -->
+<!-- 최초 비밀번호 설정 (이메일 인증 포함 3단계) -->
 <div id="pwSetScreen" style="display:none;position:fixed;inset:0;background:var(--cr);z-index:120;align-items:center;justify-content:center">
-  <div class="login-card">
+  <div class="login-card" style="width:380px">
     <div class="login-logo">Bonanza Coffee Korea</div>
-    <div class="login-sub">최초 비밀번호 설정</div>
-    <div id="pwSetWelcome" style="font-size:13px;color:var(--ts);margin-bottom:14px;line-height:1.6"></div>
-    <input type="password" id="pwSet1" placeholder="새 비밀번호 (4자 이상)" />
-    <input type="password" id="pwSet2" placeholder="새 비밀번호 다시 입력" />
-    <button class="btn-login" onclick="doSetPassword()">비밀번호 설정 완료</button>
-    <div class="login-err" id="pwSetErr"></div>
-    <div style="font-size:11px;color:var(--th);margin-top:10px;line-height:1.5">설정한 비밀번호는 본인만 알 수 있습니다. 잊으면 운영팀에 재설정을 요청하세요.</div>
+
+    <!-- STEP 1: 이메일 확인 + 발송 -->
+    <div id="pwStep1">
+      <div class="login-sub" style="margin-bottom:14px">이메일 인증</div>
+      <div id="pwSetWelcome" style="font-size:13px;color:var(--ts);margin-bottom:14px;line-height:1.6;text-align:left"></div>
+      <div style="font-size:12px;color:var(--ts);margin-bottom:6px;text-align:left;font-weight:600">인증 이메일 주소</div>
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        <input type="email" id="pwEmailInput" placeholder="이메일 주소" style="flex:1" />
+        <button class="btn-sm ghost" onclick="toggleEmailEdit()" id="emailEditBtn" style="white-space:nowrap;font-size:12px;padding:8px 10px">변경</button>
+      </div>
+      <div id="emailEditRow" style="display:none;margin-bottom:10px">
+        <div style="font-size:11px;color:var(--th);margin-bottom:6px;line-height:1.5">변경할 이메일 주소를 입력하세요. 인증 후 DB에 반영됩니다.</div>
+        <input type="email" id="pwEmailNew" placeholder="새 이메일 주소" />
+        <button class="btn-login" style="margin-top:6px;padding:9px" onclick="applyEmailChange()">이메일 변경 저장</button>
+      </div>
+      <button class="btn-login" onclick="sendOtp()">인증번호 발송</button>
+      <div class="login-err" id="pwStep1Err"></div>
+    </div>
+
+    <!-- STEP 2: OTP 입력 -->
+    <div id="pwStep2" style="display:none">
+      <div class="login-sub" style="margin-bottom:14px">인증번호 입력</div>
+      <div id="pwStep2Info" style="font-size:13px;color:var(--ts);margin-bottom:14px;line-height:1.6;text-align:left"></div>
+      <input type="text" id="otpInput" placeholder="인증번호 6자리" maxlength="6"
+        style="text-align:center;font-size:20px;letter-spacing:6px;font-weight:700"
+        oninput="this.value=this.value.replace(/[^0-9]/g,'')" />
+      <button class="btn-login" style="margin-top:10px" onclick="verifyOtp()">확인</button>
+      <div class="login-err" id="pwStep2Err"></div>
+      <button onclick="goBackToStep1()" style="background:none;border:none;color:var(--th);font-size:12px;cursor:pointer;margin-top:10px;text-decoration:underline">← 이메일 다시 확인</button>
+    </div>
+
+    <!-- STEP 3: 새 비밀번호 설정 -->
+    <div id="pwStep3" style="display:none">
+      <div class="login-sub" style="margin-bottom:14px">비밀번호 설정</div>
+      <div style="font-size:13px;color:var(--gn);margin-bottom:14px;text-align:left">✓ 이메일 인증 완료</div>
+      <input type="password" id="pwSet1" placeholder="새 비밀번호 (4자 이상)" />
+      <input type="password" id="pwSet2" placeholder="새 비밀번호 다시 입력" />
+      <button class="btn-login" onclick="doSetPassword()">비밀번호 설정 완료</button>
+      <div class="login-err" id="pwSetErr"></div>
+      <div style="font-size:11px;color:var(--th);margin-top:10px;line-height:1.5">설정한 비밀번호는 본인만 알 수 있습니다. 잊으면 운영팀에 재설정을 요청하세요.</div>
+    </div>
+
   </div>
 </div>
 
@@ -665,34 +701,158 @@ async function doLogin() {
 }
 
 // 최초 비밀번호 설정 화면 진입
-let pwSetUser = null;
+// ── 이메일 인증 + 최초 비밀번호 설정 ──────────────
+const EMAILJS_SVC  = 'service_c2of8j3';
+const EMAILJS_TPL  = 'template_v85k3ij';
+const EMAILJS_KEY  = '4lk7oZZYhsJbbULdm';
+
+let pwSetUser  = null;
+let otpCode    = null;   // 발송한 6자리 코드
+let otpExpiry  = null;   // 만료 timestamp (10분)
+
+// 이메일 마스킹: abc@bonanza.kr → a**@bonanza.kr
+function maskEmail(email) {
+  if (!email || !email.includes('@')) return '(이메일 미등록)';
+  const [local, domain] = email.split('@');
+  const masked = local[0] + '*'.repeat(Math.max(local.length - 1, 2));
+  return masked + '@' + domain;
+}
+
+// STEP1 진입
 function openPwSetScreen(user) {
   pwSetUser = user;
   document.getElementById('loginScreen').style.display = 'none';
-  const scr = document.getElementById('pwSetScreen');
-  scr.style.display = 'flex';
-  document.getElementById('pwSetWelcome').textContent = (user.name||'') + '님, 환영합니다. 처음 접속하셨습니다. 앞으로 사용할 비밀번호를 직접 설정해 주세요.';
+  document.getElementById('pwSetScreen').style.display = 'flex';
+  // 단계 초기화
+  showPwStep(1);
+  // 환영 메시지
+  document.getElementById('pwSetWelcome').innerHTML =
+    '<strong>' + (user.name||'') + '</strong>님, 환영합니다.<br>' +
+    '보안을 위해 이메일 인증 후 비밀번호를 직접 설정해 주세요.';
+  // 이메일 표시 (읽기 전용)
+  const emailEl = document.getElementById('pwEmailInput');
+  emailEl.value = user.email || '';
+  emailEl.readOnly = true;
+  emailEl.style.background = 'var(--cr)';
+  document.getElementById('emailEditRow').style.display = 'none';
+  document.getElementById('emailEditBtn').textContent = '변경';
+  document.getElementById('pwStep1Err').textContent = '';
+}
+
+function showPwStep(n) {
+  [1,2,3].forEach(i => {
+    const el = document.getElementById('pwStep'+i);
+    if (el) el.style.display = (i===n) ? '' : 'none';
+  });
+}
+
+function goBackToStep1() {
+  otpCode = null; otpExpiry = null;
+  document.getElementById('otpInput').value = '';
+  document.getElementById('pwStep2Err').textContent = '';
+  showPwStep(1);
+}
+
+// 이메일 변경 토글
+function toggleEmailEdit() {
+  const row = document.getElementById('emailEditRow');
+  const btn = document.getElementById('emailEditBtn');
+  const isOpen = row.style.display !== 'none';
+  row.style.display = isOpen ? 'none' : '';
+  btn.textContent   = isOpen ? '변경' : '취소';
+  if (!isOpen) {
+    document.getElementById('pwEmailNew').value = '';
+    setTimeout(()=>document.getElementById('pwEmailNew').focus(), 80);
+  }
+}
+
+// 이메일 변경 저장 (인증 전 DB 반영)
+async function applyEmailChange() {
+  const newEmail = (document.getElementById('pwEmailNew').value||'').trim();
+  const err = document.getElementById('pwStep1Err');
+  if (!newEmail || !newEmail.includes('@')) { err.textContent = '올바른 이메일 주소를 입력해 주세요.'; return; }
+  err.textContent = '저장 중...';
+  const { error } = await sb.from('users').update({ email: newEmail }).eq('id', pwSetUser.id);
+  if (error) { err.textContent = '저장 오류: ' + error.message; return; }
+  pwSetUser.email = newEmail;
+  document.getElementById('pwEmailInput').value = newEmail;
+  document.getElementById('emailEditRow').style.display = 'none';
+  document.getElementById('emailEditBtn').textContent = '변경';
+  err.textContent = '';
+  err.style.color = 'var(--gn)';
+  err.textContent = '✓ 이메일이 변경되었습니다.';
+  setTimeout(()=>{ err.textContent=''; err.style.color=''; }, 2500);
+}
+
+// OTP 발송
+async function sendOtp() {
+  const err = document.getElementById('pwStep1Err');
+  const email = (document.getElementById('pwEmailInput').value||'').trim();
+  if (!email || !email.includes('@')) {
+    err.textContent = '이메일 주소가 없습니다. [변경] 버튼으로 이메일을 먼저 등록해 주세요.';
+    return;
+  }
+  err.style.color = '';
+  err.textContent = '인증번호 발송 중...';
+
+  // 6자리 OTP 생성
+  otpCode   = String(Math.floor(100000 + Math.random() * 900000));
+  otpExpiry = Date.now() + 10 * 60 * 1000; // 10분
+
+  try {
+    emailjs.init(EMAILJS_KEY);
+    await emailjs.send(EMAILJS_SVC, EMAILJS_TPL, {
+      to_email:  email,
+      user_name: pwSetUser.name || '',
+      otp_code:  otpCode
+    });
+    // STEP2로 전환
+    document.getElementById('pwStep2Info').innerHTML =
+      '<strong>' + maskEmail(email) + '</strong>으로 인증번호를 발송했습니다.<br>' +
+      '메일함을 확인해 주세요. (유효시간 10분)';
+    document.getElementById('otpInput').value = '';
+    document.getElementById('pwStep2Err').textContent = '';
+    showPwStep(2);
+    setTimeout(()=>document.getElementById('otpInput').focus(), 100);
+  } catch(e) {
+    err.textContent = '발송 오류: ' + (e?.text || e?.message || JSON.stringify(e));
+    otpCode = null; otpExpiry = null;
+  }
+}
+
+// OTP 검증
+function verifyOtp() {
+  const input = (document.getElementById('otpInput').value||'').trim();
+  const err   = document.getElementById('pwStep2Err');
+  if (!otpCode) { err.textContent = '인증번호가 만료되었습니다. 다시 시도해 주세요.'; return; }
+  if (Date.now() > otpExpiry) {
+    otpCode = null;
+    err.textContent = '인증번호가 만료되었습니다 (10분 초과). 다시 발송해 주세요.';
+    return;
+  }
+  if (input !== otpCode) { err.textContent = '인증번호가 맞지 않습니다. 다시 확인해 주세요.'; return; }
+  // 성공 → STEP3
+  otpCode = null;
   document.getElementById('pwSet1').value = '';
   document.getElementById('pwSet2').value = '';
   document.getElementById('pwSetErr').textContent = '';
+  showPwStep(3);
   setTimeout(()=>document.getElementById('pwSet1').focus(), 100);
 }
 
-// 비밀번호 설정 완료
+// 비밀번호 설정 완료 (STEP3)
 async function doSetPassword() {
-  const p1 = document.getElementById('pwSet1').value.trim();
-  const p2 = document.getElementById('pwSet2').value.trim();
+  const p1  = document.getElementById('pwSet1').value.trim();
+  const p2  = document.getElementById('pwSet2').value.trim();
   const err = document.getElementById('pwSetErr');
   if (p1.length < 4) { err.textContent = '비밀번호는 4자 이상으로 설정해 주세요.'; return; }
-  if (p1 !== p2) { err.textContent = '두 비밀번호가 일치하지 않습니다. 다시 확인해 주세요.'; return; }
+  if (p1 !== p2)     { err.textContent = '두 비밀번호가 일치하지 않습니다. 다시 확인해 주세요.'; return; }
   err.textContent = '설정 중...';
   const { error } = await sb.from('users').update({ password_hash: p1, pw_set: true }).eq('id', pwSetUser.id);
   if (error) { err.textContent = '설정 중 오류가 발생했습니다: ' + error.message; return; }
   pwSetUser.password_hash = p1;
-  pwSetUser.pw_set = true;
-  // 설정 완료 → 바로 로그인
+  pwSetUser.pw_set        = true;
   document.getElementById('pwSetScreen').style.display = 'none';
-  document.getElementById('loginScreen').style.display = 'flex';
   loginAs(pwSetUser);
 }
 
