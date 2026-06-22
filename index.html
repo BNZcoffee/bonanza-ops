@@ -1314,6 +1314,11 @@ async function openPostById(id) {
   const { data } = await sb.from('posts').select('*, categories(name), users(name,store)').eq('id',id).single();
   if (!data || !canSee(data)) return;
   currentPost = data;
+  // 게시글의 카테고리로 currentCatId 동기화 (전체보기·검색 등 어디서 열어도 정확히 판단)
+  if (data.category_id) {
+    currentCatId = data.category_id;
+    currentCatName = allCats.find(c => c.id === data.category_id)?.name || '';
+  }
   goPage('postdetail');
 }
 
@@ -1325,7 +1330,9 @@ async function renderPostDetail(area) {
   const week = new Date(Date.now() - 7*24*60*60*1000).toISOString();
   const isNew = new Date(p.created_at) >= new Date(week);
   const isAdmin = currentUser.role === 'admin';
-  const isDeptWriter = canWrite();
+  // 전체보기 등 currentCatId와 무관하게 게시글 자체의 카테고리로 판단
+  const postCat = allCats.find(c => c.id === p.category_id);
+  const isDeptWriter = canWriteCatObj(postCat);
 
   // load reads, comments, attachments
   const [readsRes, cmtsRes, attRes, favRes] = await Promise.all([
@@ -1468,7 +1475,7 @@ async function renderPostDetail(area) {
       </div>
       <div class="wm-wrap">
         <div class="watermark">${wmText}&nbsp;&nbsp;&nbsp;${wmText}&nbsp;&nbsp;&nbsp;${wmText}</div>
-        <div class="detail-body" id="detailBodyContent" onselectstart="return false">${p.body}</div>
+        <div class="detail-body" id="detailBodyContent" onselectstart="return false"></div>
       </div>
       ${attachHtml}
       ${refHtml}
@@ -1480,6 +1487,8 @@ async function renderPostDetail(area) {
   setTimeout(()=>{
     const bodyEl = document.getElementById('detailBodyContent');
     if(bodyEl){
+      // Quill HTML을 innerHTML로 삽입 (리스트·서식 정상 렌더링)
+      bodyEl.innerHTML = currentPost ? (currentPost.body || '') : '';
       bodyEl.querySelectorAll('img').forEach(im=>{
         im.style.cursor='zoom-in';
         im.addEventListener('click', ()=>openImageZoom(im.getAttribute('src')));
