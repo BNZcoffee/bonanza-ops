@@ -2795,16 +2795,123 @@ async function submitBulk(){
   const btn=document.getElementById('catModalOkBtn');
   btn.textContent='등록 중...';btn.disabled=true;
   let ok=0,fail=0;
+  const registered=[];
   for(const r of valid){
     const code=await getNextCode();
     const initPw=initPwFromCode(code);
     const{error}=await sb.from('users').insert({code,name:r.name,store:r.store,role:r.role,password_hash:initPw,hire_date:r.hire||null,retire_date:r.retire||null,active:r.active});
-    if(error)fail++;else ok++;
+    if(error){ fail++; }
+    else { ok++; registered.push({...r, code, hire_date:r.hire||null}); }
   }
   btn.textContent='등록하기';btn.disabled=false;
   document.getElementById('catModal').classList.remove('open');
-  alert('완료: '+ok+'명 성공'+(fail?', '+fail+'명 실패':''));
   renderStaff(document.getElementById('contentArea'));
+  if(ok > 0) showBulkGuide(registered, fail);
+}
+
+// 일괄 등록 완료 후 안내문 모달
+function showBulkGuide(list, failCount) {
+  const appUrl = 'https://bnzcoffee.github.io/bonanza-ops/';
+  const old = document.getElementById('bulkGuideModal');
+  if(old) old.remove();
+
+  // 직원별 안내문 생성
+  const items = list.map(r => {
+    const hireLine = r.hire_date ? r.hire_date + ' 부터' : '오늘부터';
+    const body = [
+      '안녕하세요, 보난자커피 운영팀입니다.',
+      '',
+      r.name + '님의 운영 매뉴얼 앱 계정이 생성되었습니다.',
+      '',
+      '■ 로그인 방법',
+      '  · ID : 본인 이름(' + r.name + ') + 입사일(' + (r.hire_date||'미등록') + ')',
+      '  · PW : bnz1234 → 첫 로그인 후 직접 변경',
+      '  · 로그인 가능일: ' + hireLine,
+      '',
+      '[ 접속 주소 ]',
+      '  ' + appUrl,
+      '',
+      '[ 휴대폰 홈 화면에 추가 (앱처럼 사용) ]',
+      '  · 아이폰(Safari): 공유 → "홈 화면에 추가"',
+      '  · 안드로이드(Chrome): 점 세 개(⋮) → "홈 화면에 추가"',
+      '',
+      '문의는 운영팀으로 연락 주세요.',
+      '보난자커피 운영팀'
+    ].join('\n');
+
+    const subject = '[보난자커피] 운영 매뉴얼 앱 계정 안내';
+    const mailto = r.email
+      ? 'mailto:' + encodeURIComponent(r.email) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body)
+      : null;
+
+    return { name: r.name, email: r.email, body, mailto };
+  });
+
+  // 전체 안내문 (복사용)
+  const allText = items.map(it =>
+    '── ' + it.name + ' ──\n' + it.body
+  ).join('\n\n' + '='.repeat(40) + '\n\n');
+
+  // 개별 항목 HTML
+  const itemsHtml = items.map((it, i) => `
+    <div style="border:0.5px solid var(--crd);border-radius:8px;padding:12px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px">
+        <div>
+          <span style="font-size:13px;font-weight:600;color:var(--tm)">${it.name}</span>
+          <span style="font-size:11px;color:var(--th);margin-left:8px">${it.email||'이메일 미등록'}</span>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button onclick="copyBulkItem(${i})" class="btn-cancel-sm" style="font-size:11px;padding:4px 9px">
+            <i class="ti ti-copy"></i> 복사
+          </button>
+          ${it.mailto ? `<a href="${it.mailto}" class="btn-cancel-sm" style="font-size:11px;padding:4px 9px;text-decoration:none">
+            <i class="ti ti-mail-forward"></i> 메일
+          </a>` : ''}
+        </div>
+      </div>
+      <textarea id="bulkGuideText-${i}" style="width:100%;border:0.5px solid var(--crd);border-radius:6px;padding:8px;font-size:11px;color:var(--ts);background:var(--cr);resize:none;font-family:inherit;line-height:1.6;min-height:100px" readonly>${it.body}</textarea>
+    </div>`
+  ).join('');
+
+  const m = document.createElement('div');
+  m.id = 'bulkGuideModal';
+  m.className = 'modal-bg open';
+  m.innerHTML = `
+    <div class="modal-inner" style="width:520px;max-width:96vw;max-height:90vh;overflow-y:auto">
+      <div class="modal-title"><i class="ti ti-users-check"></i> 일괄 등록 완료</div>
+      <div style="font-size:13px;color:var(--ts);margin-bottom:14px;line-height:1.6">
+        <strong>${list.length}명</strong> 등록 완료${failCount ? ' · <span style="color:var(--rd)">' + failCount + '명 실패</span>' : ''}<br>
+        <span style="font-size:12px;color:var(--th)">각 직원에게 개별 안내문을 전달하거나, 전체 복사 후 단체 메시지로 보내세요.</span>
+      </div>
+      <div style="margin-bottom:12px">
+        <button onclick="copyAllBulkGuide()" class="btn-submit" style="width:100%">
+          <i class="ti ti-copy"></i> 전체 안내문 한꺼번에 복사
+        </button>
+      </div>
+      <textarea id="bulkGuideAllText" style="display:none">${allText}</textarea>
+      ${itemsHtml}
+      <div style="text-align:right;margin-top:10px">
+        <button class="btn-cancel-sm" onclick="document.getElementById('bulkGuideModal').remove()">닫기</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+}
+
+function copyBulkItem(i) {
+  const t = document.getElementById('bulkGuideText-' + i);
+  if(!t) return;
+  navigator.clipboard.writeText(t.value).then(() => {
+    const btn = t.previousElementSibling?.querySelector('button');
+    alert('안내문이 복사되었습니다. 해당 직원에게 전달하세요.');
+  });
+}
+
+function copyAllBulkGuide() {
+  const t = document.getElementById('bulkGuideAllText');
+  if(!t) return;
+  navigator.clipboard.writeText(t.value).then(() => {
+    alert('전체 안내문이 복사되었습니다.');
+  });
 }
 // ── STATS ─────────────────────────────────────────
 async function renderStats(area) {
