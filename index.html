@@ -100,9 +100,36 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--cr);color:var(
 .detail-meta{font-size:12px;color:var(--th);display:flex;gap:14px;align-items:center;flex-wrap:wrap}
 .wm-wrap{position:relative;user-select:none;-webkit-user-select:none}
 .watermark{position:absolute;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center;z-index:2;opacity:.055;font-size:13px;font-weight:700;color:var(--br);transform:rotate(-30deg);white-space:nowrap;letter-spacing:2px}
-.detail-body{font-size:14px;line-height:1.8;color:var(--tm);margin-bottom:18px;position:relative;z-index:1;white-space:pre-wrap}
+.detail-body{font-size:14px;line-height:1.8;color:var(--tm);margin-bottom:18px;position:relative;z-index:1}
+.detail-body p{margin:0 0 0.4em}
+.detail-body ol,.detail-body ul{padding-left:1.6em;margin:0.3em 0}
+.detail-body ol{list-style-type:decimal}
+.detail-body ul{list-style-type:disc}
+.detail-body ul li.ql-indent-1,.detail-body ol li.ql-indent-1{padding-left:1.5em}
+.detail-body h1{font-size:1.5em;font-weight:700;margin:0.5em 0 0.3em}
+.detail-body h2{font-size:1.25em;font-weight:700;margin:0.5em 0 0.3em}
+.detail-body h3{font-size:1.1em;font-weight:700;margin:0.5em 0 0.3em}
+.detail-body li{margin:0.1em 0}
+.detail-body li.ql-indent-1{padding-left:2em}
+.detail-body li.ql-indent-2{padding-left:3.5em}
+.detail-body blockquote{border-left:3px solid var(--crd);padding-left:12px;color:var(--ts);margin:0.5em 0}
+.detail-body a{color:var(--bl);text-decoration:underline}
 .detail-body img{max-width:100%;height:auto;border-radius:8px}
 .ql-editor img{cursor:pointer}
+/* Quill 에디터 — PC/모바일 동일 렌더링 */
+.ql-container{font-size:14px !important;font-family:'Segoe UI',system-ui,sans-serif !important}
+.ql-editor{line-height:1.8;min-height:180px;font-size:14px !important}
+.ql-editor p{margin:0 0 0.4em}
+.ql-editor ol,.ql-editor ul{padding-left:1.6em;margin:0.3em 0}
+.ql-editor ol{list-style-type:decimal !important}
+.ql-editor ul:not(.ql-check){list-style-type:disc !important}
+.ql-editor li{margin:0.1em 0}
+.ql-editor h1{font-size:1.5em;font-weight:700}
+.ql-editor h2{font-size:1.25em;font-weight:700}
+.ql-editor h3{font-size:1.1em;font-weight:700}
+/* 모바일에서 toolbar 줄바꿈 허용 */
+.ql-toolbar.ql-snow{flex-wrap:wrap !important;padding:6px}
+.ql-toolbar.ql-snow .ql-formats{margin-right:6px}
 .attach-label{font-size:11px;font-weight:700;color:var(--th);letter-spacing:1px;text-transform:uppercase;margin-bottom:7px}
 .attach-file{display:inline-flex;align-items:center;gap:5px;background:var(--cr);border:0.5px solid var(--crd);border-radius:8px;padding:5px 10px;font-size:12px;color:var(--ts);cursor:pointer;margin:3px 3px 0 0;text-decoration:none}
 .section-label{font-size:11px;font-weight:700;color:var(--th);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px}
@@ -1693,9 +1720,16 @@ function renderNewPost(area, ex) {
     nQuill = new Quill('#nQuillBox', {
       theme:'snow',
       modules:{toolbar:{
-        container:[[{header:[1,2,3,false]}],['bold','italic','underline','strike'],
-          [{color:[]},{background:[]}],[{list:'ordered'},{list:'bullet'}],
-          ['link','image'],['clean']],
+        container:[
+          [{header:[1,2,3,false]}],
+          ['bold','italic','underline','strike'],
+          [{color:[]},{background:[]}],
+          [{list:'ordered'},{list:'bullet'},{list:'check'}],
+          [{indent:'-1'},{indent:'+1'}],
+          [{align:[]}],
+          ['link','image'],
+          ['clean']
+        ],
         handlers:{image:()=>{
           const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.click();
           inp.onchange=async()=>{
