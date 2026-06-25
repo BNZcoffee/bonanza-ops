@@ -432,12 +432,23 @@ textarea.form-input{min-height:120px;resize:vertical}
 </div>
 
 <!-- NOTIF PANEL -->
-<div class="notif-panel" id="notifPanel">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+<div class="notif-panel" id="notifPanel" style="width:320px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
     <span style="font-size:14px;font-weight:600;color:var(--tm)">알림</span>
     <button onclick="closeNotifPanel()" style="background:none;border:none;cursor:pointer;color:var(--th)"><i class="ti ti-x"></i></button>
   </div>
-  <div id="notifList"></div>
+  <!-- 탭 -->
+  <div style="display:flex;gap:4px;margin-bottom:12px;border-bottom:0.5px solid var(--crd);padding-bottom:8px">
+    <button id="notifTabNew" onclick="switchNotifTab('new')"
+      style="flex:1;background:var(--br);color:#fff;border:none;border-radius:6px;padding:5px 8px;font-size:12px;font-weight:600;cursor:pointer">
+      새 알림 <span id="notifTabNewBadge"></span>
+    </button>
+    <button id="notifTabRead" onclick="switchNotifTab('read')"
+      style="flex:1;background:none;border:0.5px solid var(--crd);color:var(--ts);border-radius:6px;padding:5px 8px;font-size:12px;cursor:pointer">
+      확인한 알림
+    </button>
+  </div>
+  <div id="notifList" style="max-height:420px;overflow-y:auto"></div>
 </div>
 
 <!-- CAT MODAL -->
@@ -3342,52 +3353,106 @@ async function renderSaved(area){
   area.innerHTML = `<div class="page-header"><div class="page-title"><i class="ti ti-bookmark"></i> 저장한 공지</div><div class="page-sub">즐겨찾기한 공지 ${sorted.length}개</div></div><div class="post-list">${html}</div>`;
 }
 
+let currentNotifTab = 'new';
+
+function switchNotifTab(tab) {
+  currentNotifTab = tab;
+  const btnNew  = document.getElementById('notifTabNew');
+  const btnRead = document.getElementById('notifTabRead');
+  if (btnNew && btnRead) {
+    if (tab === 'new') {
+      btnNew.style.background  = 'var(--br)';  btnNew.style.color  = '#fff';  btnNew.style.border  = 'none';
+      btnRead.style.background = 'none';        btnRead.style.color = 'var(--ts)'; btnRead.style.border = '0.5px solid var(--crd)';
+    } else {
+      btnRead.style.background = 'var(--br)';  btnRead.style.color = '#fff';  btnRead.style.border = 'none';
+      btnNew.style.background  = 'none';        btnNew.style.color  = 'var(--ts)'; btnNew.style.border  = '0.5px solid var(--crd)';
+    }
+  }
+  loadNotifPanel();
+}
+
 function toggleNotifPanel() {
   const panel = document.getElementById('notifPanel');
   if (panel.classList.contains('open')) { panel.classList.remove('open'); return; }
+  currentNotifTab = 'new';
+  // 탭 초기 상태 복원
+  const btnNew  = document.getElementById('notifTabNew');
+  const btnRead = document.getElementById('notifTabRead');
+  if (btnNew)  { btnNew.style.background  = 'var(--br)'; btnNew.style.color  = '#fff'; btnNew.style.border  = 'none'; }
+  if (btnRead) { btnRead.style.background = 'none'; btnRead.style.color = 'var(--ts)'; btnRead.style.border = '0.5px solid var(--crd)'; }
   loadNotifPanel();
   panel.classList.add('open');
 }
 function closeNotifPanel() { document.getElementById('notifPanel').classList.remove('open'); }
 async function loadNotifPanel() {
-  const week = new Date(Date.now()-7*864e5).toISOString();
-  const {data:posts} = await sb.from('posts').select('id,title,created_at,categories(name)').eq('status','published').gte('created_at',week).order('created_at',{ascending:false}).limit(10);
-  const {data:myReads} = await sb.from('post_reads').select('post_id').eq('user_id',currentUser.id);
-  const readIds = new Set((myReads||[]).map(r=>r.post_id));
-  const unread = (posts||[]).filter(p=>!readIds.has(p.id));
+  const list  = document.getElementById('notifList');
+  if (!list) return;
+  list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--th);font-size:13px"><i class="ti ti-loader spin"></i></div>';
 
-  // 나에게 배정된 미완료 신청
+  if (currentNotifTab === 'read') {
+    // ── 확인한 알림 탭 ──────────────────────────────
+    const month = new Date(Date.now() - 30*864e5).toISOString();
+    const {data:readNotifs} = await sb.from('notifications')
+      .select('*').eq('user_id', currentUser.id).eq('is_read', true)
+      .gte('created_at', month)
+      .order('created_at', {ascending: false}).limit(50);
+    const items = readNotifs || [];
+    let html = '';
+    if (items.length) {
+      html += `<div style="font-size:10px;color:var(--th);padding:0 0 8px;letter-spacing:.5px">최근 30일 확인한 알림 ${items.length}건</div>`;
+      html += items.map(n => {
+        const icon  = n.ref_type==='interview' ? 'ti-message-report' : 'ti-clipboard-check';
+        const onclick = n.ref_type==='interview'
+          ? `openInterviewById(${n.ref_id});closeNotifPanel()`
+          : `openReqById(${n.ref_id});closeNotifPanel()`;
+        return `<div class="notif-item" onclick="${onclick}" style="opacity:.6;border-left:3px solid var(--crd);padding-left:10px">
+          <div class="notif-item-title" style="color:var(--ts)">
+            <i class="ti ${icon}" style="color:var(--th);margin-right:5px;font-size:12px"></i>${n.message}
+          </div>
+          <div class="notif-item-meta">${n.created_at?.slice(0,16).replace('T',' ')||''} · 확인 완료</div>
+        </div>`;
+      }).join('');
+    } else {
+      html = '<div style="font-size:13px;color:var(--th);padding:20px 0;text-align:center">최근 30일간 확인한 알림이 없습니다.</div>';
+    }
+    list.innerHTML = html;
+    return;
+  }
+
+  // ── 새 알림 탭 ───────────────────────────────────
+  const week = new Date(Date.now()-7*864e5).toISOString();
+  const [{data:posts},{data:myReads},{data:myNotifs}] = await Promise.all([
+    sb.from('posts').select('id,title,created_at,categories(name)').eq('status','published').gte('created_at',week).order('created_at',{ascending:false}).limit(10),
+    sb.from('post_reads').select('post_id').eq('user_id',currentUser.id),
+    sb.from('notifications').select('*').eq('user_id',currentUser.id).eq('is_read',false).order('created_at',{ascending:false}).limit(30)
+  ]);
+  const readIds    = new Set((myReads||[]).map(r=>r.post_id));
+  const unread     = (posts||[]).filter(p=>!readIds.has(p.id));
+  const notifItems = myNotifs || [];
+
   let myReqs = [];
-  if (currentUser.role === 'admin' || isManagerRole(currentUser.role) || currentUser.is_master || currentUser.part) {
+  if (currentUser.role==='admin'||isManagerRole(currentUser.role)||currentUser.is_master||currentUser.part) {
     const {data:reqs} = await sb.from('requests')
       .select('id,title,status,created_at,request_types(name)')
-      .eq('assignee_id', currentUser.id)
-      .in('status',['submitted','in_progress'])
+      .eq('assignee_id',currentUser.id).in('status',['submitted','in_progress'])
       .order('created_at',{ascending:false}).limit(10);
     myReqs = reqs || [];
   }
 
+  // 탭 뱃지 숫자
+  const badge = document.getElementById('notifTabNewBadge');
+  const total = notifItems.length + myReqs.length + unread.length;
+  if (badge) badge.textContent = total > 0 ? ` (${total})` : '';
+
   const guide = `<div style="font-size:11px;color:var(--th);padding:8px 0 0;border-top:0.5px solid var(--crd);margin-top:8px;line-height:1.5">게시글에서 <strong>확인했습니다</strong>를 누르면 공지 알림이 해제됩니다.</div>`;
-  const list = document.getElementById('notifList');
-
-  // 내 앱 알림 (미읽음)
-  const {data:myNotifs} = await sb.from('notifications')
-    .select('*')
-    .eq('user_id', currentUser.id)
-    .eq('is_read', false)
-    .order('created_at', {ascending: false})
-    .limit(20);
-  const notifItems = myNotifs || [];
-
   let html = '';
 
-  // 앱 알림 (면담 피드백 / 업무 처리 결과)
   if (notifItems.length) {
-    html += `<div style="font-size:10px;font-weight:700;color:var(--rd);letter-spacing:1px;padding:4px 0 6px">새 알림 ${notifItems.length}건</div>`;
+    html += `<div style="font-size:10px;font-weight:700;color:var(--rd);letter-spacing:1px;padding:4px 0 6px">업무 알림 ${notifItems.length}건</div>`;
     html += notifItems.map(n => {
-      const icon = n.ref_type === 'interview' ? 'ti-message-report' : 'ti-clipboard-check';
-      const color = n.ref_type === 'interview' ? 'var(--pu)' : 'var(--gn)';
-      const onclick = n.ref_type === 'interview'
+      const icon  = n.ref_type==='interview' ? 'ti-message-report' : 'ti-clipboard-check';
+      const color = n.ref_type==='interview' ? 'var(--pu)' : 'var(--gn)';
+      const onclick = n.ref_type==='interview'
         ? `markNotifRead(${n.id});openInterviewById(${n.ref_id});closeNotifPanel()`
         : `markNotifRead(${n.id});openReqById(${n.ref_id});closeNotifPanel()`;
       return `<div class="notif-item" onclick="${onclick}" style="border-left:3px solid ${color};padding-left:10px">
@@ -3397,34 +3462,48 @@ async function loadNotifPanel() {
         <div class="notif-item-meta">${n.created_at?.slice(0,16).replace('T',' ')||''}</div>
       </div>`;
     }).join('');
-    html += `<button onclick="markAllNotifsRead()" style="width:100%;background:none;border:0.5px solid var(--crd);border-radius:6px;padding:6px;font-size:11px;color:var(--th);cursor:pointer;margin:6px 0">모두 읽음 처리</button>`;
+    html += `<button onclick="markAllNotifsRead()" style="width:100%;background:none;border:0.5px solid var(--crd);border-radius:6px;padding:6px;font-size:11px;color:var(--th);cursor:pointer;margin:4px 0 8px">모두 읽음 처리 → 확인한 알림으로 이동</button>`;
   }
 
   if (myReqs.length) {
-    if (notifItems.length) html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding:10px 0 6px;border-top:0.5px solid var(--crd);margin-top:4px">담당 배정된 업무 신청</div>`;
-    else html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding:4px 0 6px">담당 배정된 업무 신청</div>`;
-    html += myReqs.map(r=>`<div class="notif-item" onclick="openReqById(${r.id});closeNotifPanel()"><div class="notif-item-title"><span class="notif-dot-item" style="background:var(--gd)"></span>${r.title}</div><div class="notif-item-meta">${r.request_types?.name||'신청'} · ${REQ_STATUS[r.status]?.label||''} · ${fmtDate(r.created_at)}</div></div>`).join('');
+    const sep = notifItems.length ? 'border-top:0.5px solid var(--crd);margin-top:4px;padding-top:6px;' : '';
+    html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding-bottom:6px;${sep}">담당 배정된 업무 신청</div>`;
+    html += myReqs.map(r=>`<div class="notif-item" onclick="openReqById(${r.id});closeNotifPanel()">
+      <div class="notif-item-title"><span class="notif-dot-item" style="background:var(--gd)"></span>${r.title}</div>
+      <div class="notif-item-meta">${r.request_types?.name||'신청'} · ${REQ_STATUS[r.status]?.label||''} · ${fmtDate(r.created_at)}</div>
+    </div>`).join('');
   }
-  if (unread.length) {
-    if (notifItems.length || myReqs.length) html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding:10px 0 6px;border-top:0.5px solid var(--crd);margin-top:8px">읽지 않은 공지</div>`;
-    html += unread.map(p=>`<div class="notif-item" onclick="openPostById(${p.id});closeNotifPanel()"><div class="notif-item-title"><span class="notif-dot-item"></span>${p.title}</div><div class="notif-item-meta">${p.categories?.name||''} · ${fmtDate(p.created_at)}</div></div>`).join('');
-  }
-  if (!notifItems.length && !myReqs.length && !unread.length) {
-    html = `<div style="font-size:13px;color:var(--th);padding:10px 0">새 알림이 없습니다.</div>`;
-  }
-  list.innerHTML = html + guide;
-}
 
+  if (unread.length) {
+    const sep = (notifItems.length||myReqs.length) ? 'border-top:0.5px solid var(--crd);margin-top:8px;padding-top:6px;' : '';
+    html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding-bottom:6px;${sep}">읽지 않은 공지</div>`;
+    html += unread.map(p=>`<div class="notif-item" onclick="openPostById(${p.id});closeNotifPanel()">
+      <div class="notif-item-title"><span class="notif-dot-item"></span>${p.title}</div>
+      <div class="notif-item-meta">${p.categories?.name||''} · ${fmtDate(p.created_at)}</div>
+    </div>`).join('');
+  }
+
+  if (!notifItems.length && !myReqs.length && !unread.length) {
+    html = '<div style="font-size:13px;color:var(--th);padding:20px 0;text-align:center">새 알림이 없습니다.<br><span style="font-size:11px;color:var(--th)">확인한 알림은 오른쪽 탭에서 볼 수 있습니다.</span></div>';
+  }
+  list.innerHTML = html + (unread.length ? guide : '');
+}
 // 알림 읽음 처리
 async function markNotifRead(id) {
   await sb.from('notifications').update({is_read: true}).eq('id', id);
   updateNotifDot();
+  // 패널 열려있으면 새 알림 탭 갱신
+  if (document.getElementById('notifPanel')?.classList.contains('open')) {
+    currentNotifTab = 'new';
+    loadNotifPanel();
+  }
 }
 async function markAllNotifsRead() {
   await sb.from('notifications').update({is_read: true})
     .eq('user_id', currentUser.id).eq('is_read', false);
   updateNotifDot();
-  loadNotifPanel();
+  // 확인한 알림 탭으로 자동 전환
+  switchNotifTab('read');
 }
 
 // 알림 생성 헬퍼
