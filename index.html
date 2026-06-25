@@ -434,7 +434,7 @@ textarea.form-input{min-height:120px;resize:vertical}
 <!-- NOTIF PANEL -->
 <div class="notif-panel" id="notifPanel">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-    <span style="font-size:14px;font-weight:600;color:var(--tm)">새 공지 알림</span>
+    <span style="font-size:14px;font-weight:600;color:var(--tm)">알림</span>
     <button onclick="closeNotifPanel()" style="background:none;border:none;cursor:pointer;color:var(--th)"><i class="ti ti-x"></i></button>
   </div>
   <div id="notifList"></div>
@@ -1090,7 +1090,15 @@ async function updateNotifDot() {
   const reqBadge = document.getElementById('reqNavBadge');
   if (reqBadge) reqBadge.style.display = myReqCount > 0 ? '' : 'none';
 
-  dot.style.display = (unread.length || myReqCount) ? 'inline-block' : 'none';
+  // 내 미읽음 앱 알림 카운트
+  const {data:myNotifs} = await sb.from('notifications')
+    .select('id').eq('user_id', currentUser.id).eq('is_read', false);
+  const myNotifCount = (myNotifs||[]).length;
+
+  dot.style.display = (unread.length || myReqCount || myNotifCount) ? 'inline-block' : 'none';
+  // 알림 뱃지 숫자 표시
+  const totalCount = unread.length + myReqCount + myNotifCount;
+  dot.title = totalCount > 0 ? `알림 ${totalCount}건` : '';
   allCats.forEach(c => {
     const badge = document.getElementById('newBadge-'+c.id);
     if (badge) badge.style.display = unread.some(p=>p.category_id===c.id) ? '' : 'none';
@@ -3362,19 +3370,70 @@ async function loadNotifPanel() {
   const guide = `<div style="font-size:11px;color:var(--th);padding:8px 0 0;border-top:0.5px solid var(--crd);margin-top:8px;line-height:1.5">게시글에서 <strong>확인했습니다</strong>를 누르면 공지 알림이 해제됩니다.</div>`;
   const list = document.getElementById('notifList');
 
+  // 내 앱 알림 (미읽음)
+  const {data:myNotifs} = await sb.from('notifications')
+    .select('*')
+    .eq('user_id', currentUser.id)
+    .eq('is_read', false)
+    .order('created_at', {ascending: false})
+    .limit(20);
+  const notifItems = myNotifs || [];
+
   let html = '';
+
+  // 앱 알림 (면담 피드백 / 업무 처리 결과)
+  if (notifItems.length) {
+    html += `<div style="font-size:10px;font-weight:700;color:var(--rd);letter-spacing:1px;padding:4px 0 6px">새 알림 ${notifItems.length}건</div>`;
+    html += notifItems.map(n => {
+      const icon = n.ref_type === 'interview' ? 'ti-message-report' : 'ti-clipboard-check';
+      const color = n.ref_type === 'interview' ? 'var(--pu)' : 'var(--gn)';
+      const onclick = n.ref_type === 'interview'
+        ? `markNotifRead(${n.id});openInterviewById(${n.ref_id});closeNotifPanel()`
+        : `markNotifRead(${n.id});openReqById(${n.ref_id});closeNotifPanel()`;
+      return `<div class="notif-item" onclick="${onclick}" style="border-left:3px solid ${color};padding-left:10px">
+        <div class="notif-item-title">
+          <i class="ti ${icon}" style="color:${color};margin-right:5px;font-size:13px"></i>${n.message}
+        </div>
+        <div class="notif-item-meta">${n.created_at?.slice(0,16).replace('T',' ')||''}</div>
+      </div>`;
+    }).join('');
+    html += `<button onclick="markAllNotifsRead()" style="width:100%;background:none;border:0.5px solid var(--crd);border-radius:6px;padding:6px;font-size:11px;color:var(--th);cursor:pointer;margin:6px 0">모두 읽음 처리</button>`;
+  }
+
   if (myReqs.length) {
-    html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding:4px 0 6px">담당 배정된 업무 신청</div>`;
+    if (notifItems.length) html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding:10px 0 6px;border-top:0.5px solid var(--crd);margin-top:4px">담당 배정된 업무 신청</div>`;
+    else html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding:4px 0 6px">담당 배정된 업무 신청</div>`;
     html += myReqs.map(r=>`<div class="notif-item" onclick="openReqById(${r.id});closeNotifPanel()"><div class="notif-item-title"><span class="notif-dot-item" style="background:var(--gd)"></span>${r.title}</div><div class="notif-item-meta">${r.request_types?.name||'신청'} · ${REQ_STATUS[r.status]?.label||''} · ${fmtDate(r.created_at)}</div></div>`).join('');
   }
   if (unread.length) {
-    if (myReqs.length) html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding:10px 0 6px;border-top:0.5px solid var(--crd);margin-top:8px">새 공지</div>`;
+    if (notifItems.length || myReqs.length) html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding:10px 0 6px;border-top:0.5px solid var(--crd);margin-top:8px">읽지 않은 공지</div>`;
     html += unread.map(p=>`<div class="notif-item" onclick="openPostById(${p.id});closeNotifPanel()"><div class="notif-item-title"><span class="notif-dot-item"></span>${p.title}</div><div class="notif-item-meta">${p.categories?.name||''} · ${fmtDate(p.created_at)}</div></div>`).join('');
   }
-  if (!myReqs.length && !unread.length) {
+  if (!notifItems.length && !myReqs.length && !unread.length) {
     html = `<div style="font-size:13px;color:var(--th);padding:10px 0">새 알림이 없습니다.</div>`;
   }
   list.innerHTML = html + guide;
+}
+
+// 알림 읽음 처리
+async function markNotifRead(id) {
+  await sb.from('notifications').update({is_read: true}).eq('id', id);
+  updateNotifDot();
+}
+async function markAllNotifsRead() {
+  await sb.from('notifications').update({is_read: true})
+    .eq('user_id', currentUser.id).eq('is_read', false);
+  updateNotifDot();
+  loadNotifPanel();
+}
+
+// 알림 생성 헬퍼
+async function createNotification(userId, type, refId, refType, message) {
+  if (!userId) return;
+  await sb.from('notifications').insert({
+    user_id: userId, type, ref_id: refId, ref_type: refType, message,
+    is_read: false, created_at: new Date().toISOString()
+  });
 }
 
 
@@ -5288,6 +5347,13 @@ async function markInProgress(id) {
   const due = document.getElementById('rqDue').value || null;
   if (!assignee) { alert('담당자를 먼저 지정해주세요.'); return; }
   await sb.from('requests').update({assignee_id: assignee, due_date: due, status: 'in_progress', updated_at: new Date().toISOString()}).eq('id', id);
+  // 신청자에게 알림
+  const { data: req } = await sb.from('requests').select('author_id,title').eq('id', id).single();
+  if (req?.author_id && req.author_id !== currentUser.id) {
+    await createNotification(req.author_id, 'request_inprogress', id, 'request',
+      `[업무 처리중] '${req.title}' 신청이 처리 중으로 변경되었습니다.`);
+    updateNotifDot();
+  }
   openReqById(id);
 }
 // 처리 완료 (담당자 + 완료일 필수)
@@ -5301,6 +5367,13 @@ async function completeReq(id) {
     assignee_id: assignee, due_date: due, done_date: done,
     status: 'done', updated_at: new Date().toISOString()
   }).eq('id', id);
+  // 신청자에게 완료 알림
+  const { data: req } = await sb.from('requests').select('author_id,title').eq('id', id).single();
+  if (req?.author_id && req.author_id !== currentUser.id) {
+    await createNotification(req.author_id, 'request_done', id, 'request',
+      `[업무 완료] '${req.title}' 신청이 처리 완료되었습니다. ✓`);
+    updateNotifDot();
+  }
   alert('처리 완료로 변경되었습니다.');
   openReqById(id);
 }
@@ -5308,6 +5381,13 @@ async function rejectReq(id) {
   const reason = prompt('반려 사유를 입력하세요. (신청자가 확인합니다)');
   if (reason === null) return;
   await sb.from('requests').update({status: 'rejected', reject_reason: reason, updated_at: new Date().toISOString()}).eq('id', id);
+  // 신청자에게 반려 알림
+  const { data: req } = await sb.from('requests').select('author_id,title').eq('id', id).single();
+  if (req?.author_id && req.author_id !== currentUser.id) {
+    await createNotification(req.author_id, 'request_rejected', id, 'request',
+      `[업무 반려] '${req.title}' 신청이 반려되었습니다. 사유: ${reason||'없음'}`);
+    updateNotifDot();
+  }
   openReqById(id);
 }
 async function changeAssignee(id) {
@@ -5549,6 +5629,14 @@ async function submitFeedback(id) {
   }).eq('id', id);
   if (error) { alert('오류: ' + error.message); return; }
   window.__ivFbEditMode = null;
+  // 면담 작성자에게 알림 발송 (본인이 작성한 경우 제외)
+  const { data: iv } = await sb.from('interviews').select('author_id,staff_id,store').eq('id', id).single();
+  if (iv && iv.author_id && iv.author_id !== currentUser.id) {
+    const staffInfo = curInterview?.staff;
+    const msg = `[면담 피드백] ${iv.store || ''} 면담 기록에 ${currentUser.name}님의 피드백이 등록되었습니다.`;
+    await createNotification(iv.author_id, 'interview_feedback', id, 'interview', msg);
+  }
+  updateNotifDot();
   await openInterviewById(id);
 }
 
