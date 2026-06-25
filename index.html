@@ -405,6 +405,11 @@ textarea.form-input{min-height:120px;resize:vertical}
       <button class="nav-btn" onclick="goPage('reqstats')" id="nav-reqstats" style="display:none"><i class="ti ti-chart-bar"></i> 처리 통계</button>
       <button class="nav-btn" onclick="goPage('reqadmin')" id="nav-reqadmin" style="display:none"><i class="ti ti-settings-automation"></i> 신청 유형 관리</button>
     </div>
+    <div class="sidebar-section" id="interviewNav" style="display:none">
+      <div class="sidebar-label">업무 보고</div>
+      <button class="nav-btn" onclick="goPage('interviews')" id="nav-interviews"><i class="ti ti-message-report"></i> 면담 기록</button>
+      <button class="nav-btn" onclick="goPage('interviewNew')" id="nav-interviewNew" style="display:none"><i class="ti ti-plus"></i> 면담 등록</button>
+    </div>
     <div class="sidebar-section" id="adminNav" style="display:none">
       <div class="sidebar-label">관리</div>
       <button class="nav-btn" onclick="goPage('drafts')" id="nav-drafts"><i class="ti ti-notes"></i> 임시저장<span class="nav-new" id="draftBadge" style="display:none">!</span></button>
@@ -1235,6 +1240,16 @@ function goPage(page) {
     const nb = document.getElementById('nav-reqadmin');
     if (nb) nb.classList.add('active');
     renderReqAdmin(area);
+  } else if (page === 'interviews') {
+    const nb = document.getElementById('nav-interviews');
+    if (nb) nb.classList.add('active');
+    renderInterviews(area);
+  } else if (page === 'interviewNew') {
+    const nb = document.getElementById('nav-interviewNew');
+    if (nb) nb.classList.add('active');
+    renderInterviewNew(area);
+  } else if (page === 'interviewDetail') {
+    renderInterviewDetail(area);
   }
 }
 
@@ -4189,6 +4204,12 @@ function applyMenuPermissions() {
   // 처리 통계: 신청 처리 권한자(운영팀·부서담당·부총괄·총괄)
   show('nav-reqstats', hasPerm('req_process'));
   show('nav-reqadmin', hasPerm('req_type_manage'));
+  // 업무 보고 섹션: 매니저 이상 + 관리자 모두 표시
+  const canInterview = currentUser.is_master || currentUser.is_vice_master ||
+    currentUser.role === 'admin' || isManagerRole(currentUser.role) || !!currentUser.part;
+  show('interviewNav', canInterview);
+  // 면담 등록 버튼: 매니저 이상(매장 매니저도 자기 매장 면담 등록 가능)
+  show('nav-interviewNew', canInterview);
   // 개별 메뉴
   show('nav-staff', hasPerm('staff_view'));
   show('nav-stats', hasPerm('notice_stats'));
@@ -5295,6 +5316,220 @@ async function changeAssignee(id) {
 
 
 // ── 신청 유형 관리 (관리자 전용) ─────────────────────────────────
+
+// ══════════════════════════════════════════════════════════
+// 업무 보고 — 직원 면담 기록
+// ══════════════════════════════════════════════════════════
+let curInterview = null;
+
+// ── 목록 ──────────────────────────────────────────────────
+async function renderInterviews(area) {
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const isAdmin = currentUser.role === 'admin' || currentUser.is_master || currentUser.is_vice_master;
+
+  // 관리자: 전체 / 매니저: 본인 매장만
+  let q = sb.from('interviews')
+    .select('*, staff:users!interviews_staff_id_fkey(name,store,role), author:users!interviews_author_id_fkey(name), feedback_user:users!interviews_feedback_by_fkey(name)')
+    .order('interview_date', {ascending: false})
+    .order('created_at', {ascending: false});
+  if (!isAdmin) q = q.eq('store', currentUser.store);
+
+  const { data: list } = await q;
+  const rows = list || [];
+
+  const canWrite = currentUser.is_master || currentUser.is_vice_master ||
+    currentUser.role === 'admin' || isManagerRole(currentUser.role) || !!currentUser.part;
+
+  const cards = rows.length ? rows.map(r => {
+    const staffName  = r.staff ? r.staff.name  : '(삭제된 직원)';
+    const staffStore = r.staff ? r.staff.store  : '';
+    const authorName = r.author ? r.author.name : '';
+    const hasFeedback = !!r.feedback;
+    const dateStr = r.interview_date || fmtDate(r.created_at);
+    return `<div class="post-card" onclick="openInterviewById(${r.id})">
+      <div class="post-card-top">
+        <span class="post-title-txt">${staffStore} · <strong>${staffName}</strong></span>
+        <span class="badge-access ${hasFeedback?'all':''}">${hasFeedback?'피드백 완료':'피드백 대기'}</span>
+      </div>
+      <div class="post-meta">
+        <span>면담일: ${dateStr}</span>
+        <span>작성: ${authorName}</span>
+        ${r.feedback_user?`<span style="color:var(--gn)">피드백: ${r.feedback_user.name}</span>`:''}
+      </div>
+    </div>`;
+  }).join('') : '<div style="text-align:center;padding:40px;color:var(--th);font-size:14px">등록된 면담 기록이 없습니다.</div>';
+
+  area.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">면담 기록</div>
+      <div class="page-sub">매장 직원 면담 내용 및 운영팀 피드백</div>
+    </div>
+    <div style="margin-bottom:14px;display:flex;justify-content:flex-end">
+      ${canWrite ? '<button class="btn-new" onclick="goPage(\'interviewNew\')"><i class="ti ti-plus"></i> 면담 등록</button>' : ''}
+    </div>
+    <div class="post-list">${cards}</div>`;
+}
+
+// ── 상세 ──────────────────────────────────────────────────
+async function openInterviewById(id) {
+  const { data } = await sb.from('interviews')
+    .select('*, staff:users!interviews_staff_id_fkey(name,store,role), author:users!interviews_author_id_fkey(name,store), feedback_user:users!interviews_feedback_by_fkey(name)')
+    .eq('id', id).single();
+  if (!data) return;
+  curInterview = data;
+  goPage('interviewDetail');
+}
+
+async function renderInterviewDetail(area) {
+  const r = curInterview;
+  if (!r) { goPage('interviews'); return; }
+  const isAdmin = currentUser.role === 'admin' || currentUser.is_master || currentUser.is_vice_master;
+  const canFeedback = isAdmin || (!!currentUser.part);
+  const canEdit = isAdmin || r.author_id === currentUser.id;
+
+  area.innerHTML = `
+    <div style="margin-bottom:10px">
+      <button class="btn-cancel-sm" onclick="goPage('interviews')"><i class="ti ti-arrow-left"></i> 목록</button>
+    </div>
+    <div class="post-detail">
+      <div class="detail-header">
+        <div class="detail-title-row">
+          <i class="ti ti-message-report" style="color:var(--brm)"></i>
+          ${r.staff ? r.staff.store + ' · ' + r.staff.name : '(삭제된 직원)'}
+        </div>
+        <div class="detail-meta">
+          <span>면담일: ${r.interview_date || fmtDate(r.created_at)}</span>
+          <span>작성: ${r.author ? r.author.name : ''}</span>
+          ${canEdit ? `<span style="margin-left:auto">
+            <button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openInterviewEdit(${r.id})">
+              <i class="ti ti-edit"></i> 수정
+            </button>
+          </span>` : ''}
+        </div>
+      </div>
+
+      <!-- 면담 내용 -->
+      <div style="margin-bottom:20px">
+        <div class="section-label" style="margin-bottom:8px">면담 내용</div>
+        <div style="font-size:14px;line-height:1.8;color:var(--tm);white-space:pre-wrap;background:var(--cr);border-radius:8px;padding:14px 16px">${r.content || ''}</div>
+      </div>
+
+      <!-- 운영팀 피드백 -->
+      <div class="confirm-section">
+        <div class="section-label" style="margin-bottom:8px">운영팀 피드백</div>
+        ${r.feedback
+          ? `<div style="font-size:14px;line-height:1.8;color:var(--tm);white-space:pre-wrap;background:var(--gnb);border-radius:8px;padding:14px 16px;border:0.5px solid var(--gn)">${r.feedback}</div>
+             <div style="font-size:11px;color:var(--gn);margin-top:6px">피드백: ${r.feedback_user?.name||''} · ${r.feedback_at ? r.feedback_at.slice(0,16).replace('T',' ') : ''}</div>`
+          : canFeedback
+            ? `<textarea id="feedbackInput" class="form-input" rows="4" placeholder="피드백 내용을 입력하세요..."></textarea>
+               <button class="btn-confirm" style="margin-top:8px" onclick="submitFeedback(${r.id})">
+                 <i class="ti ti-send"></i> 피드백 등록
+               </button>`
+            : `<div style="font-size:13px;color:var(--th);padding:12px 0">운영팀 피드백 대기 중입니다.</div>`
+        }
+      </div>
+    </div>`;
+}
+
+async function submitFeedback(id) {
+  const fb = document.getElementById('feedbackInput')?.value.trim();
+  if (!fb) { alert('피드백 내용을 입력해주세요.'); return; }
+  const now = new Date().toISOString();
+  const { error } = await sb.from('interviews').update({
+    feedback: fb,
+    feedback_by: currentUser.id,
+    feedback_at: now,
+    updated_at: now
+  }).eq('id', id);
+  if (error) { alert('오류: ' + error.message); return; }
+  await openInterviewById(id);
+}
+
+// ── 등록/수정 폼 ──────────────────────────────────────────
+let editingInterviewId = null;
+
+async function renderInterviewNew(area, ex) {
+  editingInterviewId = ex ? ex.id : null;
+  // 직원 목록 로드 (본인 매장 또는 전체)
+  const isAdmin = currentUser.role === 'admin' || currentUser.is_master || currentUser.is_vice_master;
+  let uq = sb.from('users').select('id,name,store,role').eq('active', true).neq('role','admin').order('store').order('name');
+  if (!isAdmin) uq = uq.eq('store', currentUser.store);
+  const { data: users } = await uq;
+
+  const staffOpts = (users||[]).map(u =>
+    `<option value="${u.id}"${ex && ex.staff_id===u.id?' selected':''}>${u.store} · ${u.name}</option>`
+  ).join('');
+
+  const today = new Date().toISOString().slice(0,10);
+
+  area.innerHTML = `
+    <div style="margin-bottom:10px">
+      <button class="btn-cancel-sm" onclick="goPage('interviews')"><i class="ti ti-arrow-left"></i> 취소</button>
+    </div>
+    <div class="form-section">
+      <div class="page-title" style="margin-bottom:18px">${ex ? '면담 기록 수정' : '면담 기록 등록'}</div>
+      <div class="form-row">
+        <label class="form-label">대상 직원 <span style="color:var(--rd)">*</span></label>
+        <select class="form-input" id="ivStaff">${staffOpts}</select>
+      </div>
+      <div class="form-row">
+        <label class="form-label">면담일 <span style="color:var(--rd)">*</span></label>
+        <input type="date" class="form-input" id="ivDate" value="${ex ? (ex.interview_date||today) : today}" max="${today}" />
+      </div>
+      <div class="form-row">
+        <label class="form-label">면담 내용 <span style="color:var(--rd)">*</span></label>
+        <textarea class="form-input" id="ivContent" rows="8" placeholder="면담 내용을 상세히 기록해 주세요.&#10;(업무 태도, 건의사항, 컨디션, 특이사항 등)">${ex ? (ex.content||'') : ''}</textarea>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">
+        <button class="btn-cancel-sm" onclick="goPage('interviews')">취소</button>
+        <button class="btn-submit" onclick="submitInterview()"><i class="ti ti-check"></i> ${ex ? '수정 완료' : '등록'}</button>
+      </div>
+    </div>`;
+}
+
+async function openInterviewEdit(id) {
+  const { data } = await sb.from('interviews').select('*').eq('id', id).single();
+  if (!data) return;
+  editingInterviewId = id;
+  renderInterviewNew(document.getElementById('contentArea'), data);
+}
+
+async function submitInterview() {
+  const staffId  = document.getElementById('ivStaff')?.value;
+  const date     = document.getElementById('ivDate')?.value;
+  const content  = document.getElementById('ivContent')?.value.trim();
+  if (!staffId) { alert('대상 직원을 선택해주세요.'); return; }
+  if (!date)    { alert('면담일을 선택해주세요.'); return; }
+  if (!content) { alert('면담 내용을 입력해주세요.'); return; }
+
+  // 직원 매장 조회
+  const { data: staffUser } = await sb.from('users').select('store').eq('id', staffId).single();
+  const now = new Date().toISOString();
+
+  if (editingInterviewId) {
+    const { error } = await sb.from('interviews').update({
+      staff_id: staffId,
+      store: staffUser?.store || currentUser.store,
+      interview_date: date,
+      content,
+      updated_at: now
+    }).eq('id', editingInterviewId);
+    if (error) { alert('수정 오류: ' + error.message); return; }
+  } else {
+    const { error } = await sb.from('interviews').insert({
+      staff_id: staffId,
+      store: staffUser?.store || currentUser.store,
+      author_id: currentUser.id,
+      interview_date: date,
+      content,
+      created_at: now,
+      updated_at: now
+    });
+    if (error) { alert('등록 오류: ' + error.message); return; }
+  }
+  goPage('interviews');
+}
+
 async function renderReqAdmin(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
   const [{data:parts},{data:types},{data:users}] = await Promise.all([
