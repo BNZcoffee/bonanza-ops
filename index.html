@@ -410,6 +410,7 @@ textarea.form-input{min-height:120px;resize:vertical}
       <button class="nav-btn" onclick="goPage('interviews')" id="nav-interviews"><i class="ti ti-message-report"></i> 면담 기록</button>
       <button class="nav-btn" onclick="goPage('interviewNew')" id="nav-interviewNew" style="display:none"><i class="ti ti-plus"></i> 면담 등록</button>
       <button class="nav-btn" onclick="goPage('interviewOptions')" id="nav-interviewOptions" style="display:none"><i class="ti ti-settings"></i> 항목 관리</button>
+      <button class="nav-btn" onclick="goPage('handover')" id="nav-handover"><i class="ti ti-building-store"></i> 매장 인수인계</button>
     </div>
     <div class="sidebar-section" id="adminNav" style="display:none">
       <div class="sidebar-label">관리</div>
@@ -420,6 +421,7 @@ textarea.form-input{min-height:120px;resize:vertical}
       <button class="nav-btn" onclick="goPage('appsettings')" id="nav-app"><i class="ti ti-settings-2"></i> 앱 관리</button>
       <button class="nav-btn" onclick="goManualEdit()" id="nav-manualedit"><i class="ti ti-edit"></i> 설명서 편집</button>
       <button class="nav-btn" onclick="goPage('permsetting')" id="nav-perm"><i class="ti ti-shield-lock"></i> 권한 설정</button>
+      <button class="nav-btn" onclick="goPage('coachStores')" id="nav-coachStores"><i class="ti ti-map-pin"></i> 코치 관할 관리</button>
     </div>
     <div class="sidebar-footer" id="sidebarInfo" onclick="goPage('profile')" style="cursor:pointer;display:flex;align-items:center;gap:6px">
       <i class="ti ti-user-circle" style="font-size:16px;color:var(--th)"></i>
@@ -1274,6 +1276,16 @@ function goPage(page) {
     const nb = document.getElementById('nav-interviewOptions');
     if (nb) nb.classList.add('active');
     renderInterviewOptions(area);
+  } else if (page === 'coachStores') {
+    const nb = document.getElementById('nav-coachStores');
+    if (nb) nb.classList.add('active');
+    renderCoachStores(area);
+  } else if (page === 'handover') {
+    const nb = document.getElementById('nav-handover');
+    if (nb) nb.classList.add('active');
+    renderHandoverList(area);
+  } else if (page === 'handoverDetail') {
+    renderHandoverDetail(area);
   }
 }
 
@@ -3509,10 +3521,11 @@ async function markAllNotifsRead() {
 // 알림 생성 헬퍼
 async function createNotification(userId, type, refId, refType, message) {
   if (!userId) return;
-  await sb.from('notifications').insert({
+  const { error } = await sb.from('notifications').insert({
     user_id: userId, type, ref_id: refId, ref_type: refType, message,
     is_read: false, created_at: new Date().toISOString()
   });
+  if (error) console.warn('알림 생성 오류:', error.message);
 }
 
 
@@ -5233,6 +5246,10 @@ async function submitRequest() {
     }
   }
 
+  // 관할 코치에게 참조 알림
+  await notifyCoaches(currentUser.store, 'request_new', req.id, 'request',
+    `[업무신청 참조] ${currentUser.store} · ${title} (${reqSelectedType.name}) 신청이 접수되었습니다.`);
+
   alert('신청이 접수되었습니다.');
   reqTab = 'mine';
   goPage('requests');
@@ -5839,12 +5856,17 @@ async function submitInterview() {
     }).eq('id', editingInterviewId);
     if (error) { alert('수정 오류: ' + error.message); return; }
   } else {
-    const { error } = await sb.from('interviews').insert({
+    const { data: newIv, error } = await sb.from('interviews').insert({
       staff_id: staffId, store: finalStore, author_id: currentUser.id,
       interview_date: date, interview_type: type, interview_method: method,
       content, created_at: now, updated_at: now
-    });
+    }).select().single();
     if (error) { alert('등록 오류: ' + error.message); return; }
+    // 관할 코치에게 자동 알림
+    if (newIv) {
+      await notifyCoaches(finalStore, 'interview_new', newIv.id, 'interview',
+        `[면담 등록] ${finalStore} · ${(await sb.from('users').select('name').eq('id',staffId).single()).data?.name||''} 면담 기록이 등록되었습니다.`);
+    }
   }
   window.__ivFilterStore = ''; window.__ivFilterStaff = '';
   window.__ivFilterType = ''; window.__ivFilterPeriod = '';
@@ -5942,6 +5964,403 @@ async function deleteInterviewOption(id, label) {
   await sb.from('interview_options').delete().eq('id', id);
   renderInterviewOptions(document.getElementById('contentArea'));
 }
+
+// ══════════════════════════════════════════════════════════
+// B) 코치 관할 매장 관리
+// ══════════════════════════════════════════════════════════
+
+// 코치 알림 발송 헬퍼 (면담/업무신청 등록 시 호출)
+async function notifyCoaches(store, type, refId, refType, message) {
+  if (!store) return;
+  const { data: cs } = await sb.from('coach_stores')
+    .select('coach_id').eq('store', store);
+  if (!cs || cs.length === 0) return;
+  for (const c of cs) {
+    if (c.coach_id === currentUser.id) continue; // 본인 제외
+    await createNotification(c.coach_id, type, refId, refType, message);
+  }
+}
+
+async function renderCoachStores(area) {
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+
+  const [coachRes, storeRes, csRes] = await Promise.all([
+    sb.from('users').select('id,name,store,role,part')
+      .eq('active', true)
+      .or('is_master.eq.true,is_vice_master.eq.true,part.not.is.null')
+      .order('name'),
+    sb.from('users').select('store').eq('active', true).neq('role','admin'),
+    sb.from('coach_stores').select('*')
+  ]);
+
+  const coaches   = coachRes.data  || [];
+  const allStores = [...new Set((storeRes.data||[]).map(u=>u.store).filter(Boolean))].sort();
+  const csMap     = {};
+  (csRes.data||[]).forEach(c => {
+    if (!csMap[c.coach_id]) csMap[c.coach_id] = [];
+    csMap[c.coach_id].push(c.store);
+  });
+
+  const coachCards = coaches.map(coach => {
+    const assigned = csMap[coach.id] || [];
+    const storeChips = assigned.map(s =>
+      `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--crm);border-radius:12px;padding:3px 9px;font-size:12px;margin:2px">
+        ${s}
+        <button onclick="removeCoachStore('${coach.id}','${s}')" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:11px;padding:0;line-height:1">✕</button>
+      </span>`
+    ).join('');
+
+    const unusedStores = allStores.filter(s => !assigned.includes(s));
+    const storeOpts = unusedStores.map(s => `<option value="${s}">${s}</option>`).join('');
+
+    return `<div class="notif-card" style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div class="staff-avatar" style="width:34px;height:34px;font-size:12px">${coach.name.slice(0,2)}</div>
+        <div>
+          <div style="font-size:14px;font-weight:600;color:var(--tm)">${coach.name}</div>
+          <div style="font-size:11px;color:var(--th)">${coach.part||coach.store||''}</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+          <select id="coachStoreAdd-${coach.id}" class="form-input" style="padding:5px 8px;font-size:12px;width:130px">
+            <option value="">매장 선택</option>
+            ${storeOpts}
+          </select>
+          <button class="btn-submit" style="padding:5px 12px;font-size:12px"
+            onclick="addCoachStore('${coach.id}')">추가</button>
+        </div>
+      </div>
+      <div style="min-height:28px">
+        ${storeChips || '<span style="font-size:12px;color:var(--th)">관할 매장 없음</span>'}
+      </div>
+    </div>`;
+  }).join('');
+
+  area.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">코치 관할 매장 관리</div>
+      <div class="page-sub">코치별 담당 매장을 설정합니다. 면담·업무신청 등록 시 담당 코치에게 자동 알림이 발송됩니다.</div>
+    </div>
+    ${coachCards || '<div style="text-align:center;padding:40px;color:var(--th)">등록된 코치가 없습니다.<br><span style="font-size:12px">인원현황에서 본사파트 또는 총괄·부총괄 권한을 부여하면 목록에 나타납니다.</span></div>'}`;
+}
+
+async function addCoachStore(coachId) {
+  const sel = document.getElementById('coachStoreAdd-' + coachId);
+  const store = sel?.value;
+  if (!store) { alert('매장을 선택해주세요.'); return; }
+  const { error } = await sb.from('coach_stores').insert({ coach_id: coachId, store });
+  if (error && error.code === '23505') { alert('이미 등록된 관할 매장입니다.'); return; }
+  if (error) { alert('오류: ' + error.message); return; }
+  renderCoachStores(document.getElementById('contentArea'));
+}
+
+async function removeCoachStore(coachId, store) {
+  if (!confirm(`'${store}' 관할을 제거할까요?`)) return;
+  await sb.from('coach_stores').delete().eq('coach_id', coachId).eq('store', store);
+  renderCoachStores(document.getElementById('contentArea'));
+}
+
+// ══════════════════════════════════════════════════════════
+// C) 매장 인수인계
+// ══════════════════════════════════════════════════════════
+let curHandoverStore = null;
+
+async function renderHandoverList(area) {
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const isAdmin = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
+
+  // 매장 목록 (직원 소속 기준)
+  let sq = sb.from('users').select('store').eq('active', true).neq('role','admin');
+  if (!isAdmin) sq = sq.eq('store', currentUser.store);
+  const { data: uStores } = await sq;
+  const stores = [...new Set((uStores||[]).map(u=>u.store).filter(Boolean))].sort();
+
+  // 이미 인수인계 등록된 매장
+  const { data: hvList } = await sb.from('store_handover').select('store,updated_at,updated_by,updater:users!store_handover_updated_by_fkey(name)').order('store');
+  const hvMap = {};
+  (hvList||[]).forEach(h => { hvMap[h.store] = h; });
+
+  const cards = stores.map(store => {
+    const hv = hvMap[store];
+    const hasData = !!hv;
+    return `<div class="post-card" onclick="openHandover('${store}')">
+      <div class="post-card-top">
+        <span class="post-title-txt"><i class="ti ti-building-store" style="margin-right:6px;color:var(--brm)"></i>${store}</span>
+        <span class="badge-access ${hasData?'all':''}">${hasData?'등록됨':'미등록'}</span>
+      </div>
+      <div class="post-meta">
+        ${hasData
+          ? `<span>최종 수정: ${hv.updated_at?.slice(0,16).replace('T',' ')||''}</span>
+             <span>${hv.updater?.name||''}</span>`
+          : '<span style="color:var(--th)">아직 인수인계 자료가 없습니다</span>'}
+      </div>
+    </div>`;
+  }).join('');
+
+  area.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">매장 인수인계</div>
+      <div class="page-sub">매장별 운영 정보를 기록하고 관리합니다. 관리자가 바뀌어도 인계가 원활하도록 최신 상태를 유지해 주세요.</div>
+    </div>
+    <div class="post-list">${cards||'<div style="text-align:center;padding:40px;color:var(--th)">표시할 매장이 없습니다.</div>'}</div>`;
+}
+
+async function openHandover(store) {
+  curHandoverStore = store;
+  goPage('handoverDetail');
+}
+
+async function renderHandoverDetail(area) {
+  const store = curHandoverStore;
+  if (!store) { goPage('handover'); return; }
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+
+  const { data: hv } = await sb.from('store_handover').select('*,updater:users!store_handover_updated_by_fkey(name)').eq('store', store).single().catch(()=>({data:null}));
+
+  const isAdmin = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
+  const canEdit = isAdmin || isManagerRole(currentUser.role);
+
+  const d = hv || {};
+  const contacts     = Array.isArray(d.contacts)      ? d.contacts      : [];
+  const equipment    = Array.isArray(d.equipment)     ? d.equipment     : [];
+  const repairs      = Array.isArray(d.repair_history)? d.repair_history: [];
+  const attachments  = Array.isArray(d.attachments)   ? d.attachments   : [];
+
+  const editBtn = canEdit
+    ? `<button class="btn-submit" onclick="openHandoverEdit('${store}')" style="padding:8px 16px"><i class="ti ti-edit"></i> 수정</button>`
+    : '';
+
+  const section = (title, icon, content) =>
+    `<div style="margin-bottom:22px">
+      <div class="section-label" style="margin-bottom:8px;display:flex;align-items:center;gap:6px">
+        <i class="ti ${icon}" style="color:var(--brm)"></i>${title}
+      </div>
+      <div style="background:var(--cr);border-radius:8px;padding:13px 15px;font-size:14px;line-height:1.8;color:var(--tm);white-space:pre-wrap">${content||'<span style="color:var(--th)">미등록</span>'}</div>
+    </div>`;
+
+  const tableSection = (title, icon, rows, cols) => {
+    if (!rows.length) return section(title, icon, '');
+    const thead = cols.map(c=>`<th style="padding:6px 10px;background:var(--crm);font-size:12px;font-weight:600;color:var(--ts);text-align:left">${c}</th>`).join('');
+    const tbody = rows.map(r=>`<tr>${cols.map(c=>`<td style="padding:6px 10px;border-top:0.5px solid var(--crd);font-size:13px">${r[c]||''}</td>`).join('')}</tr>`).join('');
+    return `<div style="margin-bottom:22px">
+      <div class="section-label" style="margin-bottom:8px;display:flex;align-items:center;gap:6px">
+        <i class="ti ${icon}" style="color:var(--brm)"></i>${title}
+      </div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;border:0.5px solid var(--crd)">
+        <thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody>
+      </table></div>
+    </div>`;
+  };
+
+  area.innerHTML = `
+    <div style="margin-bottom:10px;display:flex;align-items:center;justify-content:space-between">
+      <button class="btn-cancel-sm" onclick="goPage('handover')"><i class="ti ti-arrow-left"></i> 목록</button>
+      ${editBtn}
+    </div>
+    <div class="post-detail">
+      <div class="detail-header">
+        <div class="detail-title-row"><i class="ti ti-building-store" style="color:var(--brm)"></i> ${store} 인수인계</div>
+        <div class="detail-meta">
+          ${hv ? `<span>최종 수정: ${hv.updated_at?.slice(0,16).replace('T',' ')||''}</span><span>${hv.updater?.name||''}</span>` : '<span style="color:var(--th)">아직 등록된 자료가 없습니다</span>'}
+        </div>
+      </div>
+
+      ${section('POS 로그인 정보', 'ti-device-desktop', d.pos_login)}
+      ${section('영업시간', 'ti-clock', d.business_hours)}
+      ${section('휴무 정보', 'ti-calendar-off', d.holiday_info)}
+      ${tableSection('담당 연락처', 'ti-phone', contacts, ['구분','이름','연락처','비고'])}
+      ${section('프로모션 정보', 'ti-tag', d.promotion_info)}
+      ${tableSection('장비 정보', 'ti-tool', equipment, ['장비명','모델명','수량','설치위치','비고'])}
+      ${tableSection('매장 보수 내역', 'ti-hammer', repairs, ['일자','내용','업체','비용','비고'])}
+      ${section('하역장 위치', 'ti-truck', d.delivery_info)}
+      ${section('영업시간 외 출입방법', 'ti-door', d.after_hours_access)}
+      ${section('스케줄 편성 고려사항', 'ti-calendar-event', d.schedule_notes)}
+      ${section('기타 특이사항', 'ti-notes', d.extra_notes)}
+
+      ${attachments.length ? `<div style="margin-bottom:18px">
+        <div class="section-label" style="margin-bottom:8px"><i class="ti ti-paperclip" style="color:var(--brm)"></i> 첨부파일</div>
+        <div>${attachments.map(a=>`<a class="attach-file" href="${a.url}" target="_blank"><i class="ti ti-file"></i>${a.name}</a>`).join('')}</div>
+      </div>` : ''}
+    </div>`;
+}
+
+async function openHandoverEdit(store) {
+  const area = document.getElementById('contentArea');
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+
+  const { data: hv } = await sb.from('store_handover').select('*').eq('store', store).single().catch(()=>({data:null}));
+  const d = hv || {};
+  const contacts  = Array.isArray(d.contacts)      ? d.contacts      : [{}];
+  const equipment = Array.isArray(d.equipment)     ? d.equipment     : [{}];
+  const repairs   = Array.isArray(d.repair_history)? d.repair_history: [{}];
+  const attachments = Array.isArray(d.attachments) ? d.attachments   : [];
+
+  const textField = (label, id, val, placeholder='', rows=2) =>
+    `<div class="form-row">
+      <label class="form-label">${label}</label>
+      <textarea class="form-input" id="hv-${id}" rows="${rows}" placeholder="${placeholder}">${val||''}</textarea>
+    </div>`;
+
+  const dynTable = (id, rows, cols, addLabel) => {
+    const colKeys = cols.map(c=>c.key);
+    const thead = cols.map(c=>`<th style="padding:5px 8px;font-size:11px;color:var(--th);text-align:left;font-weight:600">${c.label}</th>`).join('') + '<th></th>';
+    const tbody = rows.map((r,i)=>
+      `<tr id="${id}-row-${i}">${colKeys.map(k=>`<td style="padding:3px 4px"><input class="form-input" style="padding:6px 8px;font-size:12px" data-table="${id}" data-row="${i}" data-col="${k}" value="${r[k]||''}" /></td>`).join('')}
+      <td style="padding:3px 4px"><button onclick="removeHvRow('${id}',${i})" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:16px">✕</button></td></tr>`
+    ).join('');
+    return `<div class="form-row">
+      <div style="overflow-x:auto;margin-bottom:6px">
+        <table style="width:100%;border-collapse:collapse" id="${id}-table">
+          <thead><tr>${thead}</tr></thead>
+          <tbody id="${id}-tbody">${tbody}</tbody>
+        </table>
+      </div>
+      <button type="button" class="btn-add-tag" onclick="addHvRow('${id}',[${colKeys.map(k=>`'${k}'`).join(',')}])">${addLabel}</button>
+    </div>`;
+  };
+
+  area.innerHTML = `
+    <div style="margin-bottom:10px">
+      <button class="btn-cancel-sm" onclick="openHandover('${store}')"><i class="ti ti-arrow-left"></i> 취소</button>
+    </div>
+    <div class="form-section">
+      <div class="page-title" style="margin-bottom:6px">${store} 인수인계 수정</div>
+      <div style="font-size:12px;color:var(--th);margin-bottom:20px">모든 항목은 최신 상태로 유지해 주세요. 저장 시 수정 일시와 작성자가 자동 기록됩니다.</div>
+
+      ${textField('POS 로그인 정보', 'pos_login', d.pos_login, '아이디 / 비밀번호 / 관리자 코드 등')}
+      ${textField('영업시간', 'business_hours', d.business_hours, '예) 평일 09:00~22:00 / 주말 10:00~21:00')}
+      ${textField('휴무 정보', 'holiday_info', d.holiday_info, '정기 휴무일, 단축운영 조건 등')}
+
+      <div class="form-row">
+        <label class="form-label">담당 연락처</label>
+        ${dynTable('hv-contacts', contacts,
+          [{key:'구분',label:'구분'},{key:'이름',label:'이름'},{key:'연락처',label:'연락처'},{key:'비고',label:'비고'}],
+          '+ 연락처 추가')}
+      </div>
+
+      ${textField('프로모션 정보', 'promotion_info', d.promotion_info, '진행 중인 프로모션, 조건 등', 3)}
+
+      <div class="form-row">
+        <label class="form-label">장비 정보</label>
+        ${dynTable('hv-equipment', equipment,
+          [{key:'장비명',label:'장비명'},{key:'모델명',label:'모델명'},{key:'수량',label:'수량'},{key:'설치위치',label:'설치위치'},{key:'비고',label:'비고'}],
+          '+ 장비 추가')}
+      </div>
+
+      <div class="form-row">
+        <label class="form-label">매장 보수 내역 <span style="font-size:11px;color:var(--th);font-weight:400">(최신순)</span></label>
+        ${dynTable('hv-repairs', repairs,
+          [{key:'일자',label:'일자'},{key:'내용',label:'내용'},{key:'업체',label:'업체'},{key:'비용',label:'비용'},{key:'비고',label:'비고'}],
+          '+ 보수 내역 추가')}
+      </div>
+
+      ${textField('하역장 위치', 'delivery_info', d.delivery_info, '위치 설명, 주의사항 등')}
+      ${textField('영업시간 외 출입방법', 'after_hours_access', d.after_hours_access, '출입 방법, 비밀번호, 주의사항 등')}
+      ${textField('스케줄 편성 고려사항', 'schedule_notes', d.schedule_notes, '최소 인원, 피크타임, 특이사항 등', 3)}
+      ${textField('기타 특이사항', 'extra_notes', d.extra_notes, '인수인계 시 꼭 알아야 할 사항', 4)}
+
+      <div class="form-row">
+        <label class="form-label">첨부파일 추가</label>
+        <div style="display:flex;gap:8px;margin-bottom:6px">
+          <input class="form-input" id="hv-attach-name" placeholder="파일 표시명" style="flex:1" />
+          <input class="form-input" id="hv-attach-url" placeholder="파일 URL (Drive, Dropbox 등)" style="flex:2" />
+          <button class="btn-submit" style="padding:8px 12px;font-size:12px;white-space:nowrap" onclick="addHvAttach()">추가</button>
+        </div>
+        <div id="hv-attach-list">
+          ${attachments.map((a,i)=>`<div id="hv-attach-${i}" style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+            <i class="ti ti-paperclip" style="color:var(--th)"></i>
+            <span style="font-size:13px;flex:1">${a.name}</span>
+            <button onclick="removeHvAttach(${i})" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:13px">✕</button>
+          </div>`).join('')}
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
+        <button class="btn-cancel-sm" onclick="openHandover('${store}')">취소</button>
+        <button class="btn-submit" onclick="saveHandover('${store}')"><i class="ti ti-device-floppy"></i> 저장</button>
+      </div>
+    </div>`;
+
+  // 현재 첨부파일 목록 메모리
+  window.__hvAttachments = [...attachments];
+}
+
+// 동적 테이블 행 추가/삭제
+function addHvRow(tableId, cols) {
+  const tbody = document.getElementById(tableId + '-tbody');
+  if (!tbody) return;
+  const i = tbody.rows.length;
+  const tr = document.createElement('tr');
+  tr.id = tableId + '-row-' + i;
+  tr.innerHTML = cols.map(k=>
+    `<td style="padding:3px 4px"><input class="form-input" style="padding:6px 8px;font-size:12px" data-table="${tableId}" data-row="${i}" data-col="${k}" value="" /></td>`
+  ).join('') + `<td style="padding:3px 4px"><button onclick="removeHvRow('${tableId}',${i})" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:16px">✕</button></td>`;
+  tbody.appendChild(tr);
+}
+function removeHvRow(tableId, i) {
+  document.getElementById(tableId + '-row-' + i)?.remove();
+}
+
+// 첨부파일 추가/삭제
+function addHvAttach() {
+  const name = document.getElementById('hv-attach-name')?.value.trim();
+  const url  = document.getElementById('hv-attach-url')?.value.trim();
+  if (!name||!url) { alert('파일명과 URL을 모두 입력해주세요.'); return; }
+  if (!window.__hvAttachments) window.__hvAttachments = [];
+  const i = window.__hvAttachments.length;
+  window.__hvAttachments.push({name,url});
+  const list = document.getElementById('hv-attach-list');
+  const div  = document.createElement('div');
+  div.id = 'hv-attach-' + i;
+  div.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:4px';
+  div.innerHTML = `<i class="ti ti-paperclip" style="color:var(--th)"></i><span style="font-size:13px;flex:1">${name}</span><button onclick="removeHvAttach(${i})" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:13px">✕</button>`;
+  list?.appendChild(div);
+  document.getElementById('hv-attach-name').value = '';
+  document.getElementById('hv-attach-url').value  = '';
+}
+function removeHvAttach(i) {
+  if (window.__hvAttachments) window.__hvAttachments.splice(i, 1);
+  document.getElementById('hv-attach-' + i)?.remove();
+}
+
+// 동적 테이블 데이터 수집
+function collectHvTable(tableId) {
+  const inputs = document.querySelectorAll(`[data-table="${tableId}"]`);
+  const rows = {};
+  inputs.forEach(inp => {
+    const r = inp.dataset.row;
+    const c = inp.dataset.col;
+    if (!rows[r]) rows[r] = {};
+    rows[r][c] = inp.value.trim();
+  });
+  return Object.values(rows).filter(r => Object.values(r).some(v=>v));
+}
+
+async function saveHandover(store) {
+  const now = new Date().toISOString();
+  const payload = {
+    store,
+    pos_login:          document.getElementById('hv-pos_login')?.value.trim()||null,
+    business_hours:     document.getElementById('hv-business_hours')?.value.trim()||null,
+    holiday_info:       document.getElementById('hv-holiday_info')?.value.trim()||null,
+    contacts:           collectHvTable('hv-contacts'),
+    promotion_info:     document.getElementById('hv-promotion_info')?.value.trim()||null,
+    equipment:          collectHvTable('hv-equipment'),
+    repair_history:     collectHvTable('hv-repairs'),
+    delivery_info:      document.getElementById('hv-delivery_info')?.value.trim()||null,
+    after_hours_access: document.getElementById('hv-after_hours_access')?.value.trim()||null,
+    schedule_notes:     document.getElementById('hv-schedule_notes')?.value.trim()||null,
+    extra_notes:        document.getElementById('hv-extra_notes')?.value.trim()||null,
+    attachments:        window.__hvAttachments || [],
+    updated_by:         currentUser.id,
+    updated_at:         now
+  };
+
+  // upsert (store 기준)
+  const { error } = await sb.from('store_handover').upsert(payload, {onConflict:'store'});
+  if (error) { alert('저장 오류: ' + error.message); return; }
+  openHandover(store);
+}
+
 async function renderReqAdmin(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
   const [{data:parts},{data:types},{data:users}] = await Promise.all([
