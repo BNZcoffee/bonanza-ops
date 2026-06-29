@@ -6312,21 +6312,37 @@ async function renderRepairNew(area, ex) {
       </div>
 
       <div class="form-row">
-        <label class="form-label">사진 추가 (URL)</label>
+        <label class="form-label">사진 첨부</label>
         <div style="font-size:11px;color:var(--th);margin-bottom:8px;line-height:1.5">
-          카카오톡 공유링크, Google Drive 공개 링크 등을 입력하세요.
+          파일을 직접 선택하거나 드래그해서 업로드하세요. (최대 25MB, 여러 장 동시 선택 가능)
         </div>
-        <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-          <input class="form-input" id="rpImgUrl" placeholder="이미지 URL" style="flex:2;min-width:200px" />
-          <input class="form-input" id="rpImgCaption" placeholder="사진 설명 (선택)" style="flex:1;min-width:120px" />
-          <button class="btn-submit" style="padding:8px 12px;font-size:12px;white-space:nowrap" onclick="addRpImg()">추가</button>
+        <!-- 파일 업로드 영역 -->
+        <div id="rpDropArea" style="border:1.5px dashed var(--crd);border-radius:10px;padding:20px;text-align:center;cursor:pointer;background:var(--cr);margin-bottom:10px;transition:border-color .2s"
+          onclick="document.getElementById('rpFileInput').click()"
+          ondragover="event.preventDefault();this.style.borderColor='var(--br)'"
+          ondragleave="this.style.borderColor='var(--crd)'"
+          ondrop="event.preventDefault();this.style.borderColor='var(--crd)';handleRpDrop(event.dataTransfer.files)">
+          <i class="ti ti-photo-plus" style="font-size:28px;color:var(--th);display:block;margin-bottom:6px"></i>
+          <div style="font-size:13px;color:var(--ts);font-weight:500">사진 선택 또는 드래그</div>
+          <div style="font-size:11px;color:var(--th);margin-top:3px">JPG, PNG, WEBP, GIF (최대 25MB)</div>
         </div>
-        <div id="rpImgList">
+        <input type="file" id="rpFileInput" accept="image/*" multiple style="display:none"
+          onchange="handleRpFiles(this.files)" />
+        <!-- 업로드 진행 표시 -->
+        <div id="rpUploadProgress" style="display:none;font-size:12px;color:var(--bl);margin-bottom:8px;padding:8px 10px;background:var(--blb);border-radius:7px">
+          <i class="ti ti-loader spin"></i> 업로드 중...
+        </div>
+        <!-- 미리보기 그리드 -->
+        <div id="rpImgList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px">
           ${imgs.map((img,i)=>`
-            <div id="rpImgItem-${i}" style="display:flex;align-items:center;gap:8px;padding:7px;background:var(--cr);border-radius:7px;margin-bottom:5px">
-              <img src="${img.url}" style="width:48px;height:36px;object-fit:cover;border-radius:5px;flex-shrink:0" onerror="this.style.display='none'">
-              <span style="flex:1;font-size:12px;color:var(--ts);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${img.caption||img.url}</span>
-              <button onclick="removeRpImg(${i})" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:14px;flex-shrink:0"><i class="ti ti-x"></i></button>
+            <div id="rpImgItem-${i}" style="position:relative;border-radius:8px;overflow:hidden;border:0.5px solid var(--crd)">
+              <img src="${img.url}" style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block">
+              <input value="${img.caption||''}" placeholder="사진 설명"
+                style="width:100%;border:none;border-top:0.5px solid var(--crd);padding:5px 7px;font-size:11px;background:#fff;color:var(--ts)"
+                oninput="if(window.__rpImgs&&window.__rpImgs[${i}])window.__rpImgs[${i}].caption=this.value" />
+              <button onclick="removeRpImg(${i})"
+                style="position:absolute;top:5px;right:5px;background:rgba(0,0,0,.55);border:none;cursor:pointer;color:#fff;font-size:13px;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center">
+                <i class="ti ti-x"></i></button>
             </div>`).join('')}
         </div>
       </div>
@@ -6338,24 +6354,49 @@ async function renderRepairNew(area, ex) {
     </div>`;
 }
 
-function addRpImg() {
-  const url     = document.getElementById('rpImgUrl')?.value.trim();
-  const caption = document.getElementById('rpImgCaption')?.value.trim();
-  if (!url) { alert('이미지 URL을 입력해주세요.'); return; }
+// 파일 드롭 핸들러
+function handleRpDrop(files) { handleRpFiles(files); }
+
+// 파일 선택/드롭 처리
+async function handleRpFiles(files) {
+  if (!files || !files.length) return;
   if (!window.__rpImgs) window.__rpImgs = [];
-  const i = window.__rpImgs.length;
-  window.__rpImgs.push({url, caption});
-  const list = document.getElementById('rpImgList');
-  const div = document.createElement('div');
-  div.id = 'rpImgItem-' + i;
-  div.style.cssText = 'display:flex;align-items:center;gap:8px;padding:7px;background:var(--cr);border-radius:7px;margin-bottom:5px';
-  div.innerHTML = `
-    <img src="${url}" style="width:48px;height:36px;object-fit:cover;border-radius:5px;flex-shrink:0" onerror="this.style.display='none'">
-    <span style="flex:1;font-size:12px;color:var(--ts);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${caption||url}</span>
-    <button onclick="removeRpImg(${i})" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:14px;flex-shrink:0"><i class="ti ti-x"></i></button>`;
-  list?.appendChild(div);
-  document.getElementById('rpImgUrl').value = '';
-  document.getElementById('rpImgCaption').value = '';
+
+  const prog = document.getElementById('rpUploadProgress');
+  if (prog) prog.style.display = '';
+
+  const allowed = ['jpg','jpeg','png','webp','gif','heic','heif'];
+  for (const file of Array.from(files)) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!allowed.includes(ext)) { alert(`${file.name}: 이미지 파일만 첨부 가능합니다.`); continue; }
+    if (file.size > 25*1024*1024) { alert(`${file.name}: 25MB 초과 파일은 첨부할 수 없습니다.`); continue; }
+
+    const url = await nUploadFile(file, 'repairs');
+    if (!url) continue;
+
+    const i = window.__rpImgs.length;
+    window.__rpImgs.push({url, caption:''});
+
+    const list = document.getElementById('rpImgList');
+    if (!list) continue;
+    const div = document.createElement('div');
+    div.id = 'rpImgItem-' + i;
+    div.style.cssText = 'position:relative;border-radius:8px;overflow:hidden;border:0.5px solid var(--crd)';
+    div.innerHTML = `
+      <img src="${url}" style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block">
+      <input value="" placeholder="사진 설명"
+        style="width:100%;border:none;border-top:0.5px solid var(--crd);padding:5px 7px;font-size:11px;background:#fff;color:var(--ts)"
+        oninput="if(window.__rpImgs&&window.__rpImgs[${i}])window.__rpImgs[${i}].caption=this.value" />
+      <button onclick="removeRpImg(${i})"
+        style="position:absolute;top:5px;right:5px;background:rgba(0,0,0,.55);border:none;cursor:pointer;color:#fff;font-size:13px;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center">
+        <i class="ti ti-x"></i></button>`;
+    list.appendChild(div);
+  }
+
+  if (prog) prog.style.display = 'none';
+  // 파일 input 초기화 (같은 파일 재선택 가능하게)
+  const inp = document.getElementById('rpFileInput');
+  if (inp) inp.value = '';
 }
 
 function removeRpImg(i) {
