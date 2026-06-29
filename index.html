@@ -6045,11 +6045,13 @@ let curRepair = null;
 
 async function renderRepairs(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  const isAdmin = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
+  const isAdmin  = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
   const canManage = isAdmin;
+  const REPAIR_TYPE_ID = 2;
 
-  const [catRes, listRes, storeRes] = await Promise.all([
+  const [catRes, rpRes, reqRes, storeRes] = await Promise.all([
     sb.from('repair_categories').select('*').eq('active',true).order('sort_order'),
+    // 직접 등록 보수 내역
     (async()=>{
       let q = sb.from('repair_records')
         .select('*, cat:repair_categories(label), author:users!repair_records_author_id_fkey(name)')
@@ -6057,50 +6059,108 @@ async function renderRepairs(area) {
       if (!isAdmin) q = q.eq('store', currentUser.store);
       return q;
     })(),
+    // 업무 신청 완료된 보수 요청
+    (async()=>{
+      let q = sb.from('requests')
+        .select('id,store,title,form_data,completed_at,created_at')
+        .eq('type_id', REPAIR_TYPE_ID)
+        .eq('status','done')
+        .order('completed_at',{ascending:false});
+      if (!isAdmin) q = q.eq('store', currentUser.store);
+      return q;
+    })(),
     sb.from('users').select('store').eq('active',true).neq('role','admin')
   ]);
 
-  const cats   = catRes.data   || [];
-  const list   = listRes.data  || [];
+  const cats   = catRes.data  || [];
+  const rpList = rpRes.data   || [];
+  const reqList= reqRes.data  || [];
   const stores = [...new Set((storeRes.data||[]).map(u=>u.store).filter(Boolean))].sort();
 
-  const prevStore = window.__rpFilterStore || '';
-  const prevCat   = window.__rpFilterCat   || '';
-  const prevPeriod= window.__rpFilterPeriod|| '';
+  // 업무 신청 완료건 → repair_records 형식으로 변환
+  const reqAsRepairs = reqList.map(r => {
+    const fd = r.form_data || {};
+    // 보수 유형 → 카테고리 매핑
+    const catLabel = fd['보수 유형'] || null;
+    const cat = catLabel ? cats.find(c=>c.label===catLabel) : null;
+    return {
+      id:          'req_' + r.id,   // 구분용 prefix
+      _sourceType: 'request',       // 출처 표시용
+      store:       r.store,
+      title:       r.title,
+      repair_date: r.completed_at ? r.completed_at.slice(0,10) : r.created_at.slice(0,10),
+      category_id: cat?.id || null,
+      cat:         cat ? {label: cat.label} : (catLabel ? {label: catLabel} : null),
+      content:     [fd['보수 위치']?'위치: '+fd['보수 위치']:'', fd['증상/상세 내용']||''].filter(Boolean).join('\n'),
+      vendor:      fd['업체명'] || null,
+      cost:        fd['비용']   || null,
+      images:      [],
+      author:      null,
+    };
+  });
+
+  // 직접등록 건 출처 표시
+  const rpWithSource = rpList.map(r => ({...r, _sourceType:'direct'}));
+
+  // 합치기 + 날짜순 정렬
+  const allList = [...rpWithSource, ...reqAsRepairs].sort((a,b) => {
+    const da = new Date(a.repair_date||a.created_at||0);
+    const db = new Date(b.repair_date||b.created_at||0);
+    return db - da;
+  });
+
+  const prevStore  = window.__rpFilterStore  || '';
+  const prevCat    = window.__rpFilterCat    || '';
+  const prevPeriod = window.__rpFilterPeriod || '';
+  const prevSource = window.__rpFilterSource || '';
 
   const applyFilter = () => {
     const fStore  = document.getElementById('rpFStore')?.value  || '';
     const fCat    = document.getElementById('rpFCat')?.value    || '';
     const fPeriod = document.getElementById('rpFPeriod')?.value || '';
-    window.__rpFilterStore = fStore; window.__rpFilterCat = fCat; window.__rpFilterPeriod = fPeriod;
+    const fSource = document.getElementById('rpFSource')?.value || '';
+    window.__rpFilterStore  = fStore;
+    window.__rpFilterCat    = fCat;
+    window.__rpFilterPeriod = fPeriod;
+    window.__rpFilterSource = fSource;
 
-    let filtered = list;
+    let filtered = allList;
     if (fStore)  filtered = filtered.filter(r => r.store === fStore);
     if (fCat)    filtered = filtered.filter(r => String(r.category_id) === fCat);
+    if (fSource) filtered = filtered.filter(r => r._sourceType === fSource);
     if (fPeriod) {
       const now = new Date(); let from = null;
       if (fPeriod==='1m') from = new Date(now.getFullYear(), now.getMonth()-1, now.getDate());
       if (fPeriod==='3m') from = new Date(now.getFullYear(), now.getMonth()-3, now.getDate());
       if (fPeriod==='6m') from = new Date(now.getFullYear(), now.getMonth()-6, now.getDate());
-      if (from) filtered = filtered.filter(r => new Date(r.repair_date||r.created_at) >= from);
+      if (from) filtered = filtered.filter(r => new Date(r.repair_date||r.created_at||0) >= from);
     }
 
     const el = document.getElementById('rpList');
     if (!el) return;
     el.innerHTML = filtered.length ? filtered.map(r => {
-      const imgs = Array.isArray(r.images) ? r.images : [];
-      return `<div class="post-card" onclick="openRepairById(${r.id})">
+      const isReq  = r._sourceType === 'request';
+      const srcBadge = isReq
+        ? `<span class="badge-access" style="background:var(--gnb);color:var(--gn);font-size:9px">업무신청</span>`
+        : `<span class="badge-access" style="background:var(--crm);color:var(--brm);font-size:9px">직접등록</span>`;
+      const catBadge = r.cat
+        ? `<span class="badge-access" style="background:var(--pub);color:var(--pu)">${r.cat.label}</span>` : '';
+      const imgBadge = (!isReq && Array.isArray(r.images) && r.images.length)
+        ? `<span class="badge-access" style="background:var(--blb);color:var(--bl)"><i class="ti ti-photo"></i> ${r.images.length}</span>` : '';
+      const onclick = isReq
+        ? `openReqById(${r.id.toString().replace('req_','')})` // 업무신청 상세로
+        : `openRepairById(${r.id})`;
+      return `<div class="post-card" onclick="${onclick}">
         <div class="post-card-top">
           <span class="post-title-txt"><i class="ti ti-hammer" style="color:var(--brm);margin-right:5px"></i>${r.title}</span>
-          ${r.cat?`<span class="badge-access" style="background:var(--crm);color:var(--brm)">${r.cat.label}</span>`:''}
-          ${imgs.length?`<span class="badge-access" style="background:var(--blb);color:var(--bl)"><i class="ti ti-photo"></i> ${imgs.length}</span>`:''}
+          ${srcBadge}${catBadge}${imgBadge}
         </div>
         <div class="post-meta">
           <span>${r.store}</span>
-          <span>${r.repair_date||fmtDate(r.created_at)}</span>
+          <span>${r.repair_date||''}</span>
           ${r.vendor?`<span>업체: ${r.vendor}</span>`:''}
           ${r.cost?`<span>비용: ${r.cost}</span>`:''}
-          <span>작성: ${r.author?.name||''}</span>
+          ${!isReq&&r.author?`<span>작성: ${r.author.name}</span>`:''}
         </div>
       </div>`;
     }).join('') : '<div style="text-align:center;padding:40px;color:var(--th);font-size:14px">검색 결과가 없습니다.</div>';
@@ -6118,14 +6178,20 @@ async function renderRepairs(area) {
       </div>
     </div>` : '';
 
-  const storeOptHtml = `<option value="">전체 매장</option>` + stores.map(s=>`<option value="${s}"${s===prevStore?' selected':''}>${s}</option>`).join('');
-  const catOptHtml   = `<option value="">전체 유형</option>` + cats.map(c=>`<option value="${c.id}"${String(c.id)===prevCat?' selected':''}>${c.label}</option>`).join('');
+  const storeOptHtml  = `<option value="">전체 매장</option>`  + stores.map(s=>`<option value="${s}"${s===prevStore?' selected':''}>${s}</option>`).join('');
+  const catOptHtml    = `<option value="">전체 유형</option>`  + cats.map(c=>`<option value="${c.id}"${String(c.id)===prevCat?' selected':''}>${c.label}</option>`).join('');
+  const sourceOptHtml = `<option value=""${!prevSource?' selected':''}>전체 출처</option>
+    <option value="direct"${prevSource==='direct'?' selected':''}>직접 등록</option>
+    <option value="request"${prevSource==='request'?' selected':''}>업무 신청 완료</option>`;
 
   area.innerHTML = `
     ${catModalHtml}
     <div class="page-header">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <div><div class="page-title">보수 내역</div><div class="page-sub">매장별 A/S 및 보수 내역 누적 관리</div></div>
+        <div>
+          <div class="page-title">보수 내역</div>
+          <div class="page-sub">직접 등록 + 업무신청 완료 건 통합 (${allList.length}건)</div>
+        </div>
         <div style="display:flex;gap:6px">
           ${canManage?`<button class="btn-cancel-sm" onclick="openRpCatModal()" style="font-size:12px"><i class="ti ti-settings"></i> 카테고리</button>`:''}
           <button class="btn-new" onclick="goPage('repairNew')"><i class="ti ti-plus"></i> 보수 등록</button>
@@ -6133,7 +6199,7 @@ async function renderRepairs(area) {
       </div>
     </div>
     <div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:10px 12px;margin-bottom:14px">
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">
         <div>
           <div style="font-size:11px;color:var(--th);margin-bottom:4px">매장</div>
           <select class="form-input" id="rpFStore" onchange="window.__rpApply()" style="padding:7px 8px;font-size:12px">${storeOptHtml}</select>
@@ -6141,6 +6207,10 @@ async function renderRepairs(area) {
         <div>
           <div style="font-size:11px;color:var(--th);margin-bottom:4px">유형</div>
           <select class="form-input" id="rpFCat" onchange="window.__rpApply()" style="padding:7px 8px;font-size:12px">${catOptHtml}</select>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--th);margin-bottom:4px">출처</div>
+          <select class="form-input" id="rpFSource" onchange="window.__rpApply()" style="padding:7px 8px;font-size:12px">${sourceOptHtml}</select>
         </div>
         <div>
           <div style="font-size:11px;color:var(--th);margin-bottom:4px">기간</div>
@@ -6158,7 +6228,6 @@ async function renderRepairs(area) {
   window.__rpApply = applyFilter;
   applyFilter();
 }
-
 async function openRpCatModal() {
   const modal = document.getElementById('rpCatModal');
   if (!modal) return;
