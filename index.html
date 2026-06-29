@@ -407,10 +407,9 @@ textarea.form-input{min-height:120px;resize:vertical}
     </div>
     <div class="sidebar-section" id="interviewNav" style="display:none">
       <div class="sidebar-label">업무 보고</div>
-      <button class="nav-btn" onclick="goPage('interviews')" id="nav-interviews"><i class="ti ti-message-report"></i> 면담 기록</button>
-      <button class="nav-btn" onclick="goPage('interviewNew')" id="nav-interviewNew" style="display:none"><i class="ti ti-plus"></i> 면담 등록</button>
-      <button class="nav-btn" onclick="goPage('interviewOptions')" id="nav-interviewOptions" style="display:none"><i class="ti ti-settings"></i> 항목 관리</button>
+      <button class="nav-btn" onclick="goPage('interviews')" id="nav-interviews"><i class="ti ti-message-report"></i> 직원 면담</button>
       <button class="nav-btn" onclick="goPage('handover')" id="nav-handover"><i class="ti ti-building-store"></i> 매장 인수인계</button>
+      <button class="nav-btn" onclick="goPage('repairs')" id="nav-repairs" style="display:none"><i class="ti ti-hammer"></i> 보수 내역</button>
     </div>
     <div class="sidebar-section" id="adminNav" style="display:none">
       <div class="sidebar-label">관리</div>
@@ -1267,15 +1266,29 @@ function goPage(page) {
     if (nb) nb.classList.add('active');
     renderInterviews(area);
   } else if (page === 'interviewNew') {
-    const nb = document.getElementById('nav-interviewNew');
+    const nb = document.getElementById('nav-interviews');
     if (nb) nb.classList.add('active');
     renderInterviewNew(area);
   } else if (page === 'interviewDetail') {
+    const nb = document.getElementById('nav-interviews');
+    if (nb) nb.classList.add('active');
     renderInterviewDetail(area);
   } else if (page === 'interviewOptions') {
-    const nb = document.getElementById('nav-interviewOptions');
+    const nb = document.getElementById('nav-interviews');
     if (nb) nb.classList.add('active');
     renderInterviewOptions(area);
+  } else if (page === 'repairs') {
+    const nb = document.getElementById('nav-repairs');
+    if (nb) nb.classList.add('active');
+    renderRepairs(area);
+  } else if (page === 'repairDetail') {
+    const nb = document.getElementById('nav-repairs');
+    if (nb) nb.classList.add('active');
+    renderRepairDetail(area);
+  } else if (page === 'repairNew') {
+    const nb = document.getElementById('nav-repairs');
+    if (nb) nb.classList.add('active');
+    renderRepairNew(area);
   } else if (page === 'coachStores') {
     const nb = document.getElementById('nav-coachStores');
     if (nb) nb.classList.add('active');
@@ -4364,11 +4377,8 @@ function applyMenuPermissions() {
   const canInterview = currentUser.is_master || currentUser.is_vice_master ||
     currentUser.role === 'admin' || isManagerRole(currentUser.role) || !!currentUser.part;
   show('interviewNav', canInterview);
-  // 면담 등록 버튼: 매니저 이상(매장 매니저도 자기 매장 면담 등록 가능)
-  show('nav-interviewNew', canInterview);
-  // 면담 항목 관리: 총괄·부총괄·운영팀만
-  const canInterviewAdmin = currentUser.role === 'admin' || currentUser.is_master || currentUser.is_vice_master;
-  show('nav-interviewOptions', canInterviewAdmin);
+  // 보수 내역: 인수인계 접근 가능한 사람 모두
+  show('nav-repairs', canInterview);
   // 개별 메뉴
   show('nav-staff', hasPerm('staff_view'));
   show('nav-stats', hasPerm('notice_stats'));
@@ -5514,11 +5524,14 @@ function canWriteInterview() {
   return isInterviewAdmin() || isManagerRole(currentUser.role) || !!currentUser.part;
 }
 
-// ── 목록 ──────────────────────────────────────────────────
+// ── 목록 (통합: 목록+등록+항목관리) ─────────────────────────
 async function renderInterviews(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
 
-  // 옵션 + 기록 병렬 로드
+  const isAdmin = isInterviewAdmin();
+  const canWrite = canWriteInterview();
+  const canManage = currentUser.is_master || currentUser.is_vice_master || currentUser.role === 'admin';
+
   const [optsRes, listRes] = await Promise.all([
     sb.from('interview_options').select('*').eq('active', true).order('sort_order'),
     (async () => {
@@ -5526,49 +5539,40 @@ async function renderInterviews(area) {
         .select('*, staff:users!interviews_staff_id_fkey(name,store,role,active), author:users!interviews_author_id_fkey(name,store), feedback_user:users!interviews_feedback_by_fkey(name)')
         .order('interview_date', {ascending: false})
         .order('created_at', {ascending: false});
-      // 총괄·부총괄·운영팀: 전체 / 매니저: 본인 매장만
-      if (!isInterviewAdmin()) q = q.eq('store', currentUser.store);
+      if (!isAdmin) q = q.eq('store', currentUser.store);
       return q;
     })()
   ]);
 
-  const opts   = optsRes.data   || [];
+  const opts       = optsRes.data || [];
   const typeOpts   = opts.filter(o => o.category === 'type');
   const methodOpts = opts.filter(o => o.category === 'method');
-
-  // 퇴사(비활성) 직원 블라인드 처리
   let rows = (listRes.data || []).filter(r => !r.staff || r.staff.active !== false);
 
-  // 검색 상태 보존
   const prevStore  = window.__ivFilterStore  || '';
   const prevStaff  = window.__ivFilterStaff  || '';
   const prevType   = window.__ivFilterType   || '';
   const prevPeriod = window.__ivFilterPeriod || '';
 
-  // 매장 목록 (중복 제거)
   const stores = [...new Set(rows.map(r => r.store || (r.staff?.store||'')).filter(Boolean))].sort();
 
-  // 필터 적용
   const applyFilter = () => {
     const fStore  = document.getElementById('ivFStore')?.value  || '';
     const fStaff  = document.getElementById('ivFStaff')?.value.trim().toLowerCase() || '';
     const fType   = document.getElementById('ivFType')?.value   || '';
     const fPeriod = document.getElementById('ivFPeriod')?.value || '';
-    window.__ivFilterStore  = fStore;
-    window.__ivFilterStaff  = fStaff;
-    window.__ivFilterType   = fType;
-    window.__ivFilterPeriod = fPeriod;
+    window.__ivFilterStore = fStore; window.__ivFilterStaff = fStaff;
+    window.__ivFilterType  = fType;  window.__ivFilterPeriod = fPeriod;
 
     let filtered = rows;
     if (fStore)  filtered = filtered.filter(r => (r.store||r.staff?.store||'') === fStore);
     if (fStaff)  filtered = filtered.filter(r => (r.staff?.name||'').toLowerCase().includes(fStaff));
     if (fType)   filtered = filtered.filter(r => r.interview_type === fType);
     if (fPeriod) {
-      const now = new Date();
-      let from = null;
-      if (fPeriod === '1m') from = new Date(now.getFullYear(), now.getMonth()-1, now.getDate());
-      if (fPeriod === '3m') from = new Date(now.getFullYear(), now.getMonth()-3, now.getDate());
-      if (fPeriod === '6m') from = new Date(now.getFullYear(), now.getMonth()-6, now.getDate());
+      const now = new Date(); let from = null;
+      if (fPeriod==='1m') from = new Date(now.getFullYear(), now.getMonth()-1, now.getDate());
+      if (fPeriod==='3m') from = new Date(now.getFullYear(), now.getMonth()-3, now.getDate());
+      if (fPeriod==='6m') from = new Date(now.getFullYear(), now.getMonth()-6, now.getDate());
       if (from) filtered = filtered.filter(r => new Date(r.interview_date||r.created_at) >= from);
     }
 
@@ -5577,10 +5581,10 @@ async function renderInterviews(area) {
     list.innerHTML = filtered.length ? filtered.map(r => {
       const staffName  = r.staff ? r.staff.name  : '(삭제된 직원)';
       const staffStore = r.staff ? r.staff.store  : (r.store||'');
-      const authorName = r.author ? (r.author.store ? r.author.store + ' · ' + r.author.name : r.author.name) : '';
+      const authorName = r.author ? (r.author.store ? r.author.store+' · '+r.author.name : r.author.name) : '';
       const hasFeedback = !!r.feedback;
       const dateStr = r.interview_date || fmtDate(r.created_at);
-      const typeBadge = r.interview_type ? `<span class="badge-access" style="background:var(--pub);color:var(--pu)">${r.interview_type}</span>` : '';
+      const typeBadge   = r.interview_type   ? `<span class="badge-access" style="background:var(--pub);color:var(--pu)">${r.interview_type}</span>` : '';
       const methodBadge = r.interview_method ? `<span class="badge-access">${r.interview_method}</span>` : '';
       return `<div class="post-card" onclick="openInterviewById(${r.id})">
         <div class="post-card-top">
@@ -5600,36 +5604,54 @@ async function renderInterviews(area) {
   const storeOptHtml = `<option value="">전체 매장</option>` + stores.map(s=>`<option value="${s}"${s===prevStore?' selected':''}>${s}</option>`).join('');
   const typeOptHtml  = `<option value="">전체 유형</option>` + typeOpts.map(o=>`<option value="${o.label}"${o.label===prevType?' selected':''}>${o.label}</option>`).join('');
 
+  // 항목 관리 모달 HTML (canManage인 경우만)
+  const optModalHtml = canManage ? `
+    <div id="ivOptModal" style="display:none;position:fixed;inset:0;background:rgba(43,26,14,.5);z-index:300;align-items:center;justify-content:center">
+      <div style="background:#fff;border-radius:14px;padding:22px;width:min(96vw,440px);max-height:90vh;overflow-y:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <span style="font-size:15px;font-weight:600;color:var(--tm)"><i class="ti ti-settings"></i> 면담 항목 관리</span>
+          <button onclick="document.getElementById('ivOptModal').style.display='none'" style="background:none;border:none;cursor:pointer;color:var(--th);font-size:18px"><i class="ti ti-x"></i></button>
+        </div>
+        <div id="ivOptContent"></div>
+      </div>
+    </div>` : '';
+
   area.innerHTML = `
+    ${optModalHtml}
     <div class="page-header">
-      <div class="page-title">면담 기록</div>
-      <div class="page-sub">매장 직원 면담 내용 및 운영팀 피드백</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div>
+          <div class="page-title">직원 면담</div>
+          <div class="page-sub">면담 기록 및 운영팀 피드백 관리</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          ${canManage ? `<button class="btn-cancel-sm" onclick="openIvOptModal()" style="font-size:12px"><i class="ti ti-settings"></i> 항목 관리</button>` : ''}
+          ${canWrite  ? `<button class="btn-new" onclick="goPage('interviewNew')"><i class="ti ti-plus"></i> 면담 등록</button>` : ''}
+        </div>
+      </div>
     </div>
-    <div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:12px 14px;margin-bottom:14px">
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:8px;align-items:end">
+    <div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:10px 12px;margin-bottom:14px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;align-items:end">
         <div>
           <div style="font-size:11px;color:var(--th);margin-bottom:4px">매장</div>
-          <select class="form-input" id="ivFStore" onchange="window.__ivApply()" style="padding:7px 10px;font-size:13px">${storeOptHtml}</select>
+          <select class="form-input" id="ivFStore" onchange="window.__ivApply()" style="padding:7px 8px;font-size:12px">${storeOptHtml}</select>
         </div>
         <div>
           <div style="font-size:11px;color:var(--th);margin-bottom:4px">직원 이름</div>
-          <input class="form-input" id="ivFStaff" value="${prevStaff}" placeholder="이름 검색" oninput="window.__ivApply()" style="padding:7px 10px;font-size:13px" />
+          <input class="form-input" id="ivFStaff" value="${prevStaff}" placeholder="이름 검색" oninput="window.__ivApply()" style="padding:7px 8px;font-size:12px" />
         </div>
         <div>
           <div style="font-size:11px;color:var(--th);margin-bottom:4px">면담 유형</div>
-          <select class="form-input" id="ivFType" onchange="window.__ivApply()" style="padding:7px 10px;font-size:13px">${typeOptHtml}</select>
+          <select class="form-input" id="ivFType" onchange="window.__ivApply()" style="padding:7px 8px;font-size:12px">${typeOptHtml}</select>
         </div>
         <div>
           <div style="font-size:11px;color:var(--th);margin-bottom:4px">기간</div>
-          <select class="form-input" id="ivFPeriod" onchange="window.__ivApply()" style="padding:7px 10px;font-size:13px">
-            <option value=""${!prevPeriod?' selected':''}>전체 기간</option>
-            <option value="1m"${prevPeriod==='1m'?' selected':''}>최근 1개월</option>
-            <option value="3m"${prevPeriod==='3m'?' selected':''}>최근 3개월</option>
-            <option value="6m"${prevPeriod==='6m'?' selected':''}>최근 6개월</option>
+          <select class="form-input" id="ivFPeriod" onchange="window.__ivApply()" style="padding:7px 8px;font-size:12px">
+            <option value=""${!prevPeriod?' selected':''}>전체</option>
+            <option value="1m"${prevPeriod==='1m'?' selected':''}>1개월</option>
+            <option value="3m"${prevPeriod==='3m'?' selected':''}>3개월</option>
+            <option value="6m"${prevPeriod==='6m'?' selected':''}>6개월</option>
           </select>
-        </div>
-        <div>
-          ${canWriteInterview() ? '<button class="btn-new" onclick="goPage(\'interviewNew\')"><i class="ti ti-plus"></i> 면담 등록</button>' : ''}
         </div>
       </div>
     </div>
@@ -5639,6 +5661,56 @@ async function renderInterviews(area) {
   applyFilter();
 }
 
+// 항목 관리 모달 열기
+async function openIvOptModal() {
+  const modal = document.getElementById('ivOptModal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  const cont = document.getElementById('ivOptContent');
+  cont.innerHTML = '<div style="text-align:center;padding:20px;color:var(--th)"><i class="ti ti-loader spin"></i></div>';
+
+  const { data: opts } = await sb.from('interview_options').select('*').order('category').order('sort_order');
+  const types   = (opts||[]).filter(o => o.category === 'type');
+  const methods = (opts||[]).filter(o => o.category === 'method');
+
+  const renderGroup = (list, cat, catLabel) =>
+    `<div style="margin-bottom:18px">
+      <div class="section-label" style="margin-bottom:8px">${catLabel}</div>
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:8px">
+        ${list.map(o=>`
+          <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--cr);border-radius:7px">
+            <span style="flex:1;font-size:13px">${o.label}</span>
+            <button onclick="deleteIvOpt(${o.id},'${o.label}')" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:13px"><i class="ti ti-trash"></i></button>
+          </div>`).join('')}
+        ${!list.length ? '<div style="color:var(--th);font-size:13px;padding:4px 0">항목 없음</div>' : ''}
+      </div>
+      <div style="display:flex;gap:6px">
+        <input class="form-input" id="newOpt-${cat}" placeholder="새 항목명" style="flex:1;padding:7px 10px;font-size:13px"
+          onkeydown="if(event.key==='Enter')addIvOpt('${cat}','${catLabel}')" />
+        <button class="btn-submit" style="padding:7px 13px;font-size:13px" onclick="addIvOpt('${cat}','${catLabel}')">추가</button>
+      </div>
+    </div>`;
+
+  cont.innerHTML = renderGroup(types,'type','면담 유형') + renderGroup(methods,'method','면담 방식');
+}
+
+async function addIvOpt(cat, catLabel) {
+  const inp = document.getElementById('newOpt-' + cat);
+  const label = inp?.value.trim();
+  if (!label) return;
+  const ok = await confirmMasterPw(`'${catLabel}' 항목 추가`);
+  if (!ok) return;
+  const { data: max } = await sb.from('interview_options').select('sort_order').eq('category',cat).order('sort_order',{ascending:false}).limit(1).maybeSingle();
+  await sb.from('interview_options').insert({category:cat, label, sort_order:(max?.sort_order||0)+1, active:true});
+  openIvOptModal();
+}
+
+async function deleteIvOpt(id, label) {
+  const ok = await confirmMasterPw(`'${label}' 항목 삭제`);
+  if (!ok) return;
+  await sb.from('interview_options').delete().eq('id', id);
+  openIvOptModal();
+}
 // ── 상세 ──────────────────────────────────────────────────
 async function openInterviewById(id) {
   const { data } = await sb.from('interviews')
@@ -5965,6 +6037,371 @@ async function deleteInterviewOption(id, label) {
   renderInterviewOptions(document.getElementById('contentArea'));
 }
 
+
+// ══════════════════════════════════════════════════════════
+// 매장 보수 내역
+// ══════════════════════════════════════════════════════════
+let curRepair = null;
+
+async function renderRepairs(area) {
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const isAdmin = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
+  const canManage = isAdmin;
+
+  const [catRes, listRes, storeRes] = await Promise.all([
+    sb.from('repair_categories').select('*').eq('active',true).order('sort_order'),
+    (async()=>{
+      let q = sb.from('repair_records')
+        .select('*, cat:repair_categories(label), author:users!repair_records_author_id_fkey(name)')
+        .order('repair_date',{ascending:false}).order('created_at',{ascending:false});
+      if (!isAdmin) q = q.eq('store', currentUser.store);
+      return q;
+    })(),
+    sb.from('users').select('store').eq('active',true).neq('role','admin')
+  ]);
+
+  const cats   = catRes.data   || [];
+  const list   = listRes.data  || [];
+  const stores = [...new Set((storeRes.data||[]).map(u=>u.store).filter(Boolean))].sort();
+
+  const prevStore = window.__rpFilterStore || '';
+  const prevCat   = window.__rpFilterCat   || '';
+  const prevPeriod= window.__rpFilterPeriod|| '';
+
+  const applyFilter = () => {
+    const fStore  = document.getElementById('rpFStore')?.value  || '';
+    const fCat    = document.getElementById('rpFCat')?.value    || '';
+    const fPeriod = document.getElementById('rpFPeriod')?.value || '';
+    window.__rpFilterStore = fStore; window.__rpFilterCat = fCat; window.__rpFilterPeriod = fPeriod;
+
+    let filtered = list;
+    if (fStore)  filtered = filtered.filter(r => r.store === fStore);
+    if (fCat)    filtered = filtered.filter(r => String(r.category_id) === fCat);
+    if (fPeriod) {
+      const now = new Date(); let from = null;
+      if (fPeriod==='1m') from = new Date(now.getFullYear(), now.getMonth()-1, now.getDate());
+      if (fPeriod==='3m') from = new Date(now.getFullYear(), now.getMonth()-3, now.getDate());
+      if (fPeriod==='6m') from = new Date(now.getFullYear(), now.getMonth()-6, now.getDate());
+      if (from) filtered = filtered.filter(r => new Date(r.repair_date||r.created_at) >= from);
+    }
+
+    const el = document.getElementById('rpList');
+    if (!el) return;
+    el.innerHTML = filtered.length ? filtered.map(r => {
+      const imgs = Array.isArray(r.images) ? r.images : [];
+      return `<div class="post-card" onclick="openRepairById(${r.id})">
+        <div class="post-card-top">
+          <span class="post-title-txt"><i class="ti ti-hammer" style="color:var(--brm);margin-right:5px"></i>${r.title}</span>
+          ${r.cat?`<span class="badge-access" style="background:var(--crm);color:var(--brm)">${r.cat.label}</span>`:''}
+          ${imgs.length?`<span class="badge-access" style="background:var(--blb);color:var(--bl)"><i class="ti ti-photo"></i> ${imgs.length}</span>`:''}
+        </div>
+        <div class="post-meta">
+          <span>${r.store}</span>
+          <span>${r.repair_date||fmtDate(r.created_at)}</span>
+          ${r.vendor?`<span>업체: ${r.vendor}</span>`:''}
+          ${r.cost?`<span>비용: ${r.cost}</span>`:''}
+          <span>작성: ${r.author?.name||''}</span>
+        </div>
+      </div>`;
+    }).join('') : '<div style="text-align:center;padding:40px;color:var(--th);font-size:14px">검색 결과가 없습니다.</div>';
+  };
+
+  // 카테고리 관리 모달
+  const catModalHtml = canManage ? `
+    <div id="rpCatModal" style="display:none;position:fixed;inset:0;background:rgba(43,26,14,.5);z-index:300;align-items:center;justify-content:center">
+      <div style="background:#fff;border-radius:14px;padding:22px;width:min(96vw,380px);max-height:90vh;overflow-y:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <span style="font-size:15px;font-weight:600;color:var(--tm)">보수 카테고리 관리</span>
+          <button onclick="document.getElementById('rpCatModal').style.display='none'" style="background:none;border:none;cursor:pointer;color:var(--th);font-size:18px"><i class="ti ti-x"></i></button>
+        </div>
+        <div id="rpCatContent"></div>
+      </div>
+    </div>` : '';
+
+  const storeOptHtml = `<option value="">전체 매장</option>` + stores.map(s=>`<option value="${s}"${s===prevStore?' selected':''}>${s}</option>`).join('');
+  const catOptHtml   = `<option value="">전체 유형</option>` + cats.map(c=>`<option value="${c.id}"${String(c.id)===prevCat?' selected':''}>${c.label}</option>`).join('');
+
+  area.innerHTML = `
+    ${catModalHtml}
+    <div class="page-header">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div><div class="page-title">보수 내역</div><div class="page-sub">매장별 A/S 및 보수 내역 누적 관리</div></div>
+        <div style="display:flex;gap:6px">
+          ${canManage?`<button class="btn-cancel-sm" onclick="openRpCatModal()" style="font-size:12px"><i class="ti ti-settings"></i> 카테고리</button>`:''}
+          <button class="btn-new" onclick="goPage('repairNew')"><i class="ti ti-plus"></i> 보수 등록</button>
+        </div>
+      </div>
+    </div>
+    <div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:10px 12px;margin-bottom:14px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <div>
+          <div style="font-size:11px;color:var(--th);margin-bottom:4px">매장</div>
+          <select class="form-input" id="rpFStore" onchange="window.__rpApply()" style="padding:7px 8px;font-size:12px">${storeOptHtml}</select>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--th);margin-bottom:4px">유형</div>
+          <select class="form-input" id="rpFCat" onchange="window.__rpApply()" style="padding:7px 8px;font-size:12px">${catOptHtml}</select>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--th);margin-bottom:4px">기간</div>
+          <select class="form-input" id="rpFPeriod" onchange="window.__rpApply()" style="padding:7px 8px;font-size:12px">
+            <option value=""${!prevPeriod?' selected':''}>전체</option>
+            <option value="1m"${prevPeriod==='1m'?' selected':''}>1개월</option>
+            <option value="3m"${prevPeriod==='3m'?' selected':''}>3개월</option>
+            <option value="6m"${prevPeriod==='6m'?' selected':''}>6개월</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="post-list" id="rpList"></div>`;
+
+  window.__rpApply = applyFilter;
+  applyFilter();
+}
+
+async function openRpCatModal() {
+  const modal = document.getElementById('rpCatModal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  const cont = document.getElementById('rpCatContent');
+  cont.innerHTML = '<div style="text-align:center;padding:16px;color:var(--th)"><i class="ti ti-loader spin"></i></div>';
+  const { data: cats } = await sb.from('repair_categories').select('*').order('sort_order');
+  cont.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px">
+      ${(cats||[]).map(c=>`
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--cr);border-radius:7px">
+          <span style="flex:1;font-size:13px">${c.label}</span>
+          <button onclick="deleteRpCat(${c.id},'${c.label}')" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:13px"><i class="ti ti-trash"></i></button>
+        </div>`).join('')}
+    </div>
+    <div style="display:flex;gap:6px">
+      <input class="form-input" id="newRpCat" placeholder="새 카테고리명" style="flex:1;padding:7px 10px;font-size:13px"
+        onkeydown="if(event.key==='Enter')addRpCat()" />
+      <button class="btn-submit" style="padding:7px 13px;font-size:13px" onclick="addRpCat()">추가</button>
+    </div>`;
+}
+
+async function addRpCat() {
+  const label = document.getElementById('newRpCat')?.value.trim();
+  if (!label) return;
+  const { data: max } = await sb.from('repair_categories').select('sort_order').order('sort_order',{ascending:false}).limit(1).maybeSingle();
+  await sb.from('repair_categories').insert({label, sort_order:(max?.sort_order||0)+1, active:true});
+  openRpCatModal();
+  renderRepairs(document.getElementById('contentArea'));
+}
+
+async function deleteRpCat(id, label) {
+  if (!confirm(`'${label}' 카테고리를 삭제할까요?`)) return;
+  await sb.from('repair_categories').delete().eq('id', id);
+  openRpCatModal();
+}
+
+async function openRepairById(id) {
+  const { data } = await sb.from('repair_records')
+    .select('*, cat:repair_categories(label), author:users!repair_records_author_id_fkey(name,store)')
+    .eq('id', id).single();
+  if (!data) return;
+  curRepair = data;
+  goPage('repairDetail');
+}
+
+async function renderRepairDetail(area) {
+  const r = curRepair;
+  if (!r) { goPage('repairs'); return; }
+  const isAdmin = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
+  const canEdit = isAdmin || r.author_id === currentUser.id;
+  const imgs = Array.isArray(r.images) ? r.images : [];
+
+  area.innerHTML = `
+    <div style="margin-bottom:10px;display:flex;align-items:center;justify-content:space-between">
+      <button class="btn-cancel-sm" onclick="goPage('repairs')"><i class="ti ti-arrow-left"></i> 목록</button>
+      ${canEdit?`<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openRepairEdit(${r.id})"><i class="ti ti-edit"></i> 수정</button>`:''}
+    </div>
+    <div class="post-detail">
+      <div class="detail-header">
+        <div class="detail-title-row">${r.title}</div>
+        <div class="detail-meta" style="flex-wrap:wrap;gap:10px">
+          <span>${r.store}</span>
+          <span>${r.repair_date||fmtDate(r.created_at)}</span>
+          ${r.cat?`<span class="badge-access" style="background:var(--crm);color:var(--brm)">${r.cat.label}</span>`:''}
+          ${r.vendor?`<span>업체: <strong>${r.vendor}</strong></span>`:''}
+          ${r.cost?`<span>비용: <strong>${r.cost}</strong></span>`:''}
+          <span>작성: ${r.author?.store?r.author.store+' · ':''} ${r.author?.name||''}</span>
+        </div>
+      </div>
+      ${r.content?`<div style="font-size:14px;line-height:1.9;color:var(--tm);white-space:pre-wrap;margin-bottom:18px;background:var(--cr);border-radius:8px;padding:14px 16px">${r.content}</div>`:''}
+      ${imgs.length?`
+        <div style="margin-bottom:16px">
+          <div class="section-label" style="margin-bottom:10px"><i class="ti ti-photo" style="color:var(--brm)"></i> 사진 (${imgs.length}장)</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px">
+            ${imgs.map(img=>`
+              <a href="${img.url}" target="_blank" style="display:block;border-radius:8px;overflow:hidden;border:0.5px solid var(--crd)">
+                <img src="${img.url}" alt="${img.caption||''}"
+                  style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block"
+                  onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                <div style="display:none;aspect-ratio:4/3;align-items:center;justify-content:center;background:var(--cr);color:var(--th);font-size:12px"><i class="ti ti-photo-off"></i></div>
+                ${img.caption?`<div style="padding:5px 8px;font-size:11px;color:var(--ts);background:#fff">${img.caption}</div>`:''}
+              </a>`).join('')}
+          </div>
+        </div>`:''}
+    </div>`;
+}
+
+let editingRepairId = null;
+
+async function renderRepairNew(area, ex) {
+  editingRepairId = ex ? ex.id : null;
+  const isAdmin = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
+  const today = new Date().toISOString().slice(0,10);
+
+  const [catRes, storeRes] = await Promise.all([
+    sb.from('repair_categories').select('*').eq('active',true).order('sort_order'),
+    sb.from('users').select('store').eq('active',true).neq('role','admin')
+  ]);
+  const cats   = catRes.data || [];
+  const stores = [...new Set((storeRes.data||[]).map(u=>u.store).filter(Boolean))].sort();
+  const exStore = ex ? ex.store : currentUser.store;
+
+  const storeOptHtml = stores.map(s=>`<option value="${s}"${s===exStore?' selected':''}>${s}</option>`).join('');
+  const catOptHtml   = `<option value="">카테고리 선택</option>` + cats.map(c=>`<option value="${c.id}"${ex&&ex.category_id===c.id?' selected':''}>${c.label}</option>`).join('');
+
+  const imgs = ex && Array.isArray(ex.images) ? ex.images : [];
+  window.__rpImgs = [...imgs];
+
+  area.innerHTML = `
+    <div style="margin-bottom:10px">
+      <button class="btn-cancel-sm" onclick="goPage('repairs')"><i class="ti ti-arrow-left"></i> 취소</button>
+    </div>
+    <div class="form-section">
+      <div class="page-title" style="margin-bottom:18px">${ex?'보수 내역 수정':'보수 내역 등록'}</div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-row">
+          <label class="form-label">매장 <span style="color:var(--rd)">*</span></label>
+          <select class="form-input" id="rpStore">${storeOptHtml}</select>
+        </div>
+        <div class="form-row">
+          <label class="form-label">보수 유형</label>
+          <select class="form-input" id="rpCat">${catOptHtml}</select>
+        </div>
+        <div class="form-row">
+          <label class="form-label">보수일 <span style="color:var(--rd)">*</span></label>
+          <input type="date" class="form-input" id="rpDate" value="${ex?(ex.repair_date||today):today}" max="${today}" />
+        </div>
+        <div class="form-row">
+          <label class="form-label">업체명</label>
+          <input class="form-input" id="rpVendor" value="${ex?ex.vendor||'':''}" placeholder="시공/수리 업체명" />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label class="form-label">제목 <span style="color:var(--rd)">*</span></label>
+        <input class="form-input" id="rpTitle" value="${ex?ex.title||'':''}" placeholder="예: 에어컨 냉매 보충, 누수 배관 교체 등" />
+      </div>
+
+      <div class="form-row">
+        <label class="form-label">비용</label>
+        <input class="form-input" id="rpCost" value="${ex?ex.cost||'':''}" placeholder="예: 150,000원 / 견적 대기" />
+      </div>
+
+      <div class="form-row">
+        <label class="form-label">상세 내용</label>
+        <textarea class="form-input" id="rpContent" rows="6"
+          placeholder="보수 내용을 상세히 기록하세요.&#10;슬랙에 보고한 내용을 그대로 붙여넣기 해도 됩니다."
+          style="font-size:14px;line-height:1.8">${ex?ex.content||'':''}</textarea>
+      </div>
+
+      <div class="form-row">
+        <label class="form-label">사진 추가 (URL)</label>
+        <div style="font-size:11px;color:var(--th);margin-bottom:8px;line-height:1.5">
+          카카오톡 공유링크, Google Drive 공개 링크 등을 입력하세요.
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+          <input class="form-input" id="rpImgUrl" placeholder="이미지 URL" style="flex:2;min-width:200px" />
+          <input class="form-input" id="rpImgCaption" placeholder="사진 설명 (선택)" style="flex:1;min-width:120px" />
+          <button class="btn-submit" style="padding:8px 12px;font-size:12px;white-space:nowrap" onclick="addRpImg()">추가</button>
+        </div>
+        <div id="rpImgList">
+          ${imgs.map((img,i)=>`
+            <div id="rpImgItem-${i}" style="display:flex;align-items:center;gap:8px;padding:7px;background:var(--cr);border-radius:7px;margin-bottom:5px">
+              <img src="${img.url}" style="width:48px;height:36px;object-fit:cover;border-radius:5px;flex-shrink:0" onerror="this.style.display='none'">
+              <span style="flex:1;font-size:12px;color:var(--ts);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${img.caption||img.url}</span>
+              <button onclick="removeRpImg(${i})" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:14px;flex-shrink:0"><i class="ti ti-x"></i></button>
+            </div>`).join('')}
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
+        <button class="btn-cancel-sm" onclick="goPage('repairs')">취소</button>
+        <button class="btn-submit" onclick="saveRepair()"><i class="ti ti-device-floppy"></i> ${ex?'수정 완료':'등록'}</button>
+      </div>
+    </div>`;
+}
+
+function addRpImg() {
+  const url     = document.getElementById('rpImgUrl')?.value.trim();
+  const caption = document.getElementById('rpImgCaption')?.value.trim();
+  if (!url) { alert('이미지 URL을 입력해주세요.'); return; }
+  if (!window.__rpImgs) window.__rpImgs = [];
+  const i = window.__rpImgs.length;
+  window.__rpImgs.push({url, caption});
+  const list = document.getElementById('rpImgList');
+  const div = document.createElement('div');
+  div.id = 'rpImgItem-' + i;
+  div.style.cssText = 'display:flex;align-items:center;gap:8px;padding:7px;background:var(--cr);border-radius:7px;margin-bottom:5px';
+  div.innerHTML = `
+    <img src="${url}" style="width:48px;height:36px;object-fit:cover;border-radius:5px;flex-shrink:0" onerror="this.style.display='none'">
+    <span style="flex:1;font-size:12px;color:var(--ts);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${caption||url}</span>
+    <button onclick="removeRpImg(${i})" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:14px;flex-shrink:0"><i class="ti ti-x"></i></button>`;
+  list?.appendChild(div);
+  document.getElementById('rpImgUrl').value = '';
+  document.getElementById('rpImgCaption').value = '';
+}
+
+function removeRpImg(i) {
+  if (window.__rpImgs) window.__rpImgs.splice(i, 1);
+  document.getElementById('rpImgItem-' + i)?.remove();
+}
+
+async function openRepairEdit(id) {
+  const { data } = await sb.from('repair_records').select('*').eq('id', id).single();
+  if (!data) return;
+  editingRepairId = id;
+  renderRepairNew(document.getElementById('contentArea'), data);
+}
+
+async function saveRepair() {
+  const store   = document.getElementById('rpStore')?.value;
+  const catId   = document.getElementById('rpCat')?.value || null;
+  const date    = document.getElementById('rpDate')?.value;
+  const title   = document.getElementById('rpTitle')?.value.trim();
+  const vendor  = document.getElementById('rpVendor')?.value.trim() || null;
+  const cost    = document.getElementById('rpCost')?.value.trim() || null;
+  const content = document.getElementById('rpContent')?.value.trim() || null;
+  if (!store)  { alert('매장을 선택해주세요.'); return; }
+  if (!date)   { alert('보수일을 선택해주세요.'); return; }
+  if (!title)  { alert('제목을 입력해주세요.'); return; }
+
+  const payload = {
+    store, category_id: catId ? parseInt(catId) : null,
+    repair_date: date, title, vendor, cost, content,
+    images: window.__rpImgs || [],
+    updated_at: new Date().toISOString()
+  };
+
+  if (editingRepairId) {
+    const { error } = await sb.from('repair_records').update(payload).eq('id', editingRepairId);
+    if (error) { alert('수정 오류: ' + error.message); return; }
+  } else {
+    const { error } = await sb.from('repair_records').insert({
+      ...payload, author_id: currentUser.id, created_at: new Date().toISOString()
+    });
+    if (error) { alert('등록 오류: ' + error.message); return; }
+  }
+  window.__rpFilterStore = store;
+  goPage('repairs');
+}
+
 // ══════════════════════════════════════════════════════════
 // B) 코치 관할 매장 관리
 // ══════════════════════════════════════════════════════════
@@ -6186,6 +6623,17 @@ async function renderHandoverDetail(area) {
       ${section('영업시간 외 출입방법', 'ti-door', d.after_hours_access)}
       ${section('스케줄 편성 고려사항', 'ti-calendar-event', d.schedule_notes)}
       ${section('기타 특이사항', 'ti-notes', d.extra_notes)}
+
+      <div style="margin-bottom:18px;padding:14px 16px;background:var(--crm);border-radius:10px;display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--tm)"><i class="ti ti-hammer" style="color:var(--brm);margin-right:5px"></i>보수 내역</div>
+          <div style="font-size:11px;color:var(--th);margin-top:2px">A/S 및 보수 히스토리 누적 관리</div>
+        </div>
+        <button class="btn-submit" style="padding:7px 14px;font-size:12px"
+          onclick="window.__rpFilterStore='${store}';goPage('repairs')">
+          <i class="ti ti-arrow-right"></i> 보수 내역 보기
+        </button>
+      </div>
 
       ${attachments.length ? `<div style="margin-bottom:18px">
         <div class="section-label" style="margin-bottom:8px"><i class="ti ti-paperclip" style="color:var(--brm)"></i> 첨부파일</div>
