@@ -6082,17 +6082,23 @@ async function renderHandoverList(area) {
   const cards = stores.map(store => {
     const hv = hvMap[store];
     const hasData = !!hv;
-    return `<div class="post-card" onclick="openHandover('${store}')">
-      <div class="post-card-top">
-        <span class="post-title-txt"><i class="ti ti-building-store" style="margin-right:6px;color:var(--brm)"></i>${store}</span>
-        <span class="badge-access ${hasData?'all':''}">${hasData?'등록됨':'미등록'}</span>
+    const canEdit2 = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master||isManagerRole(currentUser.role);
+    return `<div class="post-card" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div onclick="openHandover('${store}')" style="flex:1;cursor:pointer">
+        <div class="post-card-top" style="margin-bottom:5px">
+          <span class="post-title-txt"><i class="ti ti-building-store" style="margin-right:6px;color:var(--brm)"></i>${store}</span>
+          <span class="badge-access ${hasData?'all':''}">${hasData?'등록됨':'미등록'}</span>
+        </div>
+        <div class="post-meta">
+          ${hasData
+            ? `<span>최종 수정: ${hv.updated_at?.slice(0,16).replace('T',' ')||''}</span><span>${hv.updater?.name||''}</span>`
+            : '<span style="color:var(--th)">아직 인수인계 자료가 없습니다</span>'}
+        </div>
       </div>
-      <div class="post-meta">
-        ${hasData
-          ? `<span>최종 수정: ${hv.updated_at?.slice(0,16).replace('T',' ')||''}</span>
-             <span>${hv.updater?.name||''}</span>`
-          : '<span style="color:var(--th)">아직 인수인계 자료가 없습니다</span>'}
-      </div>
+      ${canEdit2 ? `<button class="btn-submit" style="padding:7px 13px;font-size:12px;white-space:nowrap;flex-shrink:0"
+        onclick="event.stopPropagation();openHandoverEdit('${store}')">
+        <i class="ti ti-edit"></i> ${hasData?'수정':'등록'}
+      </button>` : ''}
     </div>`;
   }).join('');
 
@@ -6114,9 +6120,14 @@ async function renderHandoverDetail(area) {
   if (!store) { goPage('handover'); return; }
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
 
-  const { data: hv } = await sb.from('store_handover').select('*,updater:users!store_handover_updated_by_fkey(name)').eq('store', store).single().catch(()=>({data:null}));
+  // maybeSingle: 데이터 없어도 에러 없이 null 반환
+  const { data: hv, error: hvErr } = await sb.from('store_handover')
+    .select('*,updater:users!store_handover_updated_by_fkey(name)')
+    .eq('store', store).maybeSingle();
+  if (hvErr) console.warn('인수인계 조회 오류:', hvErr.message);
 
   const isAdmin = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
+  // 부총괄 + 매니저 이상 모두 수정 가능
   const canEdit = isAdmin || isManagerRole(currentUser.role);
 
   const d = hv || {};
@@ -6187,7 +6198,7 @@ async function openHandoverEdit(store) {
   const area = document.getElementById('contentArea');
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
 
-  const { data: hv } = await sb.from('store_handover').select('*').eq('store', store).single().catch(()=>({data:null}));
+  const { data: hv } = await sb.from('store_handover').select('*').eq('store', store).maybeSingle();
   const d = hv || {};
   const contacts  = Array.isArray(d.contacts)      ? d.contacts      : [{}];
   const equipment = Array.isArray(d.equipment)     ? d.equipment     : [{}];
