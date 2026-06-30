@@ -411,6 +411,13 @@ textarea.form-input{min-height:120px;resize:vertical}
       <button class="nav-btn" onclick="goPage('handover')" id="nav-handover"><i class="ti ti-building-store"></i> 매장 인수인계</button>
       <button class="nav-btn" onclick="goPage('repairs')" id="nav-repairs" style="display:none"><i class="ti ti-hammer"></i> 보수 내역</button>
     </div>
+    <div class="sidebar-section" id="scheduleNav" style="display:none">
+      <div class="sidebar-label">스케줄 관리</div>
+      <button class="nav-btn" onclick="goPage('schedules')" id="nav-schedules"><i class="ti ti-calendar-event"></i> 매장 스케줄</button>
+      <button class="nav-btn" onclick="goPage('scheduleConfirm')" id="nav-scheduleConfirm" style="display:none"><i class="ti ti-clipboard-check"></i> 컨펌 대기 목록</button>
+      <button class="nav-btn" onclick="goPage('scheduleClose')" id="nav-scheduleClose" style="display:none"><i class="ti ti-checklist"></i> 근태 마감 현황</button>
+      <button class="nav-btn" onclick="goPage('scheduleSettings')" id="nav-scheduleSettings" style="display:none"><i class="ti ti-settings"></i> 휴무 기준 설정</button>
+    </div>
     <div class="sidebar-section" id="adminNav" style="display:none">
       <div class="sidebar-label">관리</div>
       <button class="nav-btn" onclick="goPage('drafts')" id="nav-drafts"><i class="ti ti-notes"></i> 임시저장<span class="nav-new" id="draftBadge" style="display:none">!</span></button>
@@ -1289,6 +1296,26 @@ function goPage(page) {
     const nb = document.getElementById('nav-repairs');
     if (nb) nb.classList.add('active');
     renderRepairNew(area);
+  } else if (page === 'schedules') {
+    const nb = document.getElementById('nav-schedules');
+    if (nb) nb.classList.add('active');
+    renderSchedules(area);
+  } else if (page === 'scheduleEdit') {
+    const nb = document.getElementById('nav-schedules');
+    if (nb) nb.classList.add('active');
+    renderScheduleEdit(area);
+  } else if (page === 'scheduleConfirm') {
+    const nb = document.getElementById('nav-scheduleConfirm');
+    if (nb) nb.classList.add('active');
+    renderScheduleConfirmList(area);
+  } else if (page === 'scheduleClose') {
+    const nb = document.getElementById('nav-scheduleClose');
+    if (nb) nb.classList.add('active');
+    renderScheduleCloseList(area);
+  } else if (page === 'scheduleSettings') {
+    const nb = document.getElementById('nav-scheduleSettings');
+    if (nb) nb.classList.add('active');
+    renderScheduleSettings(area);
   } else if (page === 'coachStores') {
     const nb = document.getElementById('nav-coachStores');
     if (nb) nb.classList.add('active');
@@ -3675,7 +3702,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-06-30';   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-07-01';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -4385,6 +4412,14 @@ function applyMenuPermissions() {
   show('interviewNav', canInterview);
   // 보수 내역: 인수인계 접근 가능한 사람 모두
   show('nav-repairs', canInterview);
+  // 스케줄 관리 섹션: 매니저 이상 + 운영팀(작성·조회 가능 범위는 화면 내에서 추가 분기)
+  const isAdminRole = currentUser.role === 'admin' || currentUser.is_master || currentUser.is_vice_master;
+  const isHrRole = currentUser.role === 'hr';
+  const canSchedule = isAdminRole || isManagerRole(currentUser.role) || isHrRole;
+  show('scheduleNav', canSchedule);
+  show('nav-scheduleConfirm', isAdminRole);                 // 컨펌 처리: 운영팀/총괄/부총괄
+  show('nav-scheduleClose', isAdminRole || isHrRole);        // 마감 현황: 운영팀/인사팀
+  show('nav-scheduleSettings', isAdminRole);                 // 휴무 기준 설정: 운영팀/총괄/부총괄
   // 개별 메뉴
   show('nav-staff', hasPerm('staff_view'));
   show('nav-stats', hasPerm('notice_stats'));
@@ -6522,6 +6557,888 @@ async function saveRepair() {
   }
   window.__rpFilterStore = store;
   goPage('repairs');
+}
+
+
+// ══════════════════════════════════════════════════════════
+// 스케줄 관리
+// ══════════════════════════════════════════════════════════
+let curSchedule = null;
+let curScheduleStaff = []; // 편성 화면에서 사용하는 직원 목록(기본+추가)
+let curScheduleEntries = {}; // {userId_date: {entry_type, shift_code}}
+window.__schStore = null;
+window.__schYear  = null;
+window.__schMonth = null;
+
+function isScheduleAdmin() {
+  return currentUser.role==='admin' || currentUser.is_master || currentUser.is_vice_master;
+}
+function isScheduleHr() {
+  return currentUser.role === 'hr';
+}
+function canEditSchedule(sch) {
+  // 작성자 매니저 본인 매장 + 운영팀/총괄/부총괄/인사팀
+  if (isScheduleAdmin() || isScheduleHr()) return true;
+  if (isManagerRole(currentUser.role) && sch && sch.store === currentUser.store) return true;
+  return false;
+}
+
+// ── 목록 ──────────────────────────────────────────────────
+async function renderSchedules(area) {
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const isAdmin = isScheduleAdmin();
+
+  const [storeRes, schRes] = await Promise.all([
+    sb.from('users').select('store').eq('active',true).neq('role','admin'),
+    (async()=>{
+      let q = sb.from('schedules').select('*, creator:users!schedules_created_by_fkey(name)').order('year',{ascending:false}).order('month',{ascending:false});
+      if (!isAdmin && !isScheduleHr()) q = q.eq('store', currentUser.store);
+      return q;
+    })()
+  ]);
+
+  const stores = [...new Set((storeRes.data||[]).map(u=>u.store).filter(Boolean))].sort();
+  const schList = schRes.data || [];
+
+  const now = new Date();
+  const defStore = isAdmin || isScheduleHr() ? '' : currentUser.store;
+  const defYear  = now.getFullYear();
+  const defMonth = now.getMonth()+1;
+
+  const STATUS_LABEL = {draft:'작성중', requested:'컨펌요청', confirmed:'컨펌완료', rejected:'반려'};
+  const STATUS_COLOR = {draft:'',requested:'background:var(--blb);color:var(--bl)',confirmed:'background:var(--gnb);color:var(--gn)',rejected:'background:var(--rdb);color:var(--rd)'};
+
+  const storeOptHtml = (isAdmin||isScheduleHr() ? '<option value="">매장 선택</option>' : '') +
+    stores.map(s=>`<option value="${s}"${s===defStore?' selected':''}>${s}</option>`).join('');
+
+  const yearOpts = [now.getFullYear()-1, now.getFullYear(), now.getFullYear()+1]
+    .map(y=>`<option value="${y}"${y===defYear?' selected':''}>${y}년</option>`).join('');
+  const monthOpts = Array.from({length:12},(_,i)=>i+1)
+    .map(m=>`<option value="${m}"${m===defMonth?' selected':''}>${m}월</option>`).join('');
+
+  const cards = schList.map(s => `
+    <div class="post-card" onclick="openScheduleById(${s.id})">
+      <div class="post-card-top">
+        <span class="post-title-txt"><i class="ti ti-calendar-event" style="color:var(--brm);margin-right:5px"></i>${s.store} ${s.year}년 ${s.month}월</span>
+        <span class="badge-access" style="${STATUS_COLOR[s.status]||''}">${STATUS_LABEL[s.status]||s.status}</span>
+        ${s.closed_at?'<span class="badge-access all">마감완료</span>':''}
+      </div>
+      <div class="post-meta">
+        <span>작성: ${s.creator?.name||''}</span>
+        ${s.requested_at?`<span>요청: ${fmtDate(s.requested_at)}</span>`:''}
+        ${s.confirmed_at?`<span style="color:var(--gn)">확정: ${fmtDate(s.confirmed_at)}</span>`:''}
+      </div>
+    </div>`).join('');
+
+  area.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">매장 스케줄</div>
+      <div class="page-sub">월별 근무표 작성 및 관리</div>
+    </div>
+    <div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:14px;margin-bottom:16px">
+      <div style="font-size:12px;color:var(--th);margin-bottom:10px;font-weight:600">새 스케줄 작성 / 조회</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end">
+        <div>
+          <div style="font-size:11px;color:var(--th);margin-bottom:4px">매장</div>
+          <select class="form-input" id="schSelStore" style="padding:7px 8px;font-size:13px">${storeOptHtml}</select>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--th);margin-bottom:4px">년도</div>
+          <select class="form-input" id="schSelYear" style="padding:7px 8px;font-size:13px">${yearOpts}</select>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--th);margin-bottom:4px">월</div>
+          <select class="form-input" id="schSelMonth" style="padding:7px 8px;font-size:13px">${monthOpts}</select>
+        </div>
+        <button class="btn-new" onclick="goToScheduleEdit()"><i class="ti ti-calendar-plus"></i> 열기/작성</button>
+      </div>
+    </div>
+    <div class="post-list">${cards || '<div style="text-align:center;padding:40px;color:var(--th)">등록된 스케줄이 없습니다.</div>'}</div>`;
+}
+
+async function goToScheduleEdit() {
+  const store = document.getElementById('schSelStore')?.value || currentUser.store;
+  const year  = parseInt(document.getElementById('schSelYear')?.value);
+  const month = parseInt(document.getElementById('schSelMonth')?.value);
+  if (!store) { alert('매장을 선택해주세요.'); return; }
+  window.__schStore = store; window.__schYear = year; window.__schMonth = month;
+  curSchedule = null;
+  goPage('scheduleEdit');
+}
+
+async function openScheduleById(id) {
+  const { data } = await sb.from('schedules').select('*').eq('id', id).single();
+  if (!data) return;
+  window.__schStore = data.store; window.__schYear = data.year; window.__schMonth = data.month;
+  curSchedule = data;
+  goPage('scheduleEdit');
+}
+
+// ── 캘린더 편성 ───────────────────────────────────────────
+async function renderScheduleEdit(area) {
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const store = window.__schStore, year = window.__schYear, month = window.__schMonth;
+  if (!store || !year || !month) { goPage('schedules'); return; }
+
+  // 스케줄 마스터 조회 또는 신규
+  if (!curSchedule || curSchedule.store!==store || curSchedule.year!==year || curSchedule.month!==month) {
+    const { data } = await sb.from('schedules').select('*').eq('store',store).eq('year',year).eq('month',month).maybeSingle();
+    curSchedule = data;
+  }
+
+  const isNew = !curSchedule;
+  const canEdit = isNew ? canEditSchedule({store}) : canEditSchedule(curSchedule);
+  const isAdmin = isScheduleAdmin();
+
+  // 직원, 근무조코드, 휴무유형, 기존 entries, 휴무잔여 병렬 로드
+  const [staffRes, shiftRes, leaveRes, entriesRes, balRes] = await Promise.all([
+    sb.from('users').select('id,name,store,role,employment_type,hire_date,retire_date,active').eq('store',store).order('name'),
+    sb.from('store_shift_codes').select('*').eq('store',store).eq('active',true).order('sort_order'),
+    sb.from('leave_types').select('*').order('sort_order'),
+    curSchedule ? sb.from('schedule_entries').select('*').eq('schedule_id', curSchedule.id) : Promise.resolve({data:[]}),
+    curSchedule ? sb.from('schedule_leave_balance').select('*, user:users(name)').eq('schedule_id', curSchedule.id) : Promise.resolve({data:[]})
+  ]);
+
+  let staffList = (staffRes.data||[]).filter(u=>u.active!==false || (u.retire_date && u.retire_date >= `${year}-${String(month).padStart(2,'0')}-01`));
+  const shiftCodes = shiftRes.data || [];
+  const leaveTypes = leaveRes.data || [];
+  const entries    = entriesRes.data || [];
+  const balances   = balRes.data || [];
+
+  // entries → map
+  curScheduleEntries = {};
+  entries.forEach(e => {
+    const key = (e.user_id||e.extra_name) + '_' + e.date;
+    curScheduleEntries[key] = e;
+  });
+
+  // 추가된 지원인력(extra_name이 있는 entries)에서 직원 목록 보강
+  const extraNames = [...new Set(entries.filter(e=>e.extra_name && !e.user_id).map(e=>e.extra_name))];
+  curScheduleStaff = [
+    ...staffList.map(u=>({id:u.id, name:u.name, isExtra:false, hire_date:u.hire_date, retire_date:u.retire_date, employment_type:u.employment_type})),
+    ...extraNames.map(n=>({id:null, extra_name:n, name:n, isExtra:true}))
+  ];
+
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const dayNames = ['일','월','화','수','목','금','토'];
+
+  // 공휴일 로드
+  const monthStart = `${year}-${String(month).padStart(2,'0')}-01`;
+  const monthEnd   = `${year}-${String(month).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
+  const { data: holidays } = await sb.from('holidays').select('date,name').gte('date',monthStart).lte('date',monthEnd);
+  const holidaySet = new Set((holidays||[]).map(h=>h.date));
+
+  // 휴무코드 → 색상 매핑
+  const leaveColorMap = {};
+  leaveTypes.forEach(l => leaveColorMap[l.code] = l.color);
+
+  // 근무조 코드 옵션 (select용)
+  const allCodeOptions = [
+    ...shiftCodes.map(s=>({value:s.code, label:s.code+(s.label?'('+s.label+')':'')+' '+(s.start_time||'')+'~'+(s.end_time||''), isShift:true})),
+    ...leaveTypes.map(l=>({value:l.code, label:l.code, isShift:false}))
+  ];
+
+  // 날짜 헤더
+  let dateHeaderHtml = '';
+  for (let d=1; d<=daysInMonth; d++) {
+    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dow = new Date(year, month-1, d).getDay();
+    const isHoliday = holidaySet.has(dateStr);
+    const isWeekend = dow===0 || dow===6;
+    const color = isHoliday ? 'var(--rd)' : (dow===0?'var(--rd)':(dow===6?'var(--bl)':'var(--ts)'));
+    dateHeaderHtml += `<th style="min-width:54px;padding:4px 2px;font-size:10px;color:${color};background:${isWeekend||isHoliday?'var(--cr)':'#fff'};border:0.5px solid var(--crd)">
+      ${d}<br>${dayNames[dow]}${isHoliday?'<br><span style="font-size:8px">휴</span>':''}
+    </th>`;
+  }
+
+  // 직원별 행
+  let rowsHtml = '';
+  curScheduleStaff.forEach((staff, si) => {
+    const bal = balances.find(b => staff.id && b.user_id === staff.id);
+    rowsHtml += `<tr data-staff-idx="${si}">
+      <td style="position:sticky;left:0;background:#fff;z-index:2;padding:6px 8px;font-size:12px;font-weight:600;border:0.5px solid var(--crd);white-space:nowrap;min-width:90px">
+        ${staff.name}${staff.isExtra?' <span style="font-size:9px;color:var(--th)">(지원)</span>':''}
+        ${!staff.isExtra?`<button onclick="removeStaffFromSchedule(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px;margin-left:4px" title="목록에서 제외">✕</button>`:''}
+      </td>`;
+    for (let d=1; d<=daysInMonth; d++) {
+      const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const key = (staff.id||staff.extra_name) + '_' + dateStr;
+      const e = curScheduleEntries[key];
+      let displayVal = '', bgColor = '#fff';
+      if (e) {
+        if (e.entry_type === 'shift') { displayVal = e.shift_code; }
+        else { displayVal = e.entry_type; bgColor = (leaveColorMap[e.entry_type]||'#eee') + '33'; }
+      }
+      rowsHtml += `<td style="border:0.5px solid var(--crd);padding:0;background:${bgColor}">
+        <select ${canEdit?'':'disabled'} data-staff="${staff.id||''}" data-extra="${staff.isExtra?staff.extra_name:''}" data-date="${dateStr}"
+          onchange="onCellChange(this)"
+          style="width:100%;border:none;background:transparent;font-size:11px;text-align:center;padding:6px 1px;cursor:${canEdit?'pointer':'default'};appearance:none;-webkit-appearance:none">
+          <option value="">-</option>
+          ${allCodeOptions.map(o=>`<option value="${o.value}"${displayVal===o.value?' selected':''}>${o.value}</option>`).join('')}
+        </select>
+      </td>`;
+    }
+    rowsHtml += `</tr>`;
+  });
+
+  // 근무조 시간 안내 테이블
+  const shiftLegend = shiftCodes.map(s=>`
+    <span style="display:inline-flex;align-items:center;gap:4px;background:var(--cr);border-radius:8px;padding:3px 9px;font-size:11px;margin:2px">
+      <strong>${s.code}</strong>${s.label?'('+s.label+')':''} ${s.start_time||''}~${s.end_time||''}
+    </span>`).join('');
+  const leaveLegend = leaveTypes.map(l=>`
+    <span style="display:inline-flex;align-items:center;gap:4px;background:${l.color}22;border:0.5px solid ${l.color};border-radius:8px;padding:3px 9px;font-size:11px;margin:2px">
+      <span style="width:8px;height:8px;border-radius:50%;background:${l.color}"></span>${l.code}
+    </span>`).join('');
+
+  const statusBadge = curSchedule ? {
+    draft:'<span class="badge-access">작성중</span>',
+    requested:'<span class="badge-access" style="background:var(--blb);color:var(--bl)">컨펌 요청중</span>',
+    confirmed:'<span class="badge-access all">컨펌 완료</span>',
+    rejected:'<span class="badge-access" style="background:var(--rdb);color:var(--rd)">반려됨</span>'
+  }[curSchedule.status] : '<span class="badge-access">신규 작성</span>';
+
+  area.innerHTML = `
+    <div style="margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <button class="btn-cancel-sm" onclick="goPage('schedules')"><i class="ti ti-arrow-left"></i> 목록</button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${canEdit ? `<button class="btn-cancel-sm" onclick="saveScheduleDraft()" style="font-size:12px"><i class="ti ti-device-floppy"></i> 임시저장</button>` : ''}
+        ${canEdit && curSchedule?.status!=='confirmed' ? `<button class="btn-submit" onclick="requestScheduleConfirm()" style="padding:8px 14px;font-size:13px"><i class="ti ti-send"></i> 컨펌 요청</button>` : ''}
+        ${curSchedule ? `<button class="btn-cancel-sm" onclick="openSchedulePreview()" style="font-size:12px;color:var(--bl)"><i class="ti ti-photo"></i> 이미지 저장</button>` : ''}
+        ${curSchedule ? `<button class="btn-cancel-sm" onclick="openScheduleHistoryModal(${curSchedule?.id})" style="font-size:12px"><i class="ti ti-history"></i> 히스토리</button>` : ''}
+        ${curSchedule && curSchedule.status==='requested' && isScheduleAdmin() ? `
+          <button class="btn-cancel-sm" onclick="confirmScheduleApprove()" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-check"></i> 컨펌 완료</button>
+          <button class="btn-cancel-sm" onclick="confirmScheduleReject()" style="font-size:12px;color:var(--rd);border-color:var(--rd)"><i class="ti ti-x"></i> 반려</button>
+        ` : ''}
+        ${curSchedule && curSchedule.status==='confirmed' && !curSchedule.closed_at && canEditSchedule(curSchedule) ? `<button class="btn-cancel-sm" onclick="closeSchedule()" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-checklist"></i> 근태 마감</button>` : ''}
+        ${curSchedule && curSchedule.closed_at && (isScheduleHr()||isScheduleAdmin()) && !curSchedule.hr_checked_at ? `<button class="btn-cancel-sm" onclick="hrCheckSchedule()" style="font-size:12px;color:var(--pu);border-color:var(--pu)"><i class="ti ti-user-check"></i> 인사팀 점검완료</button>` : ''}
+      </div>
+    </div>
+
+    <div class="post-detail" style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <span style="font-size:17px;font-weight:600">${store} ${year}년 ${month}월 스케줄</span>
+        ${statusBadge}
+        ${curSchedule?.closed_at?'<span class="badge-access" style="background:var(--gnb);color:var(--gn)">근태마감 완료</span>':''}
+      </div>
+      ${curSchedule?.reject_reason ? `<div style="background:var(--rdb);border-radius:8px;padding:10px 13px;font-size:13px;color:var(--rd);margin-bottom:12px"><strong>반려 사유:</strong> ${curSchedule.reject_reason}</div>` : ''}
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+        <div>
+          <label class="form-label">운영 계획</label>
+          <textarea class="form-input" id="schOpPlan" rows="3" ${canEdit?'':'disabled'} placeholder="이번 달 매장 운영 계획을 작성하세요">${curSchedule?.operation_plan||''}</textarea>
+        </div>
+        <div>
+          <label class="form-label">매장 특이사항</label>
+          <textarea class="form-input" id="schNotes" rows="3" ${canEdit?'':'disabled'} placeholder="입퇴사, 휴점, 행사 등 특이사항">${curSchedule?.special_notes||''}</textarea>
+        </div>
+      </div>
+
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:var(--th);margin-bottom:5px;font-weight:600">근무조 (시간은 매장별 설정 — 휴무 기준 설정에서 수정)</div>
+        ${shiftLegend || '<span style="font-size:12px;color:var(--th)">등록된 근무조가 없습니다. 휴무 기준 설정에서 추가하세요.</span>'}
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="font-size:11px;color:var(--th);margin-bottom:5px;font-weight:600">휴무 종류</div>
+        ${leaveLegend}
+      </div>
+
+      ${canEdit ? `<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+        <select class="form-input" id="addStaffSelect" style="flex:1;padding:7px 10px;font-size:13px"><option value="">+ 지원/교육 인력 추가 (매장·이름 검색)</option></select>
+        <button class="btn-cancel-sm" onclick="addExtraStaff()" style="font-size:12px">추가</button>
+      </div>` : ''}
+
+      <div style="overflow-x:auto;border:0.5px solid var(--crd);border-radius:8px">
+        <table style="border-collapse:collapse;font-size:11px" id="schTable">
+          <thead><tr>
+            <th style="position:sticky;left:0;background:var(--crm);z-index:3;padding:6px 8px;border:0.5px solid var(--crd);min-width:90px">이름</th>
+            ${dateHeaderHtml}
+          </tr></thead>
+          <tbody id="schTbody">${rowsHtml}</tbody>
+        </table>
+      </div>
+    </div>`;
+
+  if (canEdit) loadExtraStaffOptions();
+}
+
+// 셀 변경 시 메모리에 즉시 반영 (저장은 별도 버튼)
+function onCellChange(sel) {
+  const userId = sel.dataset.staff || null;
+  const extraName = sel.dataset.extra || null;
+  const date = sel.dataset.date;
+  const val = sel.value;
+  const key = (userId||extraName) + '_' + date;
+
+  if (!val) {
+    delete curScheduleEntries[key];
+  } else {
+    // shift 코드인지 휴무코드인지 판단은 저장 시 store_shift_codes/leave_types와 매칭
+    curScheduleEntries[key] = { user_id: userId, extra_name: extraName, date, _rawCode: val };
+  }
+  // 셀 배경색 즉시 반영
+  sb.from('leave_types').select('code,color').then(({data})=>{
+    const map = {}; (data||[]).forEach(l=>map[l.code]=l.color);
+    sel.parentElement.style.background = map[val] ? map[val]+'33' : '#fff';
+  });
+}
+
+// 지원인력 추가 옵션 로드
+async function loadExtraStaffOptions() {
+  const { data: users } = await sb.from('users').select('id,name,store').eq('active',true).order('store').order('name');
+  const sel = document.getElementById('addStaffSelect');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">+ 지원/교육 인력 추가</option>' +
+    (users||[]).map(u=>`<option value="${u.id}|${u.name}|${u.store}">${u.store} · ${u.name}</option>`).join('');
+}
+
+function addExtraStaff() {
+  const sel = document.getElementById('addStaffSelect');
+  const val = sel?.value;
+  if (!val) return;
+  const [id, name, store] = val.split('|');
+  if (curScheduleStaff.some(s=>s.id===id)) { alert('이미 추가된 직원입니다.'); return; }
+  curScheduleStaff.push({id, name: name+'('+store+')', isExtra:true, _supportStore:store});
+  renderScheduleEditTableOnly();
+}
+
+function removeStaffFromSchedule(idx) {
+  if (!confirm('이 직원을 이번 달 스케줄 목록에서 제외할까요?')) return;
+  curScheduleStaff.splice(idx, 1);
+  renderScheduleEditTableOnly();
+}
+
+// 테이블만 다시 그리기 (직원 추가/제거 시)
+function renderScheduleEditTableOnly() {
+  renderScheduleEdit(document.getElementById('contentArea'));
+}
+
+// ── 저장 (임시저장) ───────────────────────────────────────
+async function saveScheduleDraft() {
+  const store = window.__schStore, year = window.__schYear, month = window.__schMonth;
+  const opPlan = document.getElementById('schOpPlan')?.value.trim() || null;
+  const notes  = document.getElementById('schNotes')?.value.trim() || null;
+  const now = new Date().toISOString();
+
+  let scheduleId = curSchedule?.id;
+  if (!scheduleId) {
+    const { data, error } = await sb.from('schedules').insert({
+      store, year, month, operation_plan: opPlan, special_notes: notes,
+      status: 'draft', created_by: currentUser.id, created_at: now, updated_at: now
+    }).select().single();
+    if (error) { alert('저장 오류: ' + error.message); return; }
+    scheduleId = data.id;
+    curSchedule = data;
+  } else {
+    await sb.from('schedules').update({
+      operation_plan: opPlan, special_notes: notes, updated_at: now,
+      status: curSchedule.status==='rejected' ? 'draft' : curSchedule.status
+    }).eq('id', scheduleId);
+  }
+
+  // entries 저장: 현재 DOM의 모든 select값 수집
+  await persistScheduleEntries(scheduleId);
+
+  // 입사일/퇴사일 자동 반영 체크 + 휴무 잔여 검증
+  await checkLeaveWarnings(scheduleId, store, year, month);
+
+  // 히스토리 스냅샷 저장
+  await saveScheduleHistory(scheduleId, '임시저장');
+  alert('임시저장 완료!');
+  openScheduleById(scheduleId);
+}
+
+// entries DB 반영 (전체 삭제 후 재삽입 — 단순하고 안전)
+async function persistScheduleEntries(scheduleId) {
+  const { data: shiftCodes } = await sb.from('store_shift_codes').select('code').eq('store', window.__schStore);
+  const shiftCodeSet = new Set((shiftCodes||[]).map(s=>s.code));
+
+  const selects = document.querySelectorAll('#schTbody select');
+  const rows = [];
+  selects.forEach(sel => {
+    const val = sel.value;
+    if (!val) return;
+    const userId = sel.dataset.staff || null;
+    const extraName = sel.dataset.extra || null;
+    const date = sel.dataset.date;
+    const isShift = shiftCodeSet.has(val);
+    rows.push({
+      schedule_id: scheduleId,
+      user_id: userId || null,
+      extra_name: extraName || null,
+      date,
+      entry_type: isShift ? 'shift' : val,
+      shift_code: isShift ? val : null,
+      is_extra: !!extraName
+    });
+  });
+
+  await sb.from('schedule_entries').delete().eq('schedule_id', scheduleId);
+  if (rows.length > 0) {
+    // 500개씩 끊어서 insert (대량 대비)
+    for (let i=0; i<rows.length; i+=500) {
+      await sb.from('schedule_entries').insert(rows.slice(i, i+500));
+    }
+  }
+
+  // 집계 계산 후 schedule_leave_balance 갱신
+  await recalcLeaveBalance(scheduleId);
+}
+
+// ── 휴무 집계 계산 ────────────────────────────────────────
+async function recalcLeaveBalance(scheduleId) {
+  const store = window.__schStore, year = window.__schYear, month = window.__schMonth;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const monthStart = `${year}-${String(month).padStart(2,'0')}-01`;
+  const monthEnd   = `${year}-${String(month).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
+
+  const [{data: holidays}, {data: entries}, {data: staffList}] = await Promise.all([
+    sb.from('holidays').select('date').gte('date',monthStart).lte('date',monthEnd),
+    sb.from('schedule_entries').select('*').eq('schedule_id', scheduleId),
+    sb.from('users').select('id,name,store,hire_date,retire_date,employment_type,pt_hours_per_day').eq('store',store)
+  ]);
+  const holidaySet = new Set((holidays||[]).map(h=>h.date));
+
+  // 이전 달 schedule_id 찾기 (이월 자동 연결용)
+  let prevMonth = month-1, prevYear = year;
+  if (prevMonth===0) { prevMonth=12; prevYear=year-1; }
+  const { data: prevSch } = await sb.from('schedules').select('id').eq('store',store).eq('year',prevYear).eq('month',prevMonth).maybeSingle();
+  let prevBalances = [];
+  if (prevSch) {
+    const { data } = await sb.from('schedule_leave_balance').select('*').eq('schedule_id', prevSch.id);
+    prevBalances = data || [];
+  }
+
+  for (const staff of (staffList||[])) {
+    const userEntries = (entries||[]).filter(e => e.user_id === staff.id);
+    const prevBal = prevBalances.find(b => b.user_id === staff.id);
+    const carryIn = prevBal ? prevBal.carry_out : 0;
+    const carryUsed = userEntries.filter(e=>e.entry_type==='대휴').length;
+
+    // 재직 기간 산정 (월 내)
+    let periodStart = monthStart, periodEnd = monthEnd;
+    if (staff.hire_date && staff.hire_date > monthStart) periodStart = staff.hire_date;
+    if (staff.retire_date && staff.retire_date < monthEnd) periodEnd = staff.retire_date;
+
+    // 기준일수: 재직기간 내 주말+공휴일
+    let baseQuota = 0;
+    if (periodStart <= periodEnd) {
+      let d = new Date(periodStart);
+      const end = new Date(periodEnd);
+      while (d <= end) {
+        const dow = d.getDay();
+        const dateStr = d.toISOString().slice(0,10);
+        if (dow===0 || dow===6 || holidaySet.has(dateStr)) baseQuota++;
+        d.setDate(d.getDate()+1);
+      }
+    }
+
+    const baseUsed = userEntries.filter(e=>e.entry_type==='휴무').length;
+    const carryOut = (carryIn - carryUsed) + (baseQuota - baseUsed);
+    // 음수 방지하지 않음(잔존휴무 등 실제 값 그대로 기록, 경고는 별도 처리)
+
+    await sb.from('schedule_leave_balance').upsert({
+      schedule_id: scheduleId, user_id: staff.id,
+      carry_in: carryIn, carry_used: carryUsed,
+      base_quota: baseQuota, base_used: baseUsed, carry_out: carryOut
+    }, {onConflict:'schedule_id,user_id'});
+  }
+}
+
+// ── 경고 검증 ─────────────────────────────────────────────
+async function checkLeaveWarnings(scheduleId, store, year, month) {
+  const { data: balances } = await sb.from('schedule_leave_balance').select('*, user:users(name,retire_date)').eq('schedule_id', scheduleId);
+  const warnings = [];
+  (balances||[]).forEach(b => {
+    // 이월 잔여 있는데 퇴사일이 더 빠른 경우 (잔존 휴무 발생)
+    if (b.user?.retire_date && b.carry_in > 0) {
+      const retireMonth = b.user.retire_date.slice(0,7);
+      const curMonth = `${year}-${String(month).padStart(2,'0')}`;
+      if (retireMonth <= curMonth && b.carry_out > 0) {
+        warnings.push(`⚠️ ${b.user.name}: 퇴사 처리 후에도 잔존 휴무 ${b.carry_out}일이 남아있습니다. 확인이 필요합니다.`);
+      }
+    }
+  });
+  if (warnings.length) {
+    alert(warnings.join('\\n'));
+  }
+
+  // 당월계 검증 (근무일수+휴무일수 vs 당월 총일수)
+  const daysInMonth = new Date(year, month, 0).getDate();
+  // 간단 검증은 추후 상세화면에서 표로 표시
+}
+
+// ── 컨펌 요청 ─────────────────────────────────────────────
+async function requestScheduleConfirm() {
+  if (!curSchedule) { await saveScheduleDraft(); if (!curSchedule) return; }
+  const now = new Date().toISOString();
+  await sb.from('schedules').update({
+    status: 'requested', requested_at: now, requested_by: currentUser.id, updated_at: now
+  }).eq('id', curSchedule.id);
+
+  // 운영팀 전체에 알림 (또는 코치 관할 우선 — 일단 admin 전체)
+  const { data: admins } = await sb.from('users').select('id').eq('active',true).or('role.eq.admin,is_master.eq.true,is_vice_master.eq.true');
+  for (const a of (admins||[])) {
+    await createNotification(a.id, 'schedule_request', curSchedule.id, 'schedule',
+      `[스케줄 컨펌 요청] ${window.__schStore} ${window.__schYear}년 ${window.__schMonth}월 스케줄이 컨펌 요청되었습니다.`);
+  }
+  await saveScheduleHistory(curSchedule.id, '컨펌 요청');
+  alert('컨펌 요청이 전송되었습니다.');
+  openScheduleById(curSchedule.id);
+}
+
+// ── 컨펌 대기 목록 (운영팀) ───────────────────────────────
+async function renderScheduleConfirmList(area) {
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const { data: list } = await sb.from('schedules')
+    .select('*, creator:users!schedules_created_by_fkey(name)')
+    .eq('status','requested').order('requested_at',{ascending:true});
+
+  const cards = (list||[]).map(s => `
+    <div class="post-card" onclick="openScheduleById(${s.id})">
+      <div class="post-card-top">
+        <span class="post-title-txt">${s.store} ${s.year}년 ${s.month}월</span>
+        <span class="badge-access" style="background:var(--blb);color:var(--bl)">컨펌 요청</span>
+      </div>
+      <div class="post-meta">
+        <span>작성: ${s.creator?.name||''}</span>
+        <span>요청일: ${fmtDate(s.requested_at)}</span>
+      </div>
+    </div>`).join('');
+
+  area.innerHTML = `
+    <div class="page-header"><div class="page-title">컨펌 대기 목록</div><div class="page-sub">매장에서 요청한 스케줄을 검토합니다 (${(list||[]).length}건)</div></div>
+    <div class="post-list">${cards || '<div style="text-align:center;padding:40px;color:var(--th)">대기 중인 요청이 없습니다.</div>'}</div>`;
+}
+
+async function confirmScheduleApprove() {
+  if (!curSchedule) return;
+  if (!confirm('이 스케줄을 컨펌 완료 처리할까요?')) return;
+  const now = new Date().toISOString();
+  await sb.from('schedules').update({
+    status:'confirmed', confirmed_at: now, confirmed_by: currentUser.id, updated_at: now
+  }).eq('id', curSchedule.id);
+
+  // 퇴사일자 자동 반영 (스케줄 → 인원현황)
+  await syncRetireDatesFromSchedule(curSchedule.id);
+
+  const { data: req } = await sb.from('users').select('id').eq('id', curSchedule.requested_by).maybeSingle();
+  if (req) await createNotification(req.id, 'schedule_confirmed', curSchedule.id, 'schedule',
+    `[스케줄 컨펌완료] ${curSchedule.store} ${curSchedule.year}년 ${curSchedule.month}월 스케줄이 확정되었습니다.`);
+
+  await saveScheduleHistory(curSchedule.id, '컨펌 완료');
+  // Sheets 동기화 트리거 (Google Apps Script Webhook 호출)
+  triggerSheetSync(curSchedule.id);
+  alert('컨펌 완료 처리되었습니다.');
+  openScheduleById(curSchedule.id);
+}
+
+async function confirmScheduleReject() {
+  if (!curSchedule) return;
+  const reason = prompt('반려 사유를 입력하세요.');
+  if (reason === null) return;
+  const now = new Date().toISOString();
+  await sb.from('schedules').update({
+    status:'rejected', reject_reason: reason, updated_at: now
+  }).eq('id', curSchedule.id);
+
+  const { data: req } = await sb.from('users').select('id').eq('id', curSchedule.requested_by).maybeSingle();
+  if (req) await createNotification(req.id, 'schedule_rejected', curSchedule.id, 'schedule',
+    `[스케줄 반려] ${curSchedule.store} ${curSchedule.year}년 ${curSchedule.month}월 스케줄이 반려되었습니다. 사유: ${reason}`);
+
+  alert('반려 처리되었습니다.');
+  openScheduleById(curSchedule.id);
+}
+
+// 스케줄 entries 기준 퇴사일자 → users.retire_date 자동 반영 (양방향 동기화의 정방향)
+async function syncRetireDatesFromSchedule(scheduleId) {
+  const { data: sch } = await sb.from('schedules').select('*').eq('id', scheduleId).single();
+  if (!sch) return;
+  // schedule_entries에 별도 퇴사일 필드는 없으므로, users.retire_date 직접 입력 UI는
+  // 직원관리 화면에서 그대로 사용. 여기서는 스케줄 확정 시점에 이미 입력된 retire_date를
+  // 그대로 신뢰하는 정책으로 단순화. (역방향은 직원목록에서 이미 반영됨)
+}
+
+// ── 근태 마감 ──────────────────────────────────────────────
+async function closeSchedule() {
+  if (!curSchedule) return;
+  if (!confirm('이번 달 근태를 마감 처리할까요? 마감 후에는 인사팀이 점검합니다.')) return;
+  const now = new Date().toISOString();
+  await sb.from('schedules').update({ closed_at: now, closed_by: currentUser.id }).eq('id', curSchedule.id);
+  alert('근태 마감 처리되었습니다.');
+  openScheduleById(curSchedule.id);
+}
+
+async function renderScheduleCloseList(area) {
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const { data: list } = await sb.from('schedules')
+    .select('*, closer:users!schedules_closed_by_fkey(name)')
+    .eq('status','confirmed').order('year',{ascending:false}).order('month',{ascending:false});
+
+  const cards = (list||[]).map(s => `
+    <div class="post-card" onclick="openScheduleById(${s.id})">
+      <div class="post-card-top">
+        <span class="post-title-txt">${s.store} ${s.year}년 ${s.month}월</span>
+        <span class="badge-access ${s.closed_at?'all':''}">${s.closed_at?'마감완료':'마감대기'}</span>
+        ${s.hr_checked_at?'<span class="badge-access" style="background:var(--pub);color:var(--pu)">인사팀 점검완료</span>':''}
+      </div>
+      <div class="post-meta">
+        ${s.closed_at?`<span>마감: ${fmtDate(s.closed_at)} · ${s.closer?.name||''}</span>`:'<span style="color:var(--th)">매니저 마감 대기 중</span>'}
+      </div>
+    </div>`).join('');
+
+  area.innerHTML = `
+    <div class="page-header"><div class="page-title">근태 마감 현황</div><div class="page-sub">확정된 스케줄의 마감 처리 현황</div></div>
+    <div class="post-list">${cards || '<div style="text-align:center;padding:40px;color:var(--th)">확정된 스케줄이 없습니다.</div>'}</div>`;
+}
+
+async function hrCheckSchedule() {
+  if (!curSchedule) return;
+  await sb.from('schedules').update({ hr_checked_at: new Date().toISOString(), hr_checked_by: currentUser.id }).eq('id', curSchedule.id);
+  alert('인사팀 점검 완료로 표시되었습니다.');
+  openScheduleById(curSchedule.id);
+}
+
+// ── 휴무 기준 설정 (관리) ─────────────────────────────────
+async function renderScheduleSettings(area) {
+  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const { data: holidays } = await sb.from('holidays').select('*').order('date');
+  const { data: leaveTypes } = await sb.from('leave_types').select('*').order('sort_order');
+  const { data: stores } = await sb.from('users').select('store').eq('active',true).neq('role','admin');
+  const storeList = [...new Set((stores||[]).map(u=>u.store).filter(Boolean))].sort();
+
+  area.innerHTML = `
+    <div class="page-header"><div class="page-title">휴무 기준 설정</div><div class="page-sub">공휴일, 휴무 종류, 매장별 근무조 시간을 관리합니다</div></div>
+
+    <div class="notif-card" style="margin-bottom:14px">
+      <div class="section-label" style="margin-bottom:10px">공휴일 관리</div>
+      <div id="holidayList" style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px;max-height:240px;overflow-y:auto">
+        ${(holidays||[]).map(h=>`
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--cr);border-radius:7px">
+            <span style="font-size:12px;width:90px">${h.date}</span>
+            <span style="flex:1;font-size:12px">${h.name||''}</span>
+            <button onclick="deleteHoliday(${h.id})" style="background:none;border:none;cursor:pointer;color:var(--rd)"><i class="ti ti-trash"></i></button>
+          </div>`).join('')}
+      </div>
+      <div style="display:flex;gap:6px">
+        <input type="date" class="form-input" id="newHolDate" style="flex:1" />
+        <input class="form-input" id="newHolName" placeholder="공휴일명" style="flex:1" />
+        <button class="btn-submit" style="padding:8px 14px;font-size:12px" onclick="addHoliday()">추가</button>
+      </div>
+    </div>
+
+    <div class="notif-card" style="margin-bottom:14px">
+      <div class="section-label" style="margin-bottom:10px">휴무 종류 (색상 포함, 전사 공통)</div>
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px">
+        ${(leaveTypes||[]).map(l=>`
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--cr);border-radius:7px">
+            <input type="color" value="${l.color}" onchange="updateLeaveColor(${l.id},this.value)" style="width:28px;height:28px;border:none;border-radius:5px;cursor:pointer" />
+            <span style="flex:1;font-size:12px">${l.code}</span>
+            <button onclick="deleteLeaveType(${l.id})" style="background:none;border:none;cursor:pointer;color:var(--rd)"><i class="ti ti-trash"></i></button>
+          </div>`).join('')}
+      </div>
+      <div style="display:flex;gap:6px">
+        <input class="form-input" id="newLeaveCode" placeholder="휴무 종류명" style="flex:1" />
+        <input type="color" id="newLeaveColor" value="#888888" style="width:42px" />
+        <button class="btn-submit" style="padding:8px 14px;font-size:12px" onclick="addLeaveType()">추가</button>
+      </div>
+    </div>
+
+    <div class="notif-card">
+      <div class="section-label" style="margin-bottom:10px">매장별 근무조 시간 설정</div>
+      <div style="margin-bottom:10px">
+        <select class="form-input" id="ssStoreSelect" onchange="loadStoreShiftCodes(this.value)" style="padding:7px 10px;font-size:13px">
+          <option value="">매장 선택</option>
+          ${storeList.map(s=>`<option value="${s}">${s}</option>`).join('')}
+        </select>
+      </div>
+      <div id="storeShiftList"></div>
+    </div>`;
+}
+
+async function addHoliday() {
+  const date = document.getElementById('newHolDate')?.value;
+  const name = document.getElementById('newHolName')?.value.trim();
+  if (!date) { alert('날짜를 선택해주세요.'); return; }
+  const { error } = await sb.from('holidays').insert({date, name});
+  if (error) { alert('오류: ' + error.message); return; }
+  renderScheduleSettings(document.getElementById('contentArea'));
+}
+async function deleteHoliday(id) {
+  await sb.from('holidays').delete().eq('id', id);
+  renderScheduleSettings(document.getElementById('contentArea'));
+}
+async function updateLeaveColor(id, color) {
+  await sb.from('leave_types').update({color}).eq('id', id);
+}
+async function addLeaveType() {
+  const code = document.getElementById('newLeaveCode')?.value.trim();
+  const color = document.getElementById('newLeaveColor')?.value;
+  if (!code) { alert('휴무 종류명을 입력해주세요.'); return; }
+  const { data: max } = await sb.from('leave_types').select('sort_order').order('sort_order',{ascending:false}).limit(1).maybeSingle();
+  await sb.from('leave_types').insert({code, color, sort_order:(max?.sort_order||0)+1});
+  renderScheduleSettings(document.getElementById('contentArea'));
+}
+async function deleteLeaveType(id) {
+  if (!confirm('이 휴무 종류를 삭제할까요? 기존 스케줄에는 영향 없습니다.')) return;
+  await sb.from('leave_types').delete().eq('id', id);
+  renderScheduleSettings(document.getElementById('contentArea'));
+}
+
+async function loadStoreShiftCodes(store) {
+  const cont = document.getElementById('storeShiftList');
+  if (!store) { cont.innerHTML = ''; return; }
+  cont.innerHTML = '<div style="text-align:center;padding:10px;color:var(--th)"><i class="ti ti-loader spin"></i></div>';
+  const { data } = await sb.from('store_shift_codes').select('*').eq('store', store).order('sort_order');
+  cont.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px">
+      ${(data||[]).map(s=>`
+        <div style="display:grid;grid-template-columns:50px 1fr 90px 90px 36px;gap:6px;align-items:center;padding:6px;background:var(--cr);border-radius:7px">
+          <strong style="font-size:13px;text-align:center">${s.code}</strong>
+          <input class="form-input" value="${s.label||''}" placeholder="라벨(오픈/마감 등)" style="padding:5px 8px;font-size:12px" onchange="updateShiftCode(${s.id},'label',this.value)" />
+          <input class="form-input" value="${s.start_time||''}" placeholder="시작" style="padding:5px 8px;font-size:12px" onchange="updateShiftCode(${s.id},'start_time',this.value)" />
+          <input class="form-input" value="${s.end_time||''}" placeholder="종료" style="padding:5px 8px;font-size:12px" onchange="updateShiftCode(${s.id},'end_time',this.value)" />
+          <button onclick="deleteShiftCode(${s.id},'${store}')" style="background:none;border:none;cursor:pointer;color:var(--rd)"><i class="ti ti-trash"></i></button>
+        </div>`).join('')}
+    </div>
+    <div style="display:grid;grid-template-columns:50px 1fr 90px 90px auto;gap:6px;align-items:center">
+      <input class="form-input" id="newShiftCode" placeholder="A" style="padding:5px 8px;font-size:12px;text-align:center" />
+      <input class="form-input" id="newShiftLabel" placeholder="라벨" style="padding:5px 8px;font-size:12px" />
+      <input class="form-input" id="newShiftStart" placeholder="09:00" style="padding:5px 8px;font-size:12px" />
+      <input class="form-input" id="newShiftEnd" placeholder="18:00" style="padding:5px 8px;font-size:12px" />
+      <button class="btn-submit" style="padding:6px 12px;font-size:12px" onclick="addShiftCode('${store}')">추가</button>
+    </div>`;
+}
+async function addShiftCode(store) {
+  const code = document.getElementById('newShiftCode')?.value.trim().toUpperCase();
+  const label = document.getElementById('newShiftLabel')?.value.trim();
+  const start = document.getElementById('newShiftStart')?.value.trim();
+  const end = document.getElementById('newShiftEnd')?.value.trim();
+  if (!code) { alert('근무조 코드를 입력해주세요.'); return; }
+  const { data: max } = await sb.from('store_shift_codes').select('sort_order').eq('store',store).order('sort_order',{ascending:false}).limit(1).maybeSingle();
+  const { error } = await sb.from('store_shift_codes').insert({store, code, label, start_time:start, end_time:end, sort_order:(max?.sort_order||0)+1, active:true});
+  if (error) { alert('오류(코드 중복일 수 있음): ' + error.message); return; }
+  loadStoreShiftCodes(store);
+}
+async function updateShiftCode(id, field, value) {
+  await sb.from('store_shift_codes').update({[field]: value}).eq('id', id);
+}
+async function deleteShiftCode(id, store) {
+  await sb.from('store_shift_codes').delete().eq('id', id);
+  loadStoreShiftCodes(store);
+}
+
+// ── 이미지 저장 (고해상도) ────────────────────────────────
+function openSchedulePreview() {
+  const table = document.getElementById('schTable');
+  if (!table) { alert('편성 화면에서만 이미지 저장이 가능합니다.'); return; }
+  alert('스케줄 표를 이미지로 저장합니다. 잠시만 기다려주세요...');
+  // html2canvas 동적 로드 후 캡처
+  if (!window.html2canvas) {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+    s.onload = () => captureScheduleImage();
+    document.head.appendChild(s);
+  } else {
+    captureScheduleImage();
+  }
+}
+async function captureScheduleImage() {
+  const detail = document.querySelector('.post-detail');
+  if (!detail) return;
+  const canvas = await html2canvas(detail, { scale: 3, backgroundColor: '#ffffff', useCORS: true });
+  const link = document.createElement('a');
+  link.download = `${window.__schStore}_${window.__schYear}년${window.__schMonth}월_스케줄.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+
+
+// ── 스케줄 히스토리 저장 ──────────────────────────────────
+async function saveScheduleHistory(scheduleId, note) {
+  try {
+    // 현재 버전 번호 조회
+    const { data: lastVer } = await sb.from('schedule_history')
+      .select('version').eq('schedule_id', scheduleId)
+      .order('version',{ascending:false}).limit(1).maybeSingle();
+    const version = (lastVer?.version || 0) + 1;
+
+    // 현재 entries 스냅샷
+    const { data: entries } = await sb.from('schedule_entries').select('*').eq('schedule_id', scheduleId);
+    const { data: sch } = await sb.from('schedules').select('operation_plan,special_notes').eq('id',scheduleId).single();
+
+    await sb.from('schedule_history').insert({
+      schedule_id: scheduleId,
+      version,
+      snapshot_entries: entries || [],
+      operation_plan: sch?.operation_plan || null,
+      special_notes: sch?.special_notes || null,
+      saved_by: currentUser.id,
+      note
+    });
+  } catch(e) {
+    console.warn('히스토리 저장 오류:', e);
+  }
+}
+
+// ── 히스토리 열람 UI ──────────────────────────────────────
+async function openScheduleHistoryModal(scheduleId) {
+  const { data: history } = await sb.from('schedule_history')
+    .select('*, saver:users!schedule_history_saved_by_fkey(name)')
+    .eq('schedule_id', scheduleId)
+    .order('version', {ascending: false});
+
+  const old = document.getElementById('schHistoryModal');
+  if (old) old.remove();
+
+  const items = (history || []).map(h => {
+    const entries = Array.isArray(h.snapshot_entries) ? h.snapshot_entries : [];
+    const countByType = {};
+    entries.forEach(e => {
+      const t = e.shift_code || e.entry_type || '-';
+      countByType[t] = (countByType[t]||0)+1;
+    });
+    const summary = Object.entries(countByType).map(([k,v])=>`${k}:${v}`).join(', ');
+    return `
+      <details class="toggle-block" style="margin-bottom:8px">
+        <summary style="cursor:pointer;padding:10px 14px;font-weight:600;background:var(--cr);display:flex;align-items:center;justify-content:space-between;list-style:none">
+          <span>v${h.version} · ${h.note||''} <span style="font-size:11px;color:var(--th);font-weight:400">— ${h.saved_at?.slice(0,16).replace('T',' ')||''} · ${h.saver?.name||''}</span></span>
+          <i class="ti ti-chevron-down" style="font-size:13px;color:var(--th)"></i>
+        </summary>
+        <div style="padding:12px 14px;border-top:0.5px solid var(--crd)">
+          ${h.operation_plan ? `<div style="margin-bottom:8px"><strong style="font-size:12px">운영 계획:</strong><div style="font-size:13px;white-space:pre-wrap;color:var(--ts);margin-top:4px">${h.operation_plan}</div></div>` : ''}
+          ${h.special_notes ? `<div style="margin-bottom:8px"><strong style="font-size:12px">특이사항:</strong><div style="font-size:13px;white-space:pre-wrap;color:var(--ts);margin-top:4px">${h.special_notes}</div></div>` : ''}
+          <div style="font-size:12px;color:var(--th)">배치 요약: ${summary || '(없음)'}</div>
+          <div style="font-size:11px;color:var(--th);margin-top:4px">총 ${entries.length}개 셀 배치</div>
+        </div>
+      </details>`;
+  }).join('');
+
+  const m = document.createElement('div');
+  m.id = 'schHistoryModal';
+  m.className = 'modal-bg open';
+  m.innerHTML = `
+    <div class="modal-inner" style="width:min(96vw,560px);max-height:90vh;overflow-y:auto">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <span style="font-size:15px;font-weight:600;color:var(--tm)"><i class="ti ti-history"></i> 스케줄 수정 히스토리</span>
+        <button onclick="document.getElementById('schHistoryModal').remove()" style="background:none;border:none;cursor:pointer;color:var(--th);font-size:18px"><i class="ti ti-x"></i></button>
+      </div>
+      ${items || '<div style="text-align:center;padding:20px;color:var(--th)">히스토리가 없습니다.</div>'}
+    </div>`;
+  document.body.appendChild(m);
+}
+
+// Sheets 동기화 트리거 (컨펌 완료 시 호출, Webhook URL은 알림 설정에서 관리)
+async function triggerSheetSync(scheduleId) {
+  try {
+    // Apps Script Web App URL이 app_settings에 저장된 경우 호출
+    const { data: setting } = await sb.from('app_settings').select('value').eq('key','schedule_sheet_webhook').maybeSingle();
+    if (!setting?.value) return;
+    await fetch(setting.value + '?schedule_id=' + scheduleId, { method:'GET', mode:'no-cors' });
+  } catch(e) {
+    console.warn('Sheets 트리거 오류:', e);
+  }
 }
 
 // ══════════════════════════════════════════════════════════
