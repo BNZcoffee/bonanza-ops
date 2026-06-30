@@ -3674,7 +3674,7 @@ async function deleteDraft(id){
 }
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
-let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'-'};
+let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
 const APP_BUILD_DATE = '2026-06-30';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
@@ -3713,7 +3713,7 @@ async function renderAppSettings(area){
   await loadAppSettings();
   const tog = key => `<button class="toggle-switch${APP[key]==='true'?' on':''}" id="ts-${key}" onclick="this.classList.toggle('on');APP['${key}']=this.classList.contains('on')?'true':'false'"></button>`;
   area.innerHTML = `
-    <div class="page-header"><div class="page-title">앱 관리</div><div class="page-sub">현재 버전: <strong>${APP.app_version}</strong>  ·  최근 업데이트: <strong>${APP_UPDATED_AT ? fmtDateTime(APP_UPDATED_AT).slice(0,10) : APP_BUILD_DATE}</strong></div></div>
+    <div class="page-header"><div class="page-title">앱 관리</div><div class="page-sub">버전 <strong>v${APP.app_version}</strong>  ·  최근 업데이트: <strong>${APP_UPDATED_AT ? fmtDateTime(APP_UPDATED_AT).slice(0,10) : APP_BUILD_DATE}</strong></div></div>
     <div class="notif-card" style="margin-bottom:12px">
       <div class="section-label" style="margin-bottom:12px">UI 설정</div>
       <div class="form-row"><label class="form-label">앱 이름 (상단 로고)</label><input class="form-input" id="cfg-name" value="${APP.app_name||''}"/></div>
@@ -3869,13 +3869,11 @@ async function downloadBackup() {
 }
 
 async function saveUISettings(){
-  const ver = new Date().toISOString().slice(0,10);
   const name = document.getElementById('cfg-name')?.value.trim()||APP.app_name;
   const color = document.getElementById('cfg-color')?.value.trim()||APP.primary_color;
   await Promise.all([
     saveAppSetting('app_name', name),
     saveAppSetting('primary_color', color),
-    saveAppSetting('app_version', ver),
   ]);
   // 즉시 화면 반영
   const logo = document.querySelector('.logo');
