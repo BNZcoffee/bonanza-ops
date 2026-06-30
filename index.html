@@ -3675,7 +3675,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'-'};
-const APP_BUILD_DATE = '2026-06-30';   // 배포 시 자동 갱신   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-06-30';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -3683,8 +3683,14 @@ async function loadAppSettings(){
     data.forEach(r=>{APP[r.key]=r.value;});
     // 가장 최근 updated_at 찾기
     const times = data.map(r=>r.updated_at).filter(Boolean).sort();
-    // app_settings 변경이 없으면 빌드 날짜를 기본값으로 사용
-    APP_UPDATED_AT = times.length ? times[times.length-1] : APP_BUILD_DATE;
+    const latestSettingChange = times.length ? times[times.length-1] : null;
+    // 코드 배포일(APP_BUILD_DATE)과 설정 변경일 중 더 최근 날짜를 표시
+    const buildDateObj = new Date(APP_BUILD_DATE + 'T00:00:00+09:00');
+    if (latestSettingChange && new Date(latestSettingChange) > buildDateObj) {
+      APP_UPDATED_AT = latestSettingChange;
+    } else {
+      APP_UPDATED_AT = APP_BUILD_DATE;
+    }
   }
   // 저장된 설정 즉시 반영
   if(APP.app_name){
