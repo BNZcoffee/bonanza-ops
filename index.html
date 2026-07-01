@@ -6907,7 +6907,7 @@ async function renderScheduleEdit(area) {
           <button class="btn-cancel-sm" onclick="confirmScheduleApprove()" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-check"></i> 컨펌 완료</button>
           <button class="btn-cancel-sm" onclick="confirmScheduleReject()" style="font-size:12px;color:var(--rd);border-color:var(--rd)"><i class="ti ti-x"></i> 반려</button>
         ` : ''}
-        ${curSchedule && curSchedule.status==='confirmed' && !curSchedule.closed_at && canEditSchedule(curSchedule) ? `<button class="btn-cancel-sm" onclick="closeSchedule()" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-checklist"></i> 근태 마감</button>` : ''}
+        ${curSchedule && curSchedule.status==='confirmed' ? `<button class="btn-cancel-sm" onclick="openCloseModal()" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-checklist"></i> 근태 마감 관리</button>` : ''}
         ${curSchedule && curSchedule.closed_at && (isScheduleHr()||isScheduleAdmin()) && !curSchedule.hr_checked_at ? `<button class="btn-cancel-sm" onclick="hrCheckSchedule()" style="font-size:12px;color:var(--pu);border-color:var(--pu)"><i class="ti ti-user-check"></i> 인사팀 점검완료</button>` : ''}
       </div>
     </div>
@@ -6916,7 +6916,14 @@ async function renderScheduleEdit(area) {
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
         <span style="font-size:17px;font-weight:600">${store} ${year}년 ${month}월 스케줄</span>
         ${statusBadge}
-        ${curSchedule?.closed_at?'<span class="badge-access" style="background:var(--gnb);color:var(--gn)">근태마감 완료</span>':''}
+        ${(()=>{
+          const cd = curSchedule?.close_days;
+          if (!cd || (Array.isArray(cd)&&cd.length===0)) return '';
+          const daysInM = new Date(window.__schYear, window.__schMonth, 0).getDate();
+          const cnt = Array.isArray(cd)?cd.length:(cd?daysInM:0);
+          if (cnt === daysInM) return '<span class="badge-access" style="background:var(--gnb);color:var(--gn)">근태마감 완료</span>';
+          return `<span class="badge-access" style="background:var(--blb);color:var(--bl)">마감 ${cnt}일</span>`;
+        })()}
       </div>
       ${curSchedule?.reject_reason ? `<div style="background:var(--rdb);border-radius:8px;padding:10px 13px;font-size:13px;color:var(--rd);margin-bottom:12px"><strong>반려 사유:</strong> ${curSchedule.reject_reason}</div>` : ''}
 
@@ -7035,6 +7042,20 @@ function onCellChange(sel) {
   const date      = sel.dataset.date;
   const val       = sel.value;
   const key       = (userId||extraName) + '_' + date;
+
+  // 마감된 날짜 수정 차단
+  if (curSchedule?.close_days && date) {
+    const closedDays = Array.isArray(curSchedule.close_days)
+      ? curSchedule.close_days
+      : JSON.parse(curSchedule.close_days || '[]');
+    const dayNum = parseInt(date.slice(8,10));
+    if (closedDays.includes(dayNum)) {
+      const prev = curScheduleEntries[key];
+      sel.value = prev?._rawCode || prev?.entry_type || prev?.shift_code || '';
+      alert(`${dayNum}일은 마감된 날짜입니다. 근태 마감 관리에서 해제 후 수정하세요.`);
+      return;
+    }
+  }
 
   if (!val) {
     delete curScheduleEntries[key];
@@ -7885,29 +7906,43 @@ async function renderBalancePanel() {
   const month  = window.__schMonth;
   if (!store || !year || !month) return;
 
-  const tbody = document.getElementById('schTbody');
+  const tbody       = document.getElementById('schTbody');
   const daysInMonth = new Date(year, month, 0).getDate();
 
-  // 소속 직원 user_id 수집 (isExtra 아닌 직원만)
-  const staffIds = curScheduleStaff
-    .filter(s => s.id && !s.isExtra)
-    .map(s => s.id);
+  // 소속 직원만
+  const staffList = curScheduleStaff.filter(s => s.id && !s.isExtra);
+  const staffIds  = staffList.map(s => s.id);
   if (!staffIds.length) { panel.innerHTML = '<div style="padding:12px;color:var(--th)">직원이 없습니다.</div>'; return; }
 
-  // 인원별 연차 잔여 (annual_leave_balance)
-  const { data: albData } = await sb.from('annual_leave_balance')
-    .select('user_id, init_total, init_used, schedule_used')
-    .in('user_id', staffIds);
-  const albMap = Object.fromEntries((albData||[]).map(b=>[b.user_id, b]));
+  // 연차 잔여 + 전월 휴무 이월(schedule_leave_balance) 병렬 로드
+  const today = new Date().toISOString().slice(0,10);
+  const [albRes, slbRes, entriesRes] = await Promise.all([
+    sb.from('annual_leave_balance').select('user_id, adjust, init_used, expire_used').in('user_id', staffIds),
+    curSchedule?.id
+      ? sb.from('schedule_leave_balance').select('*').eq('schedule_id', curSchedule.id)
+      : Promise.resolve({data:[]}),
+    // 오늘까지 도래한 연차 사용 (인원별 연차잔여용)
+    sb.from('schedule_entries').select('user_id,entry_type,date')
+      .in('user_id', staffIds)
+      .in('entry_type',['연차','반차','오전반차','오후반차'])
+      .lte('date', today)
+  ]);
 
-  const NON_WORK = new Set(['휴무','대휴','결근','공가','경조','연차','오전반차','오후반차','반차']);
-  const LEAVE_TYPES = new Set(['휴무','대휴']);
-  const ANNUAL = new Set(['연차','오전반차','오후반차','반차']);
+  const albMap = Object.fromEntries((albRes.data||[]).map(b=>[b.user_id,b]));
+  const slbMap = Object.fromEntries((slbRes.data||[]).map(b=>[b.user_id,b]));
+  // 오늘까지 연차 사용분
+  const todayUsedMap = {};
+  (entriesRes.data||[]).forEach(e => {
+    todayUsedMap[e.user_id] = (todayUsedMap[e.user_id]||0) + (e.entry_type==='연차'?1:0.5);
+  });
 
-  // DOM에서 현재 입력값 읽기 (실시간)
-  const rows = curScheduleStaff.filter(s=>s.id&&!s.isExtra).map(staff => {
+  const NON_WORK   = new Set(['휴무','대휴','결근','공가','경조','연차','오전반차','오후반차','반차']);
+  const LEAVE_ONLY = new Set(['휴무','대휴']);
+  const ANNUAL_SET = new Set(['연차','오전반차','오후반차','반차']);
+
+  // DOM 실시간 집계
+  const rows = staffList.map(staff => {
     let workDays=0, leaveDays=0, annualUsed=0, totalFilled=0;
-
     for (let d=1; d<=daysInMonth; d++) {
       const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
       const sel = tbody?.querySelector(`select[data-staff="${staff.id}"][data-date="${dateStr}"]`);
@@ -7915,42 +7950,72 @@ async function renderBalancePanel() {
       if (!val) continue;
       totalFilled++;
       const half = val==='오전반차'||val==='오후반차'||val==='반차';
-      if (LEAVE_TYPES.has(val)) leaveDays += half ? 0.5 : 1;
-      if (ANNUAL.has(val)) annualUsed += half ? 0.5 : 1;
+      if (LEAVE_ONLY.has(val)) leaveDays += half ? 0.5 : 1;
+      if (ANNUAL_SET.has(val)) annualUsed += half ? 0.5 : 1;
       if (!NON_WORK.has(val)) workDays += half ? 0.5 : 1;
     }
 
-    const alb = albMap[staff.id];
-    const initTotal = alb?.init_total || 0;
-    const initUsed  = alb?.init_used  || 0;
-    const schUsed   = alb?.schedule_used || 0;
-    // 이번 달 연차 사용분은 실시간 DOM 기반
-    const annualRemain = initTotal - initUsed - (schUsed - annualUsed) - annualUsed;
+    // 전월 휴무 이월
+    const slb = slbMap[staff.id] || {};
+    const carryIn   = slb.carry_in   || 0;
+    const carryUsed = slb.carry_used  || 0;
+    const carryOut  = carryIn - carryUsed;
+    // 당월 휴무 기준 (주말+공휴일)
+    const baseQuota = slb.base_quota || 0;
+    const baseUsed  = leaveDays;
+    const baseRemain= baseQuota - baseUsed;
 
-    return {name:staff.name, workDays, leaveDays, annualUsed, annualRemain, totalFilled};
+    // 연차 잔여 (입사일 자동계산 기반)
+    const { days: autoDays } = calcAnnualLeave(staff.hire_date, today);
+    const alb = albMap[staff.id] || {};
+    const annualTotal  = autoDays + (alb.adjust||0);
+    const annualRemain = annualTotal - (alb.init_used||0) - (alb.expire_used||0) - (todayUsedMap[staff.id]||0);
+
+    return { name:staff.name, workDays, leaveDays, annualUsed, annualRemain,
+             totalFilled, carryIn, carryUsed, carryOut, baseQuota, baseUsed, baseRemain };
   });
 
-  const thead = `<tr style="background:var(--cr);font-size:11px;color:var(--th)">
-    <th style="padding:5px 10px;text-align:left;border-bottom:0.5px solid var(--crd)">이름</th>
-    <th style="padding:5px 8px;text-align:center;border-bottom:0.5px solid var(--crd)">근무일</th>
-    <th style="padding:5px 8px;text-align:center;border-bottom:0.5px solid var(--crd)">휴무·대휴</th>
-    <th style="padding:5px 8px;text-align:center;border-bottom:0.5px solid var(--crd)">연차사용</th>
-    <th style="padding:5px 8px;text-align:center;border-bottom:0.5px solid var(--crd)">연차잔여</th>
-    <th style="padding:5px 8px;text-align:center;border-bottom:0.5px solid var(--crd)">입력일수</th>
-  </tr>`;
+  const thStyle  = 'padding:5px 8px;text-align:center;border-bottom:0.5px solid var(--crd);border-left:0.5px solid var(--crd);font-size:10px';
+  const thStyleL = 'padding:5px 10px;text-align:left;border-bottom:0.5px solid var(--crd);font-size:10px';
+
+  const theadHtml = `
+    <tr style="background:var(--cr);color:var(--ts)">
+      <th rowspan="2" style="${thStyleL}">이름</th>
+      <th colspan="3" style="${thStyle};background:var(--blb);color:var(--bl)">전월 휴무 (대휴)</th>
+      <th colspan="3" style="${thStyle};background:var(--gnb);color:var(--gn)">당월 휴무</th>
+      <th colspan="3" style="${thStyle};background:var(--crm);color:var(--brm)">당월 근무</th>
+      <th rowspan="2" style="${thStyle};color:var(--gn)">연차잔여</th>
+    </tr>
+    <tr style="background:var(--cr);color:var(--th);font-size:10px">
+      <th style="${thStyle}">이월</th><th style="${thStyle}">사용</th><th style="${thStyle}">잔여</th>
+      <th style="${thStyle}">기준</th><th style="${thStyle}">사용</th><th style="${thStyle}">잔여</th>
+      <th style="${thStyle}">근무일</th><th style="${thStyle}">연차</th>
+      <th style="${thStyle};color:${rows.some(r=>r.totalFilled!==daysInMonth)?'var(--rd)':'var(--th)'}">당월계<small>(/${daysInMonth})</small></th>
+    </tr>`;
 
   const tbodyHtml = rows.map(r => `
     <tr style="border-bottom:0.5px solid var(--crd)">
-      <td style="padding:5px 10px;font-size:11px;font-weight:600">${r.name}</td>
-      <td style="padding:5px 8px;text-align:center;font-size:11px">${r.workDays}</td>
-      <td style="padding:5px 8px;text-align:center;font-size:11px">${r.leaveDays}</td>
+      <td style="padding:5px 10px;font-size:11px;font-weight:600;white-space:nowrap">${r.name}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:11px;border-left:0.5px solid var(--crd)">${r.carryIn}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:11px">${r.carryUsed}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:11px;color:${r.carryOut<0?'var(--rd)':'var(--tm)'};">${r.carryOut}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:11px;border-left:0.5px solid var(--crd)">${r.baseQuota}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:11px">${r.baseUsed}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:11px;color:${r.baseRemain<0?'var(--rd)':'var(--gn)'};">${r.baseRemain}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:11px;border-left:0.5px solid var(--crd)">${r.workDays}</td>
       <td style="padding:5px 8px;text-align:center;font-size:11px">${r.annualUsed}</td>
-      <td style="padding:5px 8px;text-align:center;font-size:11px;color:${r.annualRemain<0?'var(--rd)':r.annualRemain===0?'var(--th)':'var(--gn)'};font-weight:${r.annualRemain<0?700:400}">${r.annualRemain}</td>
-      <td style="padding:5px 8px;text-align:center;font-size:11px;color:${r.totalFilled===daysInMonth?'var(--gn)':'var(--th)'}">${r.totalFilled}/${daysInMonth}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:11px;color:${r.totalFilled!==daysInMonth?'var(--rd)':'var(--gn)'};">${r.totalFilled}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:11px;font-weight:600;border-left:0.5px solid var(--crd);color:${r.annualRemain<0?'var(--rd)':r.annualRemain<=2?'#E8A000':'var(--gn)'};">${r.annualRemain}</td>
     </tr>`).join('');
 
-  panel.innerHTML = `<table style="width:100%;border-collapse:collapse">
-    <thead>${thead}</thead><tbody>${tbodyHtml}</tbody></table>`;
+  panel.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:600px">
+    <thead>${theadHtml}</thead><tbody>${tbodyHtml}</tbody>
+  </table></div>
+  <div style="font-size:10px;color:var(--th);padding:6px 10px;line-height:1.7">
+    ⚠ 당월계가 <strong>${daysInMonth}</strong>일과 다른 경우 누락 확인 &nbsp;|&nbsp;
+    잔여 <span style="color:var(--rd)">빨강</span>: 초과 사용 &nbsp;|&nbsp;
+    임시저장 시 자동 갱신
+  </div>`;
 }
 
 // 집계 패널 최초 로드 (임시저장 후 또는 스케줄 열 때)
@@ -8441,13 +8506,170 @@ async function syncRetireDatesFromSchedule(scheduleId) {
 
 // ── 근태 마감 ──────────────────────────────────────────────
 async function closeSchedule() {
+  // 하위 호환 — openCloseModal로 위임
+  openCloseModal();
+}
+
+// ══════════════════════════════════════════════
+// 근태 마감 모달 (일/주 단위 체크박스)
+// ══════════════════════════════════════════════
+async function openCloseModal() {
   if (!curSchedule) return;
-  if (!confirm('이번 달 근태를 마감 처리할까요? 마감 후에는 인사팀이 점검합니다.')) return;
+  const year  = window.__schYear;
+  const month = window.__schMonth;
+  const store = window.__schStore;
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  // close_days: 마감된 날짜 배열 (JSON) — DB 컬럼 없으면 closed_at으로 전체 처리
+  const closedDays = curSchedule.close_days
+    ? (typeof curSchedule.close_days === 'string'
+        ? JSON.parse(curSchedule.close_days)
+        : curSchedule.close_days)
+    : (curSchedule.closed_at ? Array.from({length:daysInMonth},(_,i)=>i+1) : []);
+  const closedSet = new Set(closedDays);
+
+  // 주 단위로 날짜 그룹핑
+  const weeks = [];
+  let week = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = new Date(year, month-1, d);
+    const dow  = date.getDay(); // 0=일
+    week.push(d);
+    if (dow === 0 || d === daysInMonth) { weeks.push([...week]); week = []; }
+  }
+
+  const canManage = canEditSchedule(curSchedule) || isScheduleHr() || isScheduleAdmin();
+
+  const dayNames = ['일','월','화','수','목','금','토'];
+  const weekRows = weeks.map((wDays, wi) => {
+    const allClosed  = wDays.every(d => closedSet.has(d));
+    const someClosed = wDays.some(d => closedSet.has(d));
+    const wLabel = `${wi+1}주차 (${wDays[0]}~${wDays[wDays.length-1]}일)`;
+
+    const dayCells = wDays.map(d => {
+      const date = new Date(year, month-1, d);
+      const dow  = date.getDay();
+      const isClosed = closedSet.has(d);
+      const isHol    = dow === 0 || dow === 6;
+      const dayColor = dow===0||dow===6 ? 'var(--rd)' : 'var(--tm)';
+      return `<label style="display:flex;flex-direction:column;align-items:center;gap:2px;cursor:${canManage?'pointer':'default'}">
+        <span style="font-size:9px;color:${dayColor}">${dayNames[dow]}</span>
+        <span style="font-size:11px;color:${dayColor};font-weight:600">${d}</span>
+        <input type="checkbox" data-day="${d}" ${isClosed?'checked':''} ${!canManage?'disabled':''}
+          style="width:14px;height:14px;accent-color:var(--gn);cursor:${canManage?'pointer':'default'}"
+          onchange="syncWeekCheck(${wi})">
+      </label>`;
+    }).join('');
+
+    return `<div style="background:var(--cr);border-radius:8px;padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--tm);cursor:${canManage?'pointer':'default'}">
+          <input type="checkbox" id="week-chk-${wi}" ${allClosed?'checked':someClosed?'':''}
+            style="width:15px;height:15px;accent-color:var(--gn)"
+            ${!canManage?'disabled':''}
+            onchange="setWeekDays(${wi}, this.checked, ${JSON.stringify(wDays)})">
+          ${wLabel}
+          ${allClosed?'<span style="font-size:9px;background:var(--gnb);color:var(--gn);border-radius:4px;padding:1px 6px">마감완료</span>':someClosed?'<span style="font-size:9px;background:var(--blb);color:var(--bl);border-radius:4px;padding:1px 6px">일부마감</span>':''}
+        </label>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap" id="week-days-${wi}">${dayCells}</div>
+    </div>`;
+  }).join('');
+
+  const allDone = closedDays.length === daysInMonth;
+
+  const old = document.getElementById('closeModal');
+  if (old) old.remove();
+  const m = document.createElement('div');
+  m.id = 'm.className = "modal-bg open"';
+  m.className = 'modal-bg open';
+  m.id = 'closeModal';
+  m.innerHTML = `
+    <div class="modal-inner" style="width:min(96vw,560px);max-height:90vh;overflow-y:auto">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <span style="font-size:15px;font-weight:600;color:var(--tm)">
+          <i class="ti ti-checklist" style="color:var(--gn)"></i>
+          ${store} ${year}년 ${month}월 근태 마감 관리
+        </span>
+        <button onclick="document.getElementById('closeModal').remove()" style="background:none;border:none;cursor:pointer;color:var(--th);font-size:18px"><i class="ti ti-x"></i></button>
+      </div>
+
+      <div style="font-size:12px;color:var(--ts);background:var(--crm);border-radius:8px;padding:10px 13px;margin-bottom:14px;line-height:1.7">
+        <strong>마감 기준:</strong> 일 또는 주 단위로 체크 → 마감 확정 버튼<br>
+        마감된 날짜는 셀 수정이 <strong>불가</strong>합니다. 취소는 체크 해제 후 저장하세요.
+        ${!canManage?'<br><span style="color:var(--th)">※ 권한 없음: 조회만 가능</span>':''}
+      </div>
+
+      <!-- 전체 선택/해제 -->
+      ${canManage?`<div style="display:flex;gap:8px;margin-bottom:12px">
+        <button onclick="setAllDays(true,${daysInMonth})" class="btn-cancel-sm" style="font-size:12px;color:var(--gn);border-color:var(--gn)">전체 마감</button>
+        <button onclick="setAllDays(false,${daysInMonth})" class="btn-cancel-sm" style="font-size:12px;color:var(--rd);border-color:var(--rd)">전체 해제</button>
+      </div>`:''}
+
+      <div id="closeWeekRows">${weekRows}</div>
+
+      ${canManage?`<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;padding-top:12px;border-top:0.5px solid var(--crd)">
+        <button class="btn-cancel-sm" onclick="document.getElementById('closeModal').remove()">취소</button>
+        <button class="btn-submit" onclick="saveCloseDays()"><i class="ti ti-device-floppy"></i> 마감 저장</button>
+      </div>`:''}
+    </div>`;
+  document.body.appendChild(m);
+}
+
+function syncWeekCheck(wi) {
+  const dayCbs = document.querySelectorAll(`#week-days-${wi} input[type=checkbox]`);
+  const all  = Array.from(dayCbs).every(c=>c.checked);
+  const some = Array.from(dayCbs).some(c=>c.checked);
+  const wChk = document.getElementById(`week-chk-${wi}`);
+  if (wChk) { wChk.checked = all; wChk.indeterminate = !all && some; }
+}
+
+function setWeekDays(wi, checked, days) {
+  days.forEach(d => {
+    const cb = document.querySelector(`input[data-day="${d}"]`);
+    if (cb) cb.checked = checked;
+  });
+}
+
+function setAllDays(checked, daysInMonth) {
+  for (let d = 1; d <= daysInMonth; d++) {
+    const cb = document.querySelector(`input[data-day="${d}"]`);
+    if (cb) cb.checked = checked;
+  }
+  // 주차 체크박스도 동기화
+  document.querySelectorAll('[id^="week-chk-"]').forEach(wc => { wc.checked = checked; });
+}
+
+async function saveCloseDays() {
+  const allCbs = document.querySelectorAll('#closeModal input[data-day]');
+  const closedDays = Array.from(allCbs)
+    .filter(c => c.checked)
+    .map(c => parseInt(c.dataset.day));
+
+  const year  = window.__schYear;
+  const month = window.__schMonth;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const allClosed = closedDays.length === daysInMonth;
+
+  const confirmMsg = closedDays.length === 0
+    ? '마감을 전부 해제할까요?'
+    : `${closedDays.length}일을 마감 처리할까요?
+마감된 날짜는 수정이 불가합니다.`;
+  if (!confirm(confirmMsg)) return;
+
   const now = new Date().toISOString();
-  await sb.from('schedules').update({ closed_at: now, closed_by: currentUser.id }).eq('id', curSchedule.id);
-  alert('근태 마감 처리되었습니다.');
+  await sb.from('schedules').update({
+    close_days:  closedDays,
+    closed_at:   allClosed ? now : (closedDays.length > 0 ? now : null),
+    closed_by:   currentUser.id,
+    updated_at:  now
+  }).eq('id', curSchedule.id);
+
+  document.getElementById('closeModal')?.remove();
+  alert('마감이 저장되었습니다.');
   openScheduleById(curSchedule.id);
 }
+
 
 async function renderScheduleCloseList(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
@@ -8675,8 +8897,13 @@ async function captureScheduleImage() {
   if (!table) { alert('스케줄 표를 찾을 수 없습니다.'); return; }
 
   // ── 캡처 전용 임시 컨테이너 생성 (body 최하단 외부, 화면 밖) ──
+  // 스케줄 테이블 전체 너비 측정
+  const tableRealWidth = (document.getElementById('schTable')?.scrollWidth || 0) + 100;
+  const captureWidth   = Math.max(tableRealWidth, 900);
+
   const wrap = document.createElement('div');
-  wrap.style.cssText = 'position:fixed;left:-9999px;top:0;background:#fff;padding:16px;width:auto;z-index:-1';
+  wrap.style.cssText = `position:fixed;left:-9999px;top:0;background:#fff;padding:16px;width:${captureWidth}px;box-sizing:border-box;z-index:-1`;
+  wrap.setAttribute('data-capture-root','1');
 
   // 제목
   const titleEl = document.createElement('div');
@@ -8725,14 +8952,22 @@ async function captureScheduleImage() {
   });
   // 메모 dot 유지
   const tableWrap = document.createElement('div');
-  tableWrap.style.cssText = 'overflow:visible;margin-bottom:10px;border:0.5px solid #D9C9B3;border-radius:8px';
+  tableWrap.style.cssText = 'overflow:visible;margin-bottom:10px;border:0.5px solid #D9C9B3;border-radius:8px;width:100%';
+  tableClone.style.cssText = 'border-collapse:collapse;font-size:11px;width:100%';
   tableWrap.appendChild(tableClone);
   wrap.appendChild(tableWrap);
 
-  // 집계 패널 복사
+  // 집계 패널 복사 (전월/당월 휴무·근무 집계 포함)
   if (balance) {
     const balClone = balance.cloneNode(true);
-    balClone.style.overflow = 'visible';
+    balClone.style.overflow  = 'visible';
+    balClone.style.width     = '100%';
+    balClone.style.boxSizing = 'border-box';
+    // 집계 패널 내부 테이블도 전체 너비
+    balClone.querySelectorAll('table').forEach(t => {
+      t.style.minWidth = 'unset';
+      t.style.width = '100%';
+    });
     wrap.appendChild(balClone);
   }
 
@@ -8740,12 +8975,20 @@ async function captureScheduleImage() {
 
   try {
     const canvas = await html2canvas(wrap, {
-      scale: 3,
+      scale: 2,
       backgroundColor: '#ffffff',
       useCORS: true,
       scrollX: 0, scrollY: 0,
+      windowWidth: captureWidth + 32,
       width:  wrap.scrollWidth,
-      height: wrap.scrollHeight
+      height: wrap.scrollHeight,
+      onclone: (cloneDoc) => {
+        const cloneWrap = cloneDoc.querySelector('[data-capture-root]');
+        if (cloneWrap) {
+          cloneWrap.style.width = captureWidth + 'px';
+          cloneWrap.style.overflow = 'visible';
+        }
+      }
     });
     const link = document.createElement('a');
     link.download = `${window.__schStore||'스케줄'}_${window.__schYear}년${window.__schMonth}월_스케줄.png`;
