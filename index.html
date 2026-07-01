@@ -7695,12 +7695,23 @@ async function requestScheduleConfirm() {
     status: 'requested', requested_at: now, requested_by: currentUser.id, updated_at: now
   }).eq('id', curSchedule.id);
 
-  // 운영팀 전체에 알림 (또는 코치 관할 우선 — 일단 admin 전체)
-  const { data: admins } = await sb.from('users').select('id').eq('active',true).or('role.eq.admin,is_master.eq.true,is_vice_master.eq.true');
-  for (const a of (admins||[])) {
-    await createNotification(a.id, 'schedule_request', curSchedule.id, 'schedule',
-      `[스케줄 컨펌 요청] ${window.__schStore} ${window.__schYear}년 ${window.__schMonth}월 스케줄이 컨펌 요청되었습니다.`);
+  // 운영팀 + 인사팀 + 총괄/부총괄에게 앱 알림 발송
+  const notifMsg = `[스케줄 컨펌 요청] ${window.__schStore} ${window.__schYear}년 ${window.__schMonth}월 스케줄이 컨펌 요청되었습니다.`;
+  const { data: receivers } = await sb.from('users').select('id')
+    .eq('active', true)
+    .or('role.eq.admin,role.eq.hr,is_master.eq.true,is_vice_master.eq.true');
+  for (const r of (receivers||[])) {
+    await createNotification(r.id, 'schedule_request', curSchedule.id, 'schedule', notifMsg);
   }
+
+  // 슬랙 웹훅 (연동된 경우에만)
+  await sendScheduleSlackNotify(
+    `📋 스케줄 컨펌 요청
+매장: ${window.__schStore}  |  ${window.__schYear}년 ${window.__schMonth}월
+요청자: ${currentUser.name}
+확인: https://bnzcoffee.github.io/bonanza-ops/`
+  );
+
   await saveScheduleHistory(curSchedule.id, '컨펌 요청');
   alert('컨펌 요청이 전송되었습니다.');
   openScheduleById(curSchedule.id);
@@ -10179,6 +10190,18 @@ async function savePartWebhook(id) {
 }
 
 // 슬랙 웹훅으로 알림 발송 (no-cors)
+// 스케줄용 슬랙 알림 — notification_settings.slack_webhook_url 자동 사용
+async function sendScheduleSlackNotify(text) {
+  try {
+    const { data: ns } = await sb.from('notification_settings')
+      .select('slack_enabled, slack_webhook_url').single();
+    if (!ns?.slack_enabled || !ns?.slack_webhook_url) return;
+    await sendSlackNotify(ns.slack_webhook_url, text);
+  } catch(e) {
+    console.warn('스케줄 슬랙 알림 오류:', e);
+  }
+}
+
 async function sendSlackNotify(webhookUrl, text) {
   if (!webhookUrl) return;
   try {
