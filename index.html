@@ -3205,8 +3205,8 @@ async function renderNotifSettings(area) {
         Apps Script Web App 배포 후 URL을 입력하세요. 컨펌 완료 시 자동으로 스케줄 시트가 갱신됩니다.
       </div>
       <div style="padding:10px 0;border-bottom:0.5px solid var(--crd)">
-        <label class="form-label"><i class="ti ti-calendar-event"></i> 운영 현황 시트 — 스케줄 웹훅 URL</label>
-        <input class="form-input" id="scheduleSheetWebhook" placeholder="https://script.google.com/macros/s/.../exec" style="margin-top:4px" />
+        ${currentUser.is_master ? `<label class="form-label"><i class="ti ti-calendar-event"></i> 운영 현황 시트 — 스케줄 웹훅 URL <span style="font-size:10px;background:var(--br);color:#fff;border-radius:4px;padding:1px 7px;margin-left:6px">총괄 전용</span></label>
+        <input class="form-input" id="scheduleSheetWebhook" placeholder="https://script.google.com/macros/s/.../exec" style="margin-top:4px" />` : ''}
         <p style="font-size:11px;color:var(--th);margin-top:4px">시트 1(운영현황) Apps Script → 배포 → 웹 앱 → URL 복사</p>
       </div>
       <div style="padding:10px 0">
@@ -3247,7 +3247,9 @@ async function saveNotifSettings() {
   }).eq('id', ns.id);
 
   // Sheets 설정 저장
-  const webhookUrl = document.getElementById('scheduleSheetWebhook')?.value.trim();
+  const webhookUrl = currentUser.is_master
+    ? document.getElementById('scheduleSheetWebhook')?.value.trim()
+    : undefined;
   const sheetUrl   = document.getElementById('bizRecordSheetUrl')?.value.trim();
   if (webhookUrl !== undefined) {
     await sb.from('app_settings').upsert({key:'schedule_sheet_webhook', value:webhookUrl||''},{onConflict:'key'});
@@ -6841,7 +6843,8 @@ async function renderScheduleEdit(area) {
   const monthStart = `${year}-${String(month).padStart(2,'0')}-01`;
   const monthEnd   = `${year}-${String(month).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
   const { data: holidays } = await sb.from('holidays').select('date,name').gte('date',monthStart).lte('date',monthEnd);
-  const holidaySet = new Set((holidays||[]).map(h=>h.date));
+  const holidaySet  = new Set((holidays||[]).map(h=>h.date));
+  const holidayName = Object.fromEntries((holidays||[]).map(h=>[h.date, h.name]));
 
   // 휴무코드 → 색상 매핑
   const leaveColorMap = {};
@@ -6863,8 +6866,10 @@ async function renderScheduleEdit(area) {
     const isHoliday = holidaySet.has(dateStr);
     const isWeekend = dow===0 || dow===6;
     const color = isHoliday ? 'var(--rd)' : (dow===0?'var(--rd)':(dow===6?'var(--bl)':'var(--ts)'));
+    const holLabel = isHoliday ? (holidayName[dateStr]||'공휴일') : '';
+    const holShort = holLabel.replace('대체공휴일','대체').slice(0,4); // 최대 4자
     dateHeaderHtml += `<th style="min-width:54px;padding:4px 2px;font-size:10px;color:${color};background:${isWeekend||isHoliday?'var(--cr)':'#fff'};border:0.5px solid var(--crd)">
-      ${d}<br>${dayNames[dow]}${isHoliday?'<br><span style="font-size:8px">휴</span>':''}
+      ${d}<br>${dayNames[dow]}${isHoliday?`<br><span style="font-size:7px;color:var(--rd);letter-spacing:-0.3px">${holShort}</span>`:''}
     </th>`;
   }
 
@@ -6898,7 +6903,7 @@ async function renderScheduleEdit(area) {
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${canEdit ? `<button class="btn-cancel-sm" onclick="saveScheduleDraft()" style="font-size:12px"><i class="ti ti-device-floppy"></i> 임시저장</button>` : ''}
         <button class="btn-cancel-sm" onclick="openShiftSettings()" style="font-size:12px"><i class="ti ti-clock"></i> 근무조 설정</button>
-        ${canEdit && curSchedule?.status==='draft' ? `<button class="btn-submit" onclick="requestScheduleConfirm()" style="padding:8px 14px;font-size:13px"><i class="ti ti-send"></i> 컨펌 요청</button>` : ''}
+        ${(canEdit || isScheduleAdmin()) && (curSchedule?.status==='draft' || curSchedule?.status==='rejected') ? `<button class="btn-submit" onclick="requestScheduleConfirm()" style="padding:8px 14px;font-size:13px"><i class="ti ti-send"></i> ${curSchedule?.status==='rejected'?'재':''}컨펌 요청</button>` : ''}
         ${curSchedule?.status==='requested' && (canEdit||isScheduleAdmin()) ? `<button class="btn-cancel-sm" onclick="cancelScheduleConfirm()" style="font-size:12px;color:var(--rd);border-color:var(--rd)"><i class="ti ti-arrow-back-up"></i> 요청 취소</button>` : ''}
         ${curSchedule ? `<button class="btn-cancel-sm" onclick="openSchedulePreview()" style="font-size:12px;color:var(--bl)"><i class="ti ti-photo"></i> 이미지 저장</button>` : ''}
         ${curSchedule ? `<button class="btn-cancel-sm" onclick="openScheduleHistoryModal(${curSchedule?.id})" style="font-size:12px"><i class="ti ti-history"></i> 히스토리</button>` : ''}
@@ -8531,6 +8536,13 @@ async function openCloseModal() {
   const store = window.__schStore;
   const daysInMonth = new Date(year, month, 0).getDate();
 
+  // 공휴일 로드
+  const monthStart2 = `${year}-${String(month).padStart(2,'0')}-01`;
+  const monthEnd2   = `${year}-${String(month).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
+  const { data: closeHols } = await sb.from('holidays').select('date,name')
+    .gte('date', monthStart2).lte('date', monthEnd2);
+  const closeHolMap = Object.fromEntries((closeHols||[]).map(h=>[parseInt(h.date.slice(8,10)), h.name]));
+
   // close_days: 마감된 날짜 배열 (JSON) — DB 컬럼 없으면 closed_at으로 전체 처리
   const closedDays = curSchedule.close_days
     ? (typeof curSchedule.close_days === 'string'
@@ -8544,7 +8556,7 @@ async function openCloseModal() {
   let week = [];
   for (let d = 1; d <= daysInMonth; d++) {
     const date = new Date(year, month-1, d);
-    const dow  = date.getDay(); // 0=일
+    const dow  = date.getDay();
     week.push(d);
     if (dow === 0 || d === daysInMonth) { weeks.push([...week]); week = []; }
   }
@@ -8560,12 +8572,15 @@ async function openCloseModal() {
     const dayCells = wDays.map(d => {
       const date = new Date(year, month-1, d);
       const dow  = date.getDay();
-      const isClosed = closedSet.has(d);
-      const isHol    = dow === 0 || dow === 6;
-      const dayColor = dow===0||dow===6 ? 'var(--rd)' : 'var(--tm)';
-      return `<label style="display:flex;flex-direction:column;align-items:center;gap:2px;cursor:${canManage?'pointer':'default'}">
+      const isClosed  = closedSet.has(d);
+      const isHol     = dow === 0 || dow === 6 || !!closeHolMap[d];
+      const holName   = closeHolMap[d] || '';
+      const dayColor  = isHol ? 'var(--rd)' : 'var(--tm)';
+      const holShort  = holName.replace('대체공휴일','대체').slice(0,3);
+      return `<label style="display:flex;flex-direction:column;align-items:center;gap:1px;cursor:${canManage?'pointer':'default'}">
         <span style="font-size:9px;color:${dayColor}">${dayNames[dow]}</span>
         <span style="font-size:11px;color:${dayColor};font-weight:600">${d}</span>
+        ${holName?`<span style="font-size:7px;color:var(--rd);letter-spacing:-0.3px">${holShort}</span>`:''}
         <input type="checkbox" data-day="${d}" ${isClosed?'checked':''} ${!canManage?'disabled':''}
           style="width:14px;height:14px;accent-color:var(--gn);cursor:${canManage?'pointer':'default'}"
           onchange="syncWeekCheck(${wi})">
@@ -8662,11 +8677,49 @@ async function saveCloseDays() {
   const daysInMonth = new Date(year, month, 0).getDate();
   const allClosed = closedDays.length === daysInMonth;
 
+  // 마감할 날짜 중 연차/반차/공가/경조가 포함된 날짜 체크
+  const NEEDS_APPROVAL = new Set(['연차','반차','오전반차','오후반차','공가','경조']);
+  const approvalDays   = [];
+  if (curSchedule?.id) {
+    const monthStr  = `${year}-${String(month).padStart(2,'0')}`;
+    const closedSet = new Set(closedDays);
+    // 현재 스케줄 entries 중 마감 대상 날짜에 해당하는 것 확인
+    const tbody = document.getElementById('schTbody');
+    if (tbody) {
+      closedDays.forEach(d => {
+        const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const sels    = tbody.querySelectorAll(`select[data-date="${dateStr}"]`);
+        sels.forEach(sel => {
+          if (NEEDS_APPROVAL.has(sel.value)) {
+            approvalDays.push(`${d}일(${['일','월','화','수','목','금','토'][new Date(year,month-1,d).getDay()]})`);
+          }
+        });
+      });
+    }
+  }
+  // 중복 제거
+  const uniqueApprovalDays = [...new Set(approvalDays)];
+
+  // 기본 확인 팝업
   const confirmMsg = closedDays.length === 0
     ? '마감을 전부 해제할까요?'
     : `${closedDays.length}일을 마감 처리할까요?
 마감된 날짜는 수정이 불가합니다.`;
   if (!confirm(confirmMsg)) return;
+
+  // 비즈메카 상신 확인 팝업 (연차/반차/공가/경조 포함 날짜가 있을 때만)
+  if (uniqueApprovalDays.length > 0) {
+    const needsMsg = `⚠️ 아래 날짜에 상신이 필요한 일정이 포함되어 있습니다:
+
+${uniqueApprovalDays.join(', ')}
+(연차 / 반차 / 공가 / 경조)
+
+비즈메카에서 상신 처리 후 마감하세요.
+
+상신 완료 후 마감을 진행하려면 [확인]을,
+아직 미완료라면 [취소]를 눌러주세요.`;
+    if (!confirm(needsMsg)) return;
+  }
 
   const now = new Date().toISOString();
   await sb.from('schedules').update({
