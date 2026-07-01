@@ -7059,19 +7059,52 @@ async function renderSchedules(area) {
   const monthOpts = Array.from({length:12},(_,i)=>i+1)
     .map(m=>`<option value="${m}"${m===defMonth?' selected':''}>${m}월</option>`).join('');
 
-  const cards = schList.map(s => `
-    <div class="post-card" onclick="openScheduleById(${s.id})">
-      <div class="post-card-top">
-        <span class="post-title-txt"><i class="ti ti-calendar-event" style="color:var(--brm);margin-right:5px"></i>${s.store} ${s.year}년 ${s.month}월</span>
-        <span class="badge-access" style="${STATUS_COLOR[s.status]||''}">${STATUS_LABEL[s.status]||s.status}</span>
-        ${s.closed_at?'<span class="badge-access all">마감완료</span>':''}
+  const cards = schList.map(s => {
+    // ── 삭제 권한 ──
+    const isMaster    = currentUser.is_master;
+    const isVice      = currentUser.is_vice_master;
+    const isHrUser    = currentUser.role === 'hr';
+    const isAdminUser = currentUser.role === 'admin';
+    const isMgrUser   = isManagerRole(currentUser.role) && !isMaster && !isVice && !isAdminUser && !isHrUser;
+    const isAuthor    = s.created_by === currentUser.id;
+    const hrDone      = !!s.hr_checked_at;
+    const confirmed   = s.status === 'confirmed' || s.closed_at || hrDone;
+
+    let canDelete = false;
+    if (isMaster || isHrUser) {
+      // 총괄·인사팀: 항상 삭제 가능
+      canDelete = true;
+    } else if ((isVice || isAdminUser) && !hrDone) {
+      // 부총괄·운영팀: 인사팀 점검완료 전까지
+      canDelete = true;
+    } else if ((isMgrUser || isAuthor) && !confirmed) {
+      // 매니저·작성자: 컨펌완료·마감 전까지
+      canDelete = true;
+    }
+
+    const deleteBtn = canDelete
+      ? `<button onclick="event.stopPropagation();confirmDeleteSchedule(${s.id},'${s.store.replace(/'/g,"\\'")}',${s.year},${s.month})"
+           style="background:none;border:0.5px solid #DDCCCC;border-radius:6px;padding:5px 9px;font-size:11px;color:var(--rd);cursor:pointer;flex-shrink:0"
+           title="스케줄 삭제"><i class="ti ti-trash"></i></button>`
+      : '';
+
+    return `<div class="post-card" style="display:flex;align-items:center;gap:8px" onclick="openScheduleById(${s.id})">
+      <div style="flex:1;min-width:0">
+        <div class="post-card-top">
+          <span class="post-title-txt"><i class="ti ti-calendar-event" style="color:var(--brm);margin-right:5px"></i>${s.store} ${s.year}년 ${s.month}월</span>
+          <span class="badge-access" style="${STATUS_COLOR[s.status]||''}">${STATUS_LABEL[s.status]||s.status}</span>
+          ${s.closed_at?'<span class="badge-access all">마감완료</span>':''}
+          ${s.hr_checked_at?'<span class="badge-access" style="background:var(--pub);color:var(--pu)">인사팀 점검완료</span>':''}
+        </div>
+        <div class="post-meta">
+          <span>작성: ${s.creator?.name||''}</span>
+          ${s.requested_at?`<span>요청: ${fmtDate(s.requested_at)}</span>`:''}
+          ${s.confirmed_at?`<span style="color:var(--gn)">확정: ${fmtDate(s.confirmed_at)}</span>`:''}
+        </div>
       </div>
-      <div class="post-meta">
-        <span>작성: ${s.creator?.name||''}</span>
-        ${s.requested_at?`<span>요청: ${fmtDate(s.requested_at)}</span>`:''}
-        ${s.confirmed_at?`<span style="color:var(--gn)">확정: ${fmtDate(s.confirmed_at)}</span>`:''}
-      </div>
-    </div>`).join('');
+      ${deleteBtn}
+    </div>`;
+  }).join('');
 
   area.innerHTML = `
     <div class="page-header">
@@ -7104,6 +7137,43 @@ async function renderSchedules(area) {
       </div>
     </div>
     <div class="post-list">${cards || '<div style="text-align:center;padding:40px;color:var(--th)">등록된 스케줄이 없습니다.</div>'}</div>`;
+}
+
+
+// ══════════════════════════════════════════════
+// 스케줄 삭제 (비밀번호 확인 후 실행)
+// ══════════════════════════════════════════════
+async function confirmDeleteSchedule(id, store, year, month) {
+  const label = `${store} ${year}년 ${month}월 스케줄`;
+
+  // 1단계: 본인 비밀번호 확인
+  const pw = prompt(`[삭제 확인] "${label}"\n\n본인 비밀번호를 입력하세요.`);
+  if (pw === null) return; // 취소
+  if (pw !== currentUser.password_hash) {
+    alert('비밀번호가 일치하지 않습니다.');
+    return;
+  }
+
+  // 2단계: 최종 확인
+  if (!confirm(`"${label}"을 삭제합니까?\n삭제하면 모든 스케줄 내용이 사라지며 복구할 수 없습니다.`)) return;
+
+  // 연쇄 삭제: schedule_entries → schedule_leave_balance → schedule_history → schedules
+  const { error: e1 } = await sb.from('schedule_entries').delete().eq('schedule_id', id);
+  if (e1) { alert('삭제 오류(entries): ' + e1.message); return; }
+
+  const { error: e2 } = await sb.from('schedule_leave_balance').delete().eq('schedule_id', id);
+  // e2 무시 (테이블 없을 수도 있음)
+
+  const { error: e3 } = await sb.from('schedule_history').delete().eq('schedule_id', id);
+  // e3 무시
+
+  const { error: e4 } = await sb.from('schedules').delete().eq('id', id);
+  if (e4) { alert('삭제 오류: ' + e4.message); return; }
+
+  alert(`"${label}" 삭제 완료`);
+
+  // 목록 새로고침 — 현재 페이지 재렌더
+  goPage('schedules');
 }
 
 async function goToScheduleEdit() {
