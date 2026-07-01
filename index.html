@@ -3186,9 +3186,33 @@ async function renderNotifSettings(area) {
         <p style="font-size:11px;color:var(--th);margin-top:6px">게시글 수정 화면에서 리마인드 발송 시 적용되는 기본 대상입니다.</p>
       </div>
     </div>
+    <div class="notif-card">
+      <div class="section-label" style="margin-bottom:10px"><i class="ti ti-table" style="color:var(--brm)"></i> Google Sheets 연동 설정</div>
+      <div style="font-size:12px;color:var(--th);margin-bottom:12px;line-height:1.6">
+        Apps Script Web App 배포 후 URL을 입력하세요. 컨펌 완료 시 자동으로 스케줄 시트가 갱신됩니다.
+      </div>
+      <div style="padding:10px 0;border-bottom:0.5px solid var(--crd)">
+        <label class="form-label"><i class="ti ti-calendar-event"></i> 운영 현황 시트 — 스케줄 웹훅 URL</label>
+        <input class="form-input" id="scheduleSheetWebhook" placeholder="https://script.google.com/macros/s/.../exec" style="margin-top:4px" />
+        <p style="font-size:11px;color:var(--th);margin-top:4px">시트 1(운영현황) Apps Script → 배포 → 웹 앱 → URL 복사</p>
+      </div>
+      <div style="padding:10px 0">
+        <label class="form-label"><i class="ti ti-file-text"></i> 업무 기록 시트 URL (참조용)</label>
+        <input class="form-input" id="bizRecordSheetUrl" placeholder="https://docs.google.com/spreadsheets/d/..." style="margin-top:4px" />
+        <p style="font-size:11px;color:var(--th);margin-top:4px">업무 기록 시트 링크 (이 앱에서 바로 열기 버튼에 연결)</p>
+      </div>
+    </div>
     <div style="text-align:right">
       <button class="btn-submit" onclick="saveNotifSettings()">설정 저장</button>
     </div>`;
+
+  // 저장된 Sheets 설정 로드
+  const [swRes, brRes] = await Promise.all([
+    sb.from('app_settings').select('value').eq('key','schedule_sheet_webhook').maybeSingle(),
+    sb.from('app_settings').select('value').eq('key','biz_record_sheet_url').maybeSingle()
+  ]);
+  if (swRes.data?.value) document.getElementById('scheduleSheetWebhook').value = swRes.data.value;
+  if (brRes.data?.value) document.getElementById('bizRecordSheetUrl').value = brRes.data.value;
 }
 
 function setRemindTarget(v){
@@ -3208,6 +3232,16 @@ async function saveNotifSettings() {
     slack_webhook_url: document.getElementById('slackUrl').value.trim(),
     updated_at: new Date().toISOString()
   }).eq('id', ns.id);
+
+  // Sheets 설정 저장
+  const webhookUrl = document.getElementById('scheduleSheetWebhook')?.value.trim();
+  const sheetUrl   = document.getElementById('bizRecordSheetUrl')?.value.trim();
+  if (webhookUrl !== undefined) {
+    await sb.from('app_settings').upsert({key:'schedule_sheet_webhook', value:webhookUrl||''},{onConflict:'key'});
+  }
+  if (sheetUrl !== undefined) {
+    await sb.from('app_settings').upsert({key:'biz_record_sheet_url', value:sheetUrl||''},{onConflict:'key'});
+  }
   alert('설정이 저장되었습니다.');
 }
 
