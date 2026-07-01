@@ -6902,12 +6902,29 @@ async function renderScheduleEdit(area) {
         ${leaveLegend}
       </div>
 
-      ${canEdit ? `<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
-        <select class="form-input" id="addStaffSelect" style="flex:1;padding:7px 10px;font-size:13px"><option value="">+ 지원/교육 인력 추가 (매장·이름 검색)</option></select>
-        <button class="btn-cancel-sm" onclick="addExtraStaff()" style="font-size:12px">추가</button>
+      ${canEdit ? `<div style="background:var(--cr);border-radius:8px;padding:10px 12px;margin-bottom:10px">
+        <div style="font-size:11px;color:var(--th);margin-bottom:7px;font-weight:600">지원/교육 인력 추가</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center">
+          <select class="form-input" id="extraStoreSelect" onchange="loadExtraStaffByStore(this.value)"
+            style="padding:7px 8px;font-size:12px">
+            <option value="">매장 선택</option>
+          </select>
+          <select class="form-input" id="extraStaffSelect" style="padding:7px 8px;font-size:12px">
+            <option value="">직원 선택</option>
+          </select>
+          <button class="btn-submit" onclick="addExtraStaff()" style="padding:7px 14px;font-size:12px;white-space:nowrap">
+            <i class="ti ti-plus"></i> 추가
+          </button>
+        </div>
       </div>` : ''}
 
-      <div style="overflow-x:auto;border:0.5px solid var(--crd);border-radius:8px">
+      <div style="font-size:11px;color:var(--th);margin-bottom:6px">
+        <i class="ti ti-clipboard" style="margin-right:4px"></i>
+        셀 클릭 후 드롭다운 선택 또는 스프레드시트에서 <strong>복사 후 표 위에 붙여넣기(Ctrl+V)</strong> 가능
+        <span style="color:var(--rd)"> — 유효하지 않은 코드는 자동 차단됩니다</span>
+      </div>
+      <div style="overflow-x:auto;border:0.5px solid var(--crd);border-radius:8px"
+        onpaste="handleSchedulePaste(event)">
         <table style="border-collapse:collapse;font-size:11px" id="schTable">
           <thead><tr>
             <th style="position:sticky;left:0;background:var(--crm);z-index:3;padding:6px 8px;border:0.5px solid var(--crd);min-width:90px">이름</th>
@@ -6918,46 +6935,79 @@ async function renderScheduleEdit(area) {
       </div>
     </div>`;
 
-  if (canEdit) loadExtraStaffOptions();
+  if (canEdit) loadExtraStoreOptions();
 }
 
 // 셀 변경 시 메모리에 즉시 반영 (저장은 별도 버튼)
 function onCellChange(sel) {
-  const userId = sel.dataset.staff || null;
+  const userId    = sel.dataset.staff || null;
   const extraName = sel.dataset.extra || null;
-  const date = sel.dataset.date;
-  const val = sel.value;
-  const key = (userId||extraName) + '_' + date;
+  const date      = sel.dataset.date;
+  const val       = sel.value;
+  const key       = (userId||extraName) + '_' + date;
 
   if (!val) {
     delete curScheduleEntries[key];
+    sel.parentElement.style.background = '#fff';
+    sel.style.background = '';
+    sel.style.color = '';
+    sel.style.fontSize = '';
+    sel.title = '';
   } else {
-    // shift 코드인지 휴무코드인지 판단은 저장 시 store_shift_codes/leave_types와 매칭
-    curScheduleEntries[key] = { user_id: userId, extra_name: extraName, date, _rawCode: val };
+    curScheduleEntries[key] = {
+      user_id: userId, extra_name: extraName, date, _rawCode: val,
+      _supportStore: sel.dataset.supportStore||null,
+      _supportTime:  sel.dataset.supportTime||null
+    };
+    // 지원 선택 시 모달 자동 오픈 (드롭다운에서 직접 선택한 경우)
+    if (val === '지원' && !sel.dataset.supportStore) {
+      openSupportModal(sel);
+    }
+    // 셀 배경색 즉시 반영
+    sb.from('leave_types').select('code,color').then(({data})=>{
+      const map = {}; (data||[]).forEach(l=>map[l.code]=l.color);
+      if (!sel.dataset.supportStore) {
+        sel.parentElement.style.background = map[val] ? map[val]+'33' : '#fff';
+      }
+    });
   }
-  // 셀 배경색 즉시 반영
-  sb.from('leave_types').select('code,color').then(({data})=>{
-    const map = {}; (data||[]).forEach(l=>map[l.code]=l.color);
-    sel.parentElement.style.background = map[val] ? map[val]+'33' : '#fff';
-  });
 }
 
-// 지원인력 추가 옵션 로드
-async function loadExtraStaffOptions() {
-  const { data: users } = await sb.from('users').select('id,name,store').eq('active',true).order('store').order('name');
-  const sel = document.getElementById('addStaffSelect');
+// 지원인력 추가 — 매장 선택 후 인원 필터링
+let __allActiveUsers = [];  // 전체 재직자 캐시
+
+async function loadExtraStoreOptions() {
+  const sel = document.getElementById('extraStoreSelect');
   if (!sel) return;
-  sel.innerHTML = '<option value="">+ 지원/교육 인력 추가</option>' +
-    (users||[]).map(u=>`<option value="${u.id}|${u.name}|${u.store}">${u.store} · ${u.name}</option>`).join('');
+  if (!__allActiveUsers.length) {
+    const { data } = await sb.from('users').select('id,name,store,role,active')
+      .eq('active',true).order('store').order('name');
+    __allActiveUsers = data || [];
+  }
+  const stores = [...new Set(__allActiveUsers.map(u=>u.store).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">매장 선택</option>' +
+    stores.map(s=>`<option value="${s}">${s}</option>`).join('');
+}
+
+function loadExtraStaffByStore(store) {
+  const sel = document.getElementById('extraStaffSelect');
+  if (!sel) return;
+  if (!store) { sel.innerHTML = '<option value="">직원 선택</option>'; return; }
+  const filtered = __allActiveUsers.filter(u => u.store === store);
+  sel.innerHTML = '<option value="">직원 선택</option>' +
+    filtered.map(u=>`<option value="${u.id}|${u.name}|${u.store}">${u.name}</option>`).join('');
 }
 
 function addExtraStaff() {
-  const sel = document.getElementById('addStaffSelect');
+  const sel = document.getElementById('extraStaffSelect');
   const val = sel?.value;
-  if (!val) return;
+  if (!val) { alert('매장과 직원을 선택해주세요.'); return; }
   const [id, name, store] = val.split('|');
   if (curScheduleStaff.some(s=>s.id===id)) { alert('이미 추가된 직원입니다.'); return; }
-  curScheduleStaff.push({id, name: name+'('+store+')', isExtra:true, _supportStore:store});
+  curScheduleStaff.push({id, name: `${name}(${store})`, isExtra:true, _supportStore:store});
+  // 선택 초기화
+  document.getElementById('extraStoreSelect').value = '';
+  document.getElementById('extraStaffSelect').innerHTML = '<option value="">직원 선택</option>';
   renderScheduleEditTableOnly();
 }
 
@@ -7144,6 +7194,112 @@ async function requestScheduleConfirm() {
   await saveScheduleHistory(curSchedule.id, '컨펌 요청');
   alert('컨펌 요청이 전송되었습니다.');
   openScheduleById(curSchedule.id);
+}
+
+
+// ── 붙여넣기 핸들러 ──────────────────────────────────────
+async function handleSchedulePaste(e) {
+  e.preventDefault();
+  const text = e.clipboardData?.getData('text') || '';
+  if (!text.trim()) return;
+  const { data: shiftCodes } = await sb.from('store_shift_codes').select('code').eq('store', window.__schStore);
+  const { data: leaveTypes } = await sb.from('leave_types').select('code');
+  const sc = shiftCodes||[], lt = leaveTypes||[];
+  const TAB=String.fromCharCode(9),NL=String.fromCharCode(10);
+  if (text.includes(TAB) || text.includes(NL)) {
+    await pasteScheduleGrid(text, sc, lt); return;
+  }
+  const val = text.trim();
+  const focused = document.querySelector('#schTbody select:focus');
+  if (!focused) { alert('붙여넣을 셀을 먼저 클릭해주세요.'); return; }
+  applyValueToSelect(focused, val, sc, lt, true);
+}
+
+function applyValueToSelect(sel, val, shiftCodes, leaveTypes, showAlert) {
+  if (!val) { sel.value=''; sel.dispatchEvent(new Event('change')); return true; }
+  const upper = val.toUpperCase();
+  const ms = shiftCodes.find(s=>s.code.toUpperCase()===upper);
+  const ml = leaveTypes.find(l=>l.code===val);
+  if (ms) { sel.value=ms.code; sel.dispatchEvent(new Event('change')); if(ms.code==='지원') openSupportModal(sel); return true; }
+  if (ml) { sel.value=ml.code; sel.dispatchEvent(new Event('change')); return true; }
+  if (showAlert) alert('붙여넣기 불가\n\n입력값: "'+val+'"\n\n사유: 근무조('+shiftCodes.map(s=>s.code).join(',')+') 또는 휴무종류('+leaveTypes.map(l=>l.code).join(',')+')\에 해당하지 않습니다.');
+  return false;
+}
+
+async function pasteScheduleGrid(text, sc, lt) {
+  const rows = text.trim().split('\n').map(r=>r.replace(/\r$/,'').split(String.fromCharCode(9)));
+  const tbody = document.getElementById('schTbody');
+  if (!tbody) return;
+  const trList = Array.from(tbody.rows);
+  let applied=0; const invalid=[];
+  rows.forEach((rv,ri)=>{ if(ri>=trList.length)return; const sels=Array.from(trList[ri].querySelectorAll('select')); rv.forEach((v,ci)=>{ v=(v||'').trim(); if(ci>=sels.length)return; if(applyValueToSelect(sels[ci],v,sc,lt,false))applied++; else if(v)invalid.push('"'+v+'"'); }); });
+  if (invalid.length) alert('✅ '+applied+'개 셀 적용 / ⚠️ '+invalid.length+'개 건너뜀\n\n유효하지 않은 값: '+[...new Set(invalid)].join(', ')+'\n\n근무조('+sc.map(s=>s.code).join(',')+') 또는 휴무종류('+lt.map(l=>l.code).join(',')+')\만 붙여넣기 가능합니다.');
+}
+
+// ── 지원 근무조 상세 모달 ─────────────────────────────────
+function openSupportModal(selectEl) {
+  document.getElementById('supportModal')?.remove();
+  const rect=selectEl.getBoundingClientRect();
+  const top=Math.min(rect.bottom+4,window.innerHeight-290);
+  const left=Math.max(4,Math.min(rect.left,window.innerWidth-295));
+  const m=document.createElement('div'); m.id='supportModal';
+  m.style.cssText=`position:fixed;top:${top}px;left:${left}px;background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:16px;width:286px;z-index:400;box-shadow:0 4px 20px rgba(0,0,0,.15)`;
+  m.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <span style="font-size:13px;font-weight:600;color:var(--tm)"><i class="ti ti-transfer-in" style="color:var(--brm)"></i> 지원 근무 상세</span>
+      <button onclick="document.getElementById('supportModal')?.remove()" style="background:none;border:none;cursor:pointer;color:var(--th);font-size:17px">✕</button>
+    </div>
+    <div style="margin-bottom:8px">
+      <div style="font-size:11px;color:var(--th);margin-bottom:4px;font-weight:600">파견 매장 <span style="color:var(--rd)">*</span></div>
+      <input class="form-input" id="sup-store-input" placeholder="매장명 입력 또는 목록 선택"
+        style="padding:7px 9px;font-size:12px"
+        oninput="filterSupportStores(this.value)" onfocus="filterSupportStores(this.value)" />
+      <div id="sup-store-dropdown" style="display:none;max-height:130px;overflow-y:auto;border:0.5px solid var(--crd);border-radius:6px;margin-top:2px;background:#fff;position:relative;z-index:402"></div>
+    </div>
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--th);margin-bottom:4px;font-weight:600">파견 시간 <span style="font-weight:400">(선택)</span></div>
+      <input class="form-input" id="sup-time-input" placeholder="예: 09:00~18:00" style="padding:7px 9px;font-size:12px" />
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:6px">
+      <button class="btn-cancel-sm" onclick="document.getElementById('supportModal')?.remove()" style="font-size:12px;padding:6px 10px">취소</button>
+      <button class="btn-submit" onclick="applySupportDetail()" style="padding:6px 14px;font-size:12px"><i class="ti ti-check"></i> 적용</button>
+    </div>`;
+  document.body.appendChild(m);
+  window.__supportSelectEl=selectEl;
+  loadSupportStores();
+}
+
+let __supportStoreList=[];
+async function loadSupportStores() {
+  if (!__supportStoreList.length) {
+    const {data}=await sb.from('users').select('store').eq('active',true);
+    __supportStoreList=[...new Set((data||[]).map(u=>u.store).filter(Boolean))].sort();
+  }
+  filterSupportStores('');
+}
+function filterSupportStores(q) {
+  const dd=document.getElementById('sup-store-dropdown'); if(!dd)return;
+  const list=q?__supportStoreList.filter(s=>s.toLowerCase().includes(q.toLowerCase())):__supportStoreList;
+  if(!list.length){dd.style.display='none';return;}
+  dd.style.display='';
+  dd.innerHTML=list.map(s=>`<div onclick="selectSupportStore('${s}')" style="padding:7px 10px;font-size:12px;cursor:pointer;border-bottom:0.5px solid var(--crd)" onmouseover="this.style.background='var(--cr)'" onmouseout="this.style.background=''">${s}</div>`).join('');
+}
+function selectSupportStore(s) {
+  const inp=document.getElementById('sup-store-input'); if(inp)inp.value=s;
+  const dd=document.getElementById('sup-store-dropdown'); if(dd)dd.style.display='none';
+}
+function applySupportDetail() {
+  const store=document.getElementById('sup-store-input')?.value.trim();
+  const time=document.getElementById('sup-time-input')?.value.trim();
+  const sel=window.__supportSelectEl;
+  if(!sel){document.getElementById('supportModal')?.remove();return;}
+  if(!store){alert('파견 매장을 입력해주세요.');return;}
+  sel.dataset.supportStore=store; sel.dataset.supportTime=time||'';
+  const detail=[store,time].filter(Boolean).join(' ');
+  sel.title='지원: '+detail;
+  sel.style.background='#FFFBEB'; sel.style.color='#7A5C00'; sel.style.fontSize='10px';
+  document.getElementById('supportModal')?.remove();
+  sel.dispatchEvent(new Event('change'));
 }
 
 // ── 컨펌 대기 목록 (운영팀) ───────────────────────────────
@@ -8013,14 +8169,14 @@ async function loadMyLeaveInfo() {
   const { data: entries } = await sb.from('schedule_entries')
     .select('date, entry_type, schedule:schedules(store, year, month, status)')
     .eq('user_id', currentUser.id)
-    .in('entry_type', ['연차','반차'])
+    .in('entry_type', ['연차','반차','오전반차','오후반차'])
     .order('date', {ascending: false});
 
   // 사용 집계 계산 (연차=1, 반차=0.5)
   let scheduleUsed = 0;
   const usageHistory = [];
   (entries || []).forEach(e => {
-    const val = e.entry_type === '연차' ? 1 : 0.5;
+    const val = e.entry_type === '연차' ? 1 : 0.5; // 반차/오전반차/오후반차 모두 0.5
     scheduleUsed += val;
     usageHistory.push({
       date: e.date,
