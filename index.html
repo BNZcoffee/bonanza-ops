@@ -2413,6 +2413,7 @@ async function renderStaff(area) {
       <td style="font-size:12px;color:var(--th)">${u.email||'-'}</td>
       <td>${u.hire_date||'-'}</td>
       <td>${u.retire_date||'-'}</td>
+      <td id="alb-cell-${u.id}" style="font-size:12px;text-align:center;color:var(--gn)">-</td>
       <td style="white-space:nowrap">
         ${canEditStaff() ? `
         <button class="btn-cancel-sm" style="padding:3px 9px;font-size:11px" onclick="openEditUser('${u.id}')" title="수정"><i class="ti ti-edit"></i></button>
@@ -2504,7 +2505,9 @@ async function renderStaff(area) {
           <th onclick="sortStaff('code')" style="cursor:pointer">코드 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
           <th>연락처</th><th>이메일</th>
           <th onclick="sortStaff('hire_date')" style="cursor:pointer">입사일 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
-          <th>퇴사일</th><th>관리</th>
+          <th>퇴사일</th>
+          <th style="color:var(--gn)">연차잔여</th>
+          <th>관리</th>
         </tr></thead>
         <tbody id="staffTbody">${renderTab(active)}</tbody>
       </table>
@@ -2514,6 +2517,9 @@ async function renderStaff(area) {
   window.__staffData = {active, inactive, renderTab};
   window.__staffTab = 'active';
   window.__staffSort = {col:null, dir:1};
+
+  // 연차 잔여 비동기 로드 (오늘 기준 실제 차감)
+  loadStaffLeaveBalance(active);
 
   // 탭 전환
   window.switchStaffTab = function(tab){
@@ -2582,7 +2588,14 @@ function applyStaffFilter(){
   }
 
   const tbody = document.getElementById('staffTbody');
-  if(tbody) tbody.innerHTML = list.length ? window.__staffData.renderTab(list)
+  if(tbody) {
+    const rendered = list.length ? window.__staffData.renderTab(list) : '<tr><td colspan="11" style="text-align:center;padding:20px;color:var(--th)">해당 직원이 없습니다.</td></tr>';
+    tbody.innerHTML = rendered;
+    // 연차 잔여 갱신
+    const visibleUsers = list.filter(u=>u.active!==false);
+    if (visibleUsers.length) loadStaffLeaveBalance(visibleUsers);
+  }
+  if(false && tbody) tbody.innerHTML = list.length ? window.__staffData.renderTab(list)
     : '<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--th)">검색 결과가 없습니다.</td></tr>';
 
   // 필터 적용 안내
@@ -2734,7 +2747,7 @@ async function openEditUser(userId){
           <div style="font-size:12px;font-weight:600;color:var(--ts)">연차 초기값</div>
           <div style="font-size:11px;color:var(--th);margin-top:2px">시스템 도입 전 발생·사용 연차 수기 입력</div>
         </div>
-        <button class="btn-cancel-sm" onclick="document.getElementById('editUserModal').remove();openStaffLeaveEdit('${userId}','${u?.name||''}')" style="font-size:12px">
+        <button class="btn-cancel-sm" onclick="closeEditUserAndOpenLeave('${userId}','${u?.name||''}')" style="font-size:12px">
           <i class="ti ti-calendar-check"></i> 연차 설정
         </button>
       </div>
@@ -6691,8 +6704,15 @@ async function renderSchedules(area) {
 
   area.innerHTML = `
     <div class="page-header">
-      <div class="page-title">매장 스케줄</div>
-      <div class="page-sub">월별 근무표 작성 및 관리</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div>
+          <div class="page-title">매장 스케줄</div>
+          <div class="page-sub">월별 근무표 작성 및 관리</div>
+        </div>
+        <button class="btn-cancel-sm" onclick="openScheduleManual()" style="font-size:12px">
+          <i class="ti ti-book-2"></i> 작성 기준
+        </button>
+      </div>
     </div>
     <div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:14px;margin-bottom:16px">
       <div style="font-size:12px;color:var(--th);margin-bottom:10px;font-weight:600">새 스케줄 작성 / 조회</div>
@@ -6878,7 +6898,8 @@ async function renderScheduleEdit(area) {
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${canEdit ? `<button class="btn-cancel-sm" onclick="saveScheduleDraft()" style="font-size:12px"><i class="ti ti-device-floppy"></i> 임시저장</button>` : ''}
         <button class="btn-cancel-sm" onclick="openShiftSettings()" style="font-size:12px"><i class="ti ti-clock"></i> 근무조 설정</button>
-        ${canEdit && curSchedule?.status!=='confirmed' ? `<button class="btn-submit" onclick="requestScheduleConfirm()" style="padding:8px 14px;font-size:13px"><i class="ti ti-send"></i> 컨펌 요청</button>` : ''}
+        ${canEdit && curSchedule?.status==='draft' ? `<button class="btn-submit" onclick="requestScheduleConfirm()" style="padding:8px 14px;font-size:13px"><i class="ti ti-send"></i> 컨펌 요청</button>` : ''}
+        ${curSchedule?.status==='requested' && (canEdit||isScheduleAdmin()) ? `<button class="btn-cancel-sm" onclick="cancelScheduleConfirm()" style="font-size:12px;color:var(--rd);border-color:var(--rd)"><i class="ti ti-arrow-back-up"></i> 요청 취소</button>` : ''}
         ${curSchedule ? `<button class="btn-cancel-sm" onclick="openSchedulePreview()" style="font-size:12px;color:var(--bl)"><i class="ti ti-photo"></i> 이미지 저장</button>` : ''}
         ${curSchedule ? `<button class="btn-cancel-sm" onclick="openScheduleHistoryModal(${curSchedule?.id})" style="font-size:12px"><i class="ti ti-history"></i> 히스토리</button>` : ''}
         <button class="btn-cancel-sm" onclick="initBalancePanel()" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-calculator"></i> 집계 새로고침</button>
@@ -7300,6 +7321,82 @@ async function buildStaffRowWithCross(staff, si, daysInMonth, year, month, allCo
   return rowHtml;
 }
 
+
+// ── 스케줄 작성 기준 모달 ────────────────────────────────────
+const SCHEDULE_MANUAL_KEY = 'schedule_writing_guide';
+
+async function openScheduleManual() {
+  // 권한 확인
+  const canManualEdit = currentUser.is_master || currentUser.is_vice_master ||
+                        currentUser.role === 'hr' || currentUser.role === 'admin';
+
+  // DB에서 작성 기준 로드
+  const { data: sec } = await sb.from('manual_sections')
+    .select('*').eq('key', SCHEDULE_MANUAL_KEY).maybeSingle();
+
+  const body = sec?.body || '';
+
+  const old = document.getElementById('scheduleManualModal');
+  if (old) old.remove();
+  const m = document.createElement('div');
+  m.id = 'scheduleManualModal';
+  m.className = 'modal-bg open';
+  m.innerHTML = `
+    <div class="modal-inner" style="width:min(96vw,680px);max-height:90vh;overflow-y:auto">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <span style="font-size:15px;font-weight:600;color:var(--tm)">
+          <i class="ti ti-book-2" style="color:var(--brm)"></i> 스케줄 작성 기준
+        </span>
+        <div style="display:flex;gap:6px;align-items:center">
+          ${canManualEdit ? `<button class="btn-cancel-sm" onclick="editScheduleManual()" style="font-size:12px"><i class="ti ti-edit"></i> 편집</button>` : ''}
+          <button onclick="document.getElementById('scheduleManualModal')?.remove()" style="background:none;border:none;cursor:pointer;color:var(--th);font-size:18px"><i class="ti ti-x"></i></button>
+        </div>
+      </div>
+      <div id="scheduleManualBody" style="font-size:13px;line-height:1.8;color:var(--tm);white-space:pre-wrap">
+        ${body || '<span style="color:var(--th)">아직 작성된 내용이 없습니다.' + (canManualEdit ? ' [편집] 버튼으로 작성해주세요.' : '') + '</span>'}
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+}
+
+async function editScheduleManual() {
+  const { data: sec } = await sb.from('manual_sections')
+    .select('*').eq('key', SCHEDULE_MANUAL_KEY).maybeSingle();
+  const body = sec?.body || '';
+
+  const m = document.getElementById('scheduleManualModal');
+  if (!m) return;
+  m.querySelector('#scheduleManualBody').outerHTML = `
+    <div>
+      <textarea id="scheduleManualInput" class="form-input"
+        style="width:100%;min-height:360px;font-size:13px;line-height:1.8;resize:vertical"
+        placeholder="스케줄 작성 기준, 근무조 설명, 지원근무 연동 방법 등을 자유롭게 작성하세요.">${body}</textarea>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button class="btn-cancel-sm" onclick="openScheduleManual()">취소</button>
+        <button class="btn-submit" onclick="saveScheduleManual()"><i class="ti ti-device-floppy"></i> 저장</button>
+      </div>
+    </div>`;
+}
+
+async function saveScheduleManual() {
+  const body = document.getElementById('scheduleManualInput')?.value || '';
+  const { data: sec } = await sb.from('manual_sections')
+    .select('id').eq('key', SCHEDULE_MANUAL_KEY).maybeSingle();
+  if (sec) {
+    await sb.from('manual_sections').update({body, updated_at: new Date().toISOString()}).eq('id', sec.id);
+  } else {
+    await sb.from('manual_sections').insert({
+      key: SCHEDULE_MANUAL_KEY,
+      title: '스케줄 작성 기준',
+      body,
+      audience: 'dept',
+      sort_order: 99
+    });
+  }
+  alert('저장되었습니다.');
+  openScheduleManual();
+}
+
 // ── 저장 (임시저장) ───────────────────────────────────────
 async function saveScheduleDraft() {
   const store = window.__schStore, year = window.__schYear, month = window.__schMonth;
@@ -7457,6 +7554,20 @@ async function checkLeaveWarnings(scheduleId, store, year, month) {
   // 당월계 검증 (근무일수+휴무일수 vs 당월 총일수)
   const daysInMonth = new Date(year, month, 0).getDate();
   // 간단 검증은 추후 상세화면에서 표로 표시
+}
+
+
+// ── 컨펌 요청 취소 ──────────────────────────────────────────
+async function cancelScheduleConfirm() {
+  if (!curSchedule || curSchedule.status !== 'requested') return;
+  if (!confirm('컨펌 요청을 취소하고 작성중 상태로 되돌릴까요?')) return;
+  const now = new Date().toISOString();
+  await sb.from('schedules').update({
+    status: 'draft', requested_at: null, requested_by: null, updated_at: now
+  }).eq('id', curSchedule.id);
+  await saveScheduleHistory(curSchedule.id, '컨펌 요청 취소');
+  alert('컨펌 요청이 취소되었습니다. 계속 수정할 수 있습니다.');
+  openScheduleById(curSchedule.id);
 }
 
 // ── 컨펌 요청 ─────────────────────────────────────────────
@@ -9067,18 +9178,20 @@ async function loadMyLeaveInfo() {
   const { data: bal } = await sb.from('annual_leave_balance')
     .select('*').eq('user_id', currentUser.id).maybeSingle();
 
-  // 스케줄에서 연차/반차 사용 내역 조회 (전체 기간)
+  // 스케줄에서 연차/반차 사용 내역 조회 (오늘 이전 도래한 날짜만 차감)
+  const today = new Date().toISOString().slice(0,10);
   const { data: entries } = await sb.from('schedule_entries')
     .select('date, entry_type, schedule:schedules(store, year, month, status)')
     .eq('user_id', currentUser.id)
     .in('entry_type', ['연차','반차','오전반차','오후반차'])
+    .lte('date', today)   // ← 오늘까지 도래한 날짜만
     .order('date', {ascending: false});
 
   // 사용 집계 계산 (연차=1, 반차=0.5)
   let scheduleUsed = 0;
   const usageHistory = [];
   (entries || []).forEach(e => {
-    const val = e.entry_type === '연차' ? 1 : 0.5; // 반차/오전반차/오후반차 모두 0.5
+    const val = e.entry_type === '연차' ? 1 : 0.5;
     scheduleUsed += val;
     usageHistory.push({
       date: e.date,
@@ -9103,26 +9216,15 @@ async function loadMyLeaveInfo() {
   const remaining   = initTotal - totalUsed;
   const isAdmin     = currentUser.role === 'admin' || currentUser.is_master || currentUser.is_vice_master;
 
-  // 초기값 입력 UI (관리자 또는 본인 — 운영팀만 타인 수정 가능)
-  const initEditHtml = `
-    <div style="background:var(--cr);border-radius:10px;padding:14px;margin-bottom:14px">
-      <div style="font-size:12px;font-weight:700;color:var(--th);margin-bottom:10px;letter-spacing:.5px">초기값 설정 (시스템 도입 전 발생·사용분)</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
-        <div>
-          <div style="font-size:11px;color:var(--th);margin-bottom:3px">총 발생 연차</div>
-          <input type="number" class="form-input" id="alb-total" value="${initTotal}" min="0" step="0.5" style="padding:6px 8px;font-size:13px" />
-        </div>
-        <div>
-          <div style="font-size:11px;color:var(--th);margin-bottom:3px">기존 사용 연차</div>
-          <input type="number" class="form-input" id="alb-used" value="${initUsed}" min="0" step="0.5" style="padding:6px 8px;font-size:13px" />
-        </div>
-        <div>
-          <div style="font-size:11px;color:var(--th);margin-bottom:3px">기준일</div>
-          <input type="date" class="form-input" id="alb-date" value="${initDate||''}" style="padding:6px 8px;font-size:13px" />
-        </div>
-      </div>
-      <button class="btn-submit" onclick="saveMyLeaveInit()" style="padding:6px 14px;font-size:12px"><i class="ti ti-device-floppy"></i> 초기값 저장</button>
-    </div>`;
+  // 초기값 읽기 전용 표시 (수정은 인원현황 > 연차 설정에서 운영팀이 진행)
+  const initEditHtml = initTotal > 0 ? `
+    <div style="background:var(--cr);border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div style="font-size:11px;color:var(--th);font-weight:700">초기값 (시스템 도입 전)</div>
+      <span style="font-size:12px;color:var(--ts)">총 발생 <strong>${initTotal}</strong>일</span>
+      <span style="font-size:12px;color:var(--ts)">기존 사용 <strong>${initUsed}</strong>일</span>
+      ${initDate?`<span style="font-size:11px;color:var(--th)">기준일: ${initDate}</span>`:''}
+      <span style="font-size:11px;color:var(--th)">(수정은 운영팀에 문의)</span>
+    </div>` : '';
 
   // 잔여 연차 표시
   const remColor = remaining < 0 ? 'var(--rd)' : remaining <= 2 ? '#E8A000' : 'var(--gn)';
@@ -9170,6 +9272,54 @@ async function saveMyLeaveInit() {
   }, {onConflict: 'user_id'});
   alert('초기값이 저장되었습니다.');
   loadMyLeaveInfo();
+}
+
+
+// ── 인원현황 연차잔여 비동기 로드 ─────────────────────────────
+// 차감 기준: 스케줄 계획일이 아닌 오늘 날짜까지 도래한 날짜만 차감
+async function loadStaffLeaveBalance(userList) {
+  if (!userList || !userList.length) return;
+  const today = new Date().toISOString().slice(0,10);
+  const ids   = userList.map(u=>u.id);
+
+  // 연차 초기값
+  const { data: albData } = await sb.from('annual_leave_balance')
+    .select('user_id, init_total, init_used, schedule_used').in('user_id', ids);
+  const albMap = Object.fromEntries((albData||[]).map(b=>[b.user_id,b]));
+
+  // 오늘까지 도래한 날짜의 연차/반차 entries만 집계
+  const { data: entries } = await sb.from('schedule_entries')
+    .select('user_id, entry_type, date')
+    .in('user_id', ids)
+    .in('entry_type', ['연차','반차','오전반차','오후반차'])
+    .lte('date', today);  // ← 오늘 이전 날짜만
+
+  // 직원별 실제 사용 집계
+  const usedMap = {};
+  (entries||[]).forEach(e => {
+    const val = (e.entry_type==='연차') ? 1 : 0.5;
+    usedMap[e.user_id] = (usedMap[e.user_id]||0) + val;
+  });
+
+  // 셀에 반영
+  ids.forEach(uid => {
+    const cell = document.getElementById('alb-cell-'+uid);
+    if (!cell) return;
+    const alb = albMap[uid];
+    if (!alb) { cell.textContent = '-'; cell.style.color='var(--th)'; return; }
+    const remain = (alb.init_total||0) - (alb.init_used||0) - (usedMap[uid]||0);
+    cell.textContent = remain + '일';
+    cell.style.color = remain < 0 ? 'var(--rd)' : remain <= 2 ? '#E8A000' : 'var(--gn)';
+    cell.style.fontWeight = remain < 0 ? '700' : '400';
+    cell.title = `총발생 ${alb.init_total||0} - 초기사용 ${alb.init_used||0} - 스케줄사용(오늘까지) ${usedMap[uid]||0} = ${remain}`;
+  });
+}
+
+// 직원 편집 모달 닫고 연차 설정 모달 열기
+function closeEditUserAndOpenLeave(userId, userName) {
+  const modal = document.getElementById('editUserModal');
+  if (modal) modal.remove();
+  openStaffLeaveEdit(userId, userName);
 }
 
 // 운영팀이 특정 직원 연차 초기값 설정 (인원현황 직원 카드에서 호출)
