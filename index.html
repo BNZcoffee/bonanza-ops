@@ -9261,18 +9261,7 @@ async function loadMyLeaveInfo() {
   cont.innerHTML = initEditHtml + summaryHtml + historyHtml;
 }
 
-async function saveMyLeaveInit() {
-  const total = parseFloat(document.getElementById('alb-total')?.value) || 0;
-  const used  = parseFloat(document.getElementById('alb-used')?.value)  || 0;
-  const date  = document.getElementById('alb-date')?.value || null;
-  await sb.from('annual_leave_balance').upsert({
-    user_id: currentUser.id,
-    init_total: total, init_used: used, init_date: date,
-    updated_at: new Date().toISOString()
-  }, {onConflict: 'user_id'});
-  alert('초기값이 저장되었습니다.');
-  loadMyLeaveInfo();
-}
+// saveMyLeaveInit 제거됨 — 연차 초기값은 운영팀이 인원현황에서 설정
 
 
 // ── 인원현황 연차잔여 비동기 로드 ─────────────────────────────
