@@ -324,8 +324,8 @@ textarea.form-input{min-height:120px;resize:vertical}
     <input type="password" id="loginPw" placeholder="비밀번호" autocomplete="current-password" />
     <!-- 동명이인 분기: 코드 추가 입력 -->
     <div id="dupCodeRow" style="display:none">
-      <div style="font-size:12px;color:var(--rd);margin-bottom:6px;text-align:left">동일 이름·입사일 계정이 여러 개입니다. 운영팀에서 안내받은 직원 코드를 입력해 주세요.</div>
-      <input type="text" id="loginCodeFallback" placeholder="직원 코드 (예: BCK-012)" style="text-transform:uppercase" />
+      <div style="font-size:12px;color:var(--rd);margin-bottom:6px;text-align:left">동일 이름의 계정이 여러 개입니다. 운영팀에 문의하여 본인 식별 코드를 확인해 주세요.</div>
+      <input type="text" id="loginCodeFallback" placeholder="직원 식별 코드 (운영팀 문의)" style="text-transform:uppercase" />
     </div>
     <label class="autologin-row">
       <input type="checkbox" id="autoLogin" style="width:auto;margin:0"> 이름·입사일 기억하기
@@ -2727,6 +2727,17 @@ async function openEditUser(userId){
       <label class="form-label">비밀번호 초기화 (변경 시만 입력)</label>
       <input class="form-input" id="eu_pw" placeholder="새 비밀번호"/>
       <p style="font-size:11px;color:var(--th);margin-top:4px">현재 비밀번호: <strong>${u?.password_hash||''}</strong></p>
+    </div>
+    <div style="margin-top:12px;padding-top:12px;border-top:0.5px solid var(--crd)">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--ts)">연차 초기값</div>
+          <div style="font-size:11px;color:var(--th);margin-top:2px">시스템 도입 전 발생·사용 연차 수기 입력</div>
+        </div>
+        <button class="btn-cancel-sm" onclick="document.getElementById('editUserModal').remove();openStaffLeaveEdit('${userId}','${u?.name||''}')" style="font-size:12px">
+          <i class="ti ti-calendar-check"></i> 연차 설정
+        </button>
+      </div>
     </div>`:`<p style="font-size:11px;color:var(--th);margin-top:8px">직원 코드 자동 부여 · 초기 비밀번호: <strong>bonanza1234</strong></p>`}`;
   
   document.getElementById('catModalAddBtn').style.display = 'none';
@@ -3965,7 +3976,21 @@ async function renderProfile(area){
       <div style="display:flex;justify-content:flex-end;margin-top:16px">
         <button class="btn-submit" onclick="saveProfile()">저장</button>
       </div>
+    </div>
+
+    <!-- 연차 조회 섹션 -->
+    <div style="background:#fff;border:0.5px solid var(--crd);border-radius:14px;padding:24px;max-width:480px;margin-top:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div>
+          <div style="font-size:15px;font-weight:600;color:var(--tm)"><i class="ti ti-calendar-check" style="color:var(--brm);margin-right:6px"></i>내 연차 현황</div>
+          <div style="font-size:12px;color:var(--th);margin-top:2px">근로기준법 기준 · 스케줄 연동 자동 집계</div>
+        </div>
+        <button class="btn-cancel-sm" onclick="loadMyLeaveInfo()" style="font-size:12px"><i class="ti ti-refresh"></i> 새로고침</button>
+      </div>
+      <div id="myLeaveInfo"><div style="text-align:center;padding:20px;color:var(--th);font-size:13px"><i class="ti ti-loader spin"></i> 불러오는 중...</div></div>
     </div>`;
+  // 연차 정보 자동 로드
+  setTimeout(() => loadMyLeaveInfo(), 100);
 }
 async function uploadAvatar(input){
   const file = input.files[0]; if(!file) return;
@@ -7596,52 +7621,78 @@ async function renderHandoverDetail(area) {
   if (!store) { goPage('handover'); return; }
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
 
-  // maybeSingle: 데이터 없어도 에러 없이 null 반환
-  const { data: hv, error: hvErr } = await sb.from('store_handover')
-    .select('*,updater:users!store_handover_updated_by_fkey(name)')
-    .eq('store', store).maybeSingle();
-  if (hvErr) console.warn('인수인계 조회 오류:', hvErr.message);
+  const [hvRes, cfgRes] = await Promise.all([
+    sb.from('store_handover').select('*,updater:users!store_handover_updated_by_fkey(name)').eq('store',store).maybeSingle(),
+    sb.from('handover_field_config').select('*').eq('active',true).order('sort_order')
+  ]);
+  const hv  = hvRes.data || null;
+  const cfg = cfgRes.data || [];
+  const d   = hv || {};
+  const attachments = Array.isArray(d.attachments) ? d.attachments : [];
 
-  const isAdmin = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
-  // 부총괄 + 매니저 이상 모두 수정 가능
-  const canEdit = isAdmin || isManagerRole(currentUser.role);
+  const isAdmin  = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
+  const canEdit  = isAdmin || isManagerRole(currentUser.role);
+  const canConfig= currentUser.is_master || currentUser.is_vice_master || currentUser.role==='admin';
 
-  const d = hv || {};
-  const contacts     = Array.isArray(d.contacts)      ? d.contacts      : [];
-  const equipment    = Array.isArray(d.equipment)     ? d.equipment     : [];
-  const repairs      = Array.isArray(d.repair_history)? d.repair_history: [];
-  const attachments  = Array.isArray(d.attachments)   ? d.attachments   : [];
+  const editBtn   = canEdit   ? `<button class="btn-submit" onclick="openHandoverEdit('${store}')" style="padding:8px 16px"><i class="ti ti-edit"></i> 수정</button>` : '';
+  const configBtn = canConfig ? `<button class="btn-cancel-sm" onclick="openHandoverFieldConfig()" style="font-size:12px"><i class="ti ti-settings"></i> 항목 편집</button>` : '';
 
-  const editBtn = canEdit
-    ? `<button class="btn-submit" onclick="openHandoverEdit('${store}')" style="padding:8px 16px"><i class="ti ti-edit"></i> 수정</button>`
-    : '';
-
-  const section = (title, icon, content) =>
-    `<div style="margin-bottom:22px">
-      <div class="section-label" style="margin-bottom:8px;display:flex;align-items:center;gap:6px">
-        <i class="ti ${icon}" style="color:var(--brm)"></i>${title}
-      </div>
-      <div style="background:var(--cr);border-radius:8px;padding:13px 15px;font-size:14px;line-height:1.8;color:var(--tm);white-space:pre-wrap">${content||'<span style="color:var(--th)">미등록</span>'}</div>
-    </div>`;
-
-  const tableSection = (title, icon, rows, cols) => {
-    if (!rows.length) return section(title, icon, '');
-    const thead = cols.map(c=>`<th style="padding:6px 10px;background:var(--crm);font-size:12px;font-weight:600;color:var(--ts);text-align:left">${c}</th>`).join('');
-    const tbody = rows.map(r=>`<tr>${cols.map(c=>`<td style="padding:6px 10px;border-top:0.5px solid var(--crd);font-size:13px">${r[c]||''}</td>`).join('')}</tr>`).join('');
-    return `<div style="margin-bottom:22px">
-      <div class="section-label" style="margin-bottom:8px;display:flex;align-items:center;gap:6px">
-        <i class="ti ${icon}" style="color:var(--brm)"></i>${title}
-      </div>
-      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;border:0.5px solid var(--crd)">
-        <thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody>
-      </table></div>
-    </div>`;
+  // field_key → db 컬럼값 매핑
+  const FIELD_MAP = {
+    pos_login:'pos_login', business_hours:'business_hours', holiday_info:'holiday_info',
+    contacts:'contacts', promotion_info:'promotion_info', equipment:'equipment',
+    repair_history:'repair_history', delivery_info:'delivery_info',
+    after_hours_access:'after_hours_access', schedule_notes:'schedule_notes', extra_notes:'extra_notes'
+  };
+  const ICON_MAP = {
+    pos_login:'ti-device-desktop', business_hours:'ti-clock', holiday_info:'ti-calendar-off',
+    contacts:'ti-phone', promotion_info:'ti-tag', equipment:'ti-tool',
+    repair_history:'ti-tool', delivery_info:'ti-truck',
+    after_hours_access:'ti-door', schedule_notes:'ti-calendar-event', extra_notes:'ti-notes'
   };
 
+  const renderField = (f) => {
+    const dbKey = FIELD_MAP[f.field_key] || f.field_key;
+    const val   = d[dbKey];
+    const icon  = ICON_MAP[f.field_key] || 'ti-file-text';
+    if (f.is_table) {
+      const rows = Array.isArray(val) ? val : [];
+      const cols = Array.isArray(f.table_cols) ? f.table_cols : (typeof f.table_cols==='string' ? JSON.parse(f.table_cols||'[]') : []);
+      const colKeys = cols.map(c=>c.key||c);
+      const colLabels = cols.map(c=>c.label||c.key||c);
+      if (!rows.length) return `<div style="margin-bottom:22px">
+        <div class="section-label" style="margin-bottom:8px;display:flex;align-items:center;gap:6px"><i class="ti ${icon}" style="color:var(--brm)"></i>${f.label}</div>
+        <div style="background:var(--cr);border-radius:8px;padding:13px 15px;font-size:14px;color:var(--th)">미등록</div></div>`;
+      const thead = colLabels.map(c=>`<th style="padding:6px 10px;background:var(--crm);font-size:12px;font-weight:600;color:var(--ts);text-align:left">${c}</th>`).join('');
+      const tbody = rows.map(r=>`<tr>${colKeys.map(k=>`<td style="padding:6px 10px;border-top:0.5px solid var(--crd);font-size:13px">${r[k]||''}</td>`).join('')}</tr>`).join('');
+      return `<div style="margin-bottom:22px">
+        <div class="section-label" style="margin-bottom:8px;display:flex;align-items:center;gap:6px"><i class="ti ${icon}" style="color:var(--brm)"></i>${f.label}</div>
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;border:0.5px solid var(--crd)">
+          <thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div></div>`;
+    } else {
+      return `<div style="margin-bottom:22px">
+        <div class="section-label" style="margin-bottom:8px;display:flex;align-items:center;gap:6px"><i class="ti ${icon}" style="color:var(--brm)"></i>${f.label}</div>
+        <div style="background:var(--cr);border-radius:8px;padding:13px 15px;font-size:14px;line-height:1.8;color:var(--tm);white-space:pre-wrap">${val||'<span style="color:var(--th)">미등록</span>'}</div></div>`;
+    }
+  };
+
+  // 항목 편집 모달
+  const configModalHtml = canConfig ? `
+    <div id="hvCfgModal" style="display:none;position:fixed;inset:0;background:rgba(43,26,14,.5);z-index:300;align-items:center;justify-content:center">
+      <div style="background:#fff;border-radius:14px;padding:22px;width:min(96vw,520px);max-height:90vh;overflow-y:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <span style="font-size:15px;font-weight:600;color:var(--tm)"><i class="ti ti-settings"></i> 인수인계 항목 편집</span>
+          <button onclick="document.getElementById('hvCfgModal').style.display='none'" style="background:none;border:none;cursor:pointer;color:var(--th);font-size:18px"><i class="ti ti-x"></i></button>
+        </div>
+        <div id="hvCfgContent"></div>
+      </div>
+    </div>` : '';
+
   area.innerHTML = `
-    <div style="margin-bottom:10px;display:flex;align-items:center;justify-content:space-between">
+    ${configModalHtml}
+    <div style="margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
       <button class="btn-cancel-sm" onclick="goPage('handover')"><i class="ti ti-arrow-left"></i> 목록</button>
-      ${editBtn}
+      <div style="display:flex;gap:6px">${configBtn}${editBtn}</div>
     </div>
     <div class="post-detail">
       <div class="detail-header">
@@ -7656,35 +7707,81 @@ async function renderHandoverDetail(area) {
           ${hv ? `<span>최종 수정: ${hv.updated_at?.slice(0,16).replace('T',' ')||''}</span><span>${hv.updater?.name||''}</span>` : '<span style="color:var(--th)">아직 등록된 자료가 없습니다</span>'}
         </div>
       </div>
-
-      ${section('POS 로그인 정보', 'ti-device-desktop', d.pos_login)}
-      ${section('영업시간', 'ti-clock', d.business_hours)}
-      ${section('휴무 정보', 'ti-calendar-off', d.holiday_info)}
-      ${tableSection('담당 연락처', 'ti-phone', contacts, ['구분','이름','연락처','비고'])}
-      ${section('프로모션 정보', 'ti-tag', d.promotion_info)}
-      ${tableSection('장비 정보', 'ti-tool', equipment, ['장비명','모델명','수량','설치위치','비고'])}
-      ${tableSection('매장 보수 내역', 'ti-hammer', repairs, ['일자','내용','업체','비용','비고'])}
-      ${section('하역장 위치', 'ti-truck', d.delivery_info)}
-      ${section('영업시간 외 출입방법', 'ti-door', d.after_hours_access)}
-      ${section('스케줄 편성 고려사항', 'ti-calendar-event', d.schedule_notes)}
-      ${section('기타 특이사항', 'ti-notes', d.extra_notes)}
-
+      ${cfg.map(f => renderField(f)).join('')}
       <div style="margin-bottom:18px;padding:14px 16px;background:var(--crm);border-radius:10px;display:flex;align-items:center;justify-content:space-between">
         <div>
           <div style="font-size:13px;font-weight:600;color:var(--tm)"><i class="ti ti-hammer" style="color:var(--brm);margin-right:5px"></i>보수 내역</div>
           <div style="font-size:11px;color:var(--th);margin-top:2px">A/S 및 보수 히스토리 누적 관리</div>
         </div>
-        <button class="btn-submit" style="padding:7px 14px;font-size:12px"
-          onclick="window.__rpFilterStore='${store}';goPage('repairs')">
+        <button class="btn-submit" style="padding:7px 14px;font-size:12px" onclick="window.__rpFilterStore='${store}';goPage('repairs')">
           <i class="ti ti-arrow-right"></i> 보수 내역 보기
         </button>
       </div>
-
       ${attachments.length ? `<div style="margin-bottom:18px">
         <div class="section-label" style="margin-bottom:8px"><i class="ti ti-paperclip" style="color:var(--brm)"></i> 첨부파일</div>
         <div>${attachments.map(a=>`<a class="attach-file" href="${a.url}" target="_blank"><i class="ti ti-file"></i>${a.name}</a>`).join('')}</div>
       </div>` : ''}
     </div>`;
+}
+
+// A) 인수인계 항목 편집 모달 (총괄·부총괄)
+async function openHandoverFieldConfig() {
+  const modal = document.getElementById('hvCfgModal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  const cont = document.getElementById('hvCfgContent');
+  cont.innerHTML = '<div style="text-align:center;padding:16px;color:var(--th)"><i class="ti ti-loader spin"></i></div>';
+  const { data: cfg } = await sb.from('handover_field_config').select('*').order('sort_order');
+
+  cont.innerHTML = `
+    <div style="font-size:12px;color:var(--th);margin-bottom:12px;line-height:1.6">항목 이름, 설명(작성 안내)을 수정하거나 순서를 변경할 수 있습니다. 비활성화하면 화면에서 숨겨집니다.</div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">
+      ${(cfg||[]).map(f=>`
+        <div style="border:0.5px solid var(--crd);border-radius:8px;padding:10px 12px;background:${f.active?'#fff':'var(--cr)'}">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <span style="font-size:11px;color:var(--th);width:24px;text-align:center">${f.sort_order}</span>
+            <input class="form-input" value="${f.label}" id="hvcfg-label-${f.id}"
+              style="flex:1;padding:5px 9px;font-size:13px;font-weight:600" placeholder="항목명" />
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+              <input type="checkbox" ${f.active?'checked':''} id="hvcfg-active-${f.id}" style="width:auto"> 표시
+            </label>
+            <div style="display:flex;gap:3px">
+              <button onclick="moveHvField(${f.id},-1)" style="background:none;border:0.5px solid var(--crd);border-radius:4px;padding:2px 7px;cursor:pointer;font-size:11px">↑</button>
+              <button onclick="moveHvField(${f.id},1)" style="background:none;border:0.5px solid var(--crd);border-radius:4px;padding:2px 7px;cursor:pointer;font-size:11px">↓</button>
+            </div>
+          </div>
+          <input class="form-input" value="${f.description||''}" id="hvcfg-desc-${f.id}"
+            style="width:100%;padding:5px 9px;font-size:12px;color:var(--th)" placeholder="작성 안내 (placeholder)" />
+        </div>`).join('')}
+    </div>
+    <div style="text-align:right">
+      <button class="btn-submit" onclick="saveHandoverFieldConfig()"><i class="ti ti-device-floppy"></i> 항목 설정 저장</button>
+    </div>`;
+}
+
+async function moveHvField(id, dir) {
+  const { data: cfg } = await sb.from('handover_field_config').select('*').order('sort_order');
+  const idx = cfg.findIndex(f=>f.id===id);
+  const swapIdx = idx + dir;
+  if (swapIdx < 0 || swapIdx >= cfg.length) return;
+  const a = cfg[idx], b = cfg[swapIdx];
+  await Promise.all([
+    sb.from('handover_field_config').update({sort_order: b.sort_order}).eq('id', a.id),
+    sb.from('handover_field_config').update({sort_order: a.sort_order}).eq('id', b.id)
+  ]);
+  openHandoverFieldConfig();
+}
+
+async function saveHandoverFieldConfig() {
+  const { data: cfg } = await sb.from('handover_field_config').select('id');
+  for (const f of (cfg||[])) {
+    const label  = document.getElementById('hvcfg-label-'+f.id)?.value.trim();
+    const desc   = document.getElementById('hvcfg-desc-'+f.id)?.value.trim() || null;
+    const active = document.getElementById('hvcfg-active-'+f.id)?.checked ?? true;
+    if (label) await sb.from('handover_field_config').update({label, description:desc, active}).eq('id', f.id);
+  }
+  document.getElementById('hvCfgModal').style.display = 'none';
+  renderHandoverDetail(document.getElementById('contentArea'));
 }
 
 async function openHandoverEdit(store) {
@@ -7863,6 +7960,168 @@ async function saveHandover(store) {
   const { error } = await sb.from('store_handover').upsert(payload, {onConflict:'store'});
   if (error) { alert('저장 오류: ' + error.message); return; }
   openHandover(store);
+}
+
+
+// ══════════════════════════════════════════════════════════
+// 개인 연차 조회 (D)
+// ══════════════════════════════════════════════════════════
+async function loadMyLeaveInfo() {
+  const cont = document.getElementById('myLeaveInfo');
+  if (!cont) return;
+  cont.innerHTML = '<div style="text-align:center;padding:20px;color:var(--th)"><i class="ti ti-loader spin"></i></div>';
+
+  // 연차 초기값 조회
+  const { data: bal } = await sb.from('annual_leave_balance')
+    .select('*').eq('user_id', currentUser.id).maybeSingle();
+
+  // 스케줄에서 연차/반차 사용 내역 조회 (전체 기간)
+  const { data: entries } = await sb.from('schedule_entries')
+    .select('date, entry_type, schedule:schedules(store, year, month, status)')
+    .eq('user_id', currentUser.id)
+    .in('entry_type', ['연차','반차'])
+    .order('date', {ascending: false});
+
+  // 사용 집계 계산 (연차=1, 반차=0.5)
+  let scheduleUsed = 0;
+  const usageHistory = [];
+  (entries || []).forEach(e => {
+    const val = e.entry_type === '연차' ? 1 : 0.5;
+    scheduleUsed += val;
+    usageHistory.push({
+      date: e.date,
+      type: e.entry_type,
+      val,
+      store: e.schedule?.store || currentUser.store,
+      status: e.schedule?.status
+    });
+  });
+
+  // schedule_used 자동 갱신
+  if (bal) {
+    await sb.from('annual_leave_balance').update({
+      schedule_used: scheduleUsed, updated_at: new Date().toISOString()
+    }).eq('user_id', currentUser.id);
+  }
+
+  const initTotal   = bal?.init_total   || 0;
+  const initUsed    = bal?.init_used    || 0;
+  const initDate    = bal?.init_date    || null;
+  const totalUsed   = initUsed + scheduleUsed;
+  const remaining   = initTotal - totalUsed;
+  const isAdmin     = currentUser.role === 'admin' || currentUser.is_master || currentUser.is_vice_master;
+
+  // 초기값 입력 UI (관리자 또는 본인 — 운영팀만 타인 수정 가능)
+  const initEditHtml = `
+    <div style="background:var(--cr);border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:var(--th);margin-bottom:10px;letter-spacing:.5px">초기값 설정 (시스템 도입 전 발생·사용분)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+        <div>
+          <div style="font-size:11px;color:var(--th);margin-bottom:3px">총 발생 연차</div>
+          <input type="number" class="form-input" id="alb-total" value="${initTotal}" min="0" step="0.5" style="padding:6px 8px;font-size:13px" />
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--th);margin-bottom:3px">기존 사용 연차</div>
+          <input type="number" class="form-input" id="alb-used" value="${initUsed}" min="0" step="0.5" style="padding:6px 8px;font-size:13px" />
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--th);margin-bottom:3px">기준일</div>
+          <input type="date" class="form-input" id="alb-date" value="${initDate||''}" style="padding:6px 8px;font-size:13px" />
+        </div>
+      </div>
+      <button class="btn-submit" onclick="saveMyLeaveInit()" style="padding:6px 14px;font-size:12px"><i class="ti ti-device-floppy"></i> 초기값 저장</button>
+    </div>`;
+
+  // 잔여 연차 표시
+  const remColor = remaining < 0 ? 'var(--rd)' : remaining <= 2 ? '#E8A000' : 'var(--gn)';
+  const summaryHtml = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
+      <div style="text-align:center;background:var(--cr);border-radius:10px;padding:14px">
+        <div style="font-size:22px;font-weight:600;color:var(--br)">${initTotal}</div>
+        <div style="font-size:11px;color:var(--th);margin-top:2px">총 발생</div>
+      </div>
+      <div style="text-align:center;background:var(--cr);border-radius:10px;padding:14px">
+        <div style="font-size:22px;font-weight:600;color:var(--ts)">${totalUsed}</div>
+        <div style="font-size:11px;color:var(--th);margin-top:2px">사용 (초기 ${initUsed} + 스케줄 ${scheduleUsed})</div>
+      </div>
+      <div style="text-align:center;background:var(--cr);border-radius:10px;padding:14px">
+        <div style="font-size:22px;font-weight:600;color:${remColor}">${remaining}</div>
+        <div style="font-size:11px;color:var(--th);margin-top:2px">잔여</div>
+      </div>
+    </div>`;
+
+  // 사용 내역 히스토리
+  const historyHtml = usageHistory.length ? `
+    <div style="margin-top:4px">
+      <div style="font-size:12px;font-weight:700;color:var(--th);letter-spacing:.5px;margin-bottom:8px">사용 내역 (스케줄 연동)</div>
+      ${usageHistory.map(h => `
+        <div style="display:flex;align-items:center;padding:8px 0;border-bottom:0.5px solid var(--crd)">
+          <span style="font-size:13px;color:var(--tm);width:90px">${h.date}</span>
+          <span style="font-size:12px;padding:2px 8px;border-radius:8px;background:${h.type==='연차'?'var(--gnb)':'var(--blb)'};color:${h.type==='연차'?'var(--gn)':'var(--bl)'};margin-right:8px">${h.type}</span>
+          <span style="font-size:12px;color:var(--ts);flex:1">${h.store}</span>
+          <span style="font-size:13px;font-weight:600;color:var(--tm)">-${h.val}일</span>
+          ${h.status!=='confirmed'?'<span style="font-size:10px;color:var(--th);margin-left:6px">(미확정)</span>':''}
+        </div>`).join('')}
+    </div>` : `<div style="text-align:center;padding:20px;color:var(--th);font-size:13px">스케줄에 등록된 연차/반차가 없습니다.</div>`;
+
+  cont.innerHTML = initEditHtml + summaryHtml + historyHtml;
+}
+
+async function saveMyLeaveInit() {
+  const total = parseFloat(document.getElementById('alb-total')?.value) || 0;
+  const used  = parseFloat(document.getElementById('alb-used')?.value)  || 0;
+  const date  = document.getElementById('alb-date')?.value || null;
+  await sb.from('annual_leave_balance').upsert({
+    user_id: currentUser.id,
+    init_total: total, init_used: used, init_date: date,
+    updated_at: new Date().toISOString()
+  }, {onConflict: 'user_id'});
+  alert('초기값이 저장되었습니다.');
+  loadMyLeaveInfo();
+}
+
+// 운영팀이 특정 직원 연차 초기값 설정 (인원현황 직원 카드에서 호출)
+async function openStaffLeaveEdit(userId, userName) {
+  const { data: bal } = await sb.from('annual_leave_balance').select('*').eq('user_id', userId).maybeSingle();
+  const old = document.getElementById('staffLeaveModal');
+  if (old) old.remove();
+  const m = document.createElement('div');
+  m.id = 'staffLeaveModal';
+  m.className = 'modal-bg open';
+  m.innerHTML = `
+    <div class="modal-inner" style="width:360px">
+      <div class="modal-title"><i class="ti ti-calendar-check"></i> ${userName} 연차 초기값 설정</div>
+      <div style="font-size:12px;color:var(--th);margin-bottom:14px">시스템 도입 전 발생·사용 연차를 입력하세요.</div>
+      <div class="form-row">
+        <label class="form-label">총 발생 연차</label>
+        <input type="number" class="form-input" id="sl-total" value="${bal?.init_total||0}" min="0" step="0.5" />
+      </div>
+      <div class="form-row">
+        <label class="form-label">기존 사용 연차</label>
+        <input type="number" class="form-input" id="sl-used" value="${bal?.init_used||0}" min="0" step="0.5" />
+      </div>
+      <div class="form-row">
+        <label class="form-label">기준일</label>
+        <input type="date" class="form-input" id="sl-date" value="${bal?.init_date||''}" />
+      </div>
+      <div class="modal-footer">
+        <button class="btn-sm ghost" onclick="document.getElementById('staffLeaveModal').remove()">취소</button>
+        <button class="btn-sm primary" onclick="saveStaffLeaveInit('${userId}')">저장</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+}
+
+async function saveStaffLeaveInit(userId) {
+  const total = parseFloat(document.getElementById('sl-total')?.value) || 0;
+  const used  = parseFloat(document.getElementById('sl-used')?.value)  || 0;
+  const date  = document.getElementById('sl-date')?.value || null;
+  await sb.from('annual_leave_balance').upsert({
+    user_id: userId, init_total: total, init_used: used, init_date: date,
+    updated_at: new Date().toISOString()
+  }, {onConflict: 'user_id'});
+  document.getElementById('staffLeaveModal')?.remove();
+  alert('저장되었습니다.');
 }
 
 async function renderReqAdmin(area) {
