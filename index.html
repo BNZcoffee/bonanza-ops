@@ -4478,7 +4478,7 @@ function applyMenuPermissions() {
   show('scheduleNav', canSchedule);
   show('nav-scheduleConfirm', isAdminRole);                 // 컨펌 처리: 운영팀/총괄/부총괄
   show('nav-scheduleClose', isAdminRole || isHrRole);        // 마감 현황: 운영팀/인사팀
-  show('nav-scheduleSettings', isAdminRole);                 // 휴무 기준 설정: 운영팀/총괄/부총괄
+  show('nav-scheduleSettings', isAdminRole || isManagerRole(currentUser.role)); // 휴무 기준 설정: 운영팀+매니저(본인매장만)
   // 개별 메뉴
   show('nav-staff', hasPerm('staff_view'));
   show('nav-stats', hasPerm('notice_stats'));
@@ -6862,6 +6862,7 @@ async function renderScheduleEdit(area) {
       <button class="btn-cancel-sm" onclick="goPage('schedules')"><i class="ti ti-arrow-left"></i> 목록</button>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${canEdit ? `<button class="btn-cancel-sm" onclick="saveScheduleDraft()" style="font-size:12px"><i class="ti ti-device-floppy"></i> 임시저장</button>` : ''}
+        <button class="btn-cancel-sm" onclick="openShiftSettings()" style="font-size:12px"><i class="ti ti-clock"></i> 근무조 설정</button>
         ${canEdit && curSchedule?.status!=='confirmed' ? `<button class="btn-submit" onclick="requestScheduleConfirm()" style="padding:8px 14px;font-size:13px"><i class="ti ti-send"></i> 컨펌 요청</button>` : ''}
         ${curSchedule ? `<button class="btn-cancel-sm" onclick="openSchedulePreview()" style="font-size:12px;color:var(--bl)"><i class="ti ti-photo"></i> 이미지 저장</button>` : ''}
         ${curSchedule ? `<button class="btn-cancel-sm" onclick="openScheduleHistoryModal(${curSchedule?.id})" style="font-size:12px"><i class="ti ti-history"></i> 히스토리</button>` : ''}
@@ -7197,6 +7198,18 @@ async function requestScheduleConfirm() {
 }
 
 
+
+// 스케줄 편성 화면에서 근무조 설정으로 이동
+function openShiftSettings() {
+  window.__schSettingsFromEdit = true;
+  // scheduleSettings 페이지를 본인 매장으로 자동 진입
+  const area = document.getElementById('contentArea');
+  const nb = document.getElementById('nav-scheduleSettings');
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  if (nb) nb.classList.add('active');
+  renderScheduleSettings(area, window.__schStore || currentUser.store);
+}
+
 // ── 붙여넣기 핸들러 ──────────────────────────────────────
 async function handleSchedulePaste(e) {
   e.preventDefault();
@@ -7415,20 +7428,28 @@ async function hrCheckSchedule() {
 }
 
 // ── 휴무 기준 설정 (관리) ─────────────────────────────────
-async function renderScheduleSettings(area) {
+async function renderScheduleSettings(area, preStore) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  const { data: holidays } = await sb.from('holidays').select('*').order('date');
-  const { data: leaveTypes } = await sb.from('leave_types').select('*').order('sort_order');
-  const { data: stores } = await sb.from('users').select('store').eq('active',true).neq('role','admin');
-  const storeList = [...new Set((stores||[]).map(u=>u.store).filter(Boolean))].sort();
+  const isAdmin  = isScheduleAdmin();
+  const isMgr    = isManagerRole(currentUser.role) && !isAdmin;
+  // 매니저는 본인 매장만, 관리자는 전체
+  const myStore  = preStore || (isMgr ? currentUser.store : '');
 
-  area.innerHTML = `
-    <div class="page-header"><div class="page-title">휴무 기준 설정</div><div class="page-sub">공휴일, 휴무 종류, 매장별 근무조 시간을 관리합니다</div></div>
+  const [holRes, ltRes, storeRes] = await Promise.all([
+    sb.from('holidays').select('*').order('date'),
+    sb.from('leave_types').select('*').order('sort_order'),
+    sb.from('users').select('store').eq('active',true).neq('role','admin')
+  ]);
+  const holidays  = holRes.data  || [];
+  const leaveTypes= ltRes.data   || [];
+  const storeList = [...new Set((storeRes.data||[]).map(u=>u.store).filter(Boolean))].sort();
 
+  // 공휴일 섹션 (관리자만 수정, 매니저는 읽기 전용)
+  const holSection = isAdmin ? `
     <div class="notif-card" style="margin-bottom:14px">
       <div class="section-label" style="margin-bottom:10px">공휴일 관리</div>
-      <div id="holidayList" style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px;max-height:240px;overflow-y:auto">
-        ${(holidays||[]).map(h=>`
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px;max-height:240px;overflow-y:auto">
+        ${holidays.map(h=>`
           <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--cr);border-radius:7px">
             <span style="font-size:12px;width:90px">${h.date}</span>
             <span style="flex:1;font-size:12px">${h.name||''}</span>
@@ -7440,12 +7461,20 @@ async function renderScheduleSettings(area) {
         <input class="form-input" id="newHolName" placeholder="공휴일명" style="flex:1" />
         <button class="btn-submit" style="padding:8px 14px;font-size:12px" onclick="addHoliday()">추가</button>
       </div>
-    </div>
+    </div>` : `
+    <div class="notif-card" style="margin-bottom:14px">
+      <div class="section-label" style="margin-bottom:8px">공휴일 <span style="font-size:11px;color:var(--th);font-weight:400">(읽기 전용 — 수정은 운영팀에 요청)</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${holidays.map(h=>`<span style="font-size:12px;background:var(--cr);border-radius:6px;padding:3px 9px">${h.date} ${h.name||''}</span>`).join('')}
+      </div>
+    </div>`;
 
+  // 휴무 종류 섹션 (관리자만 수정)
+  const leaveSection = isAdmin ? `
     <div class="notif-card" style="margin-bottom:14px">
       <div class="section-label" style="margin-bottom:10px">휴무 종류 (색상 포함, 전사 공통)</div>
       <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px">
-        ${(leaveTypes||[]).map(l=>`
+        ${leaveTypes.map(l=>`
           <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--cr);border-radius:7px">
             <input type="color" value="${l.color}" onchange="updateLeaveColor(${l.id},this.value)" style="width:28px;height:28px;border:none;border-radius:5px;cursor:pointer" />
             <span style="flex:1;font-size:12px">${l.code}</span>
@@ -7457,18 +7486,46 @@ async function renderScheduleSettings(area) {
         <input type="color" id="newLeaveColor" value="#888888" style="width:42px" />
         <button class="btn-submit" style="padding:8px 14px;font-size:12px" onclick="addLeaveType()">추가</button>
       </div>
-    </div>
+    </div>` : `
+    <div class="notif-card" style="margin-bottom:14px">
+      <div class="section-label" style="margin-bottom:8px">휴무 종류 <span style="font-size:11px;color:var(--th);font-weight:400">(읽기 전용)</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${leaveTypes.map(l=>`<span style="font-size:12px;background:${l.color}22;border:0.5px solid ${l.color};border-radius:6px;padding:3px 9px">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${l.color};margin-right:4px"></span>${l.code}
+        </span>`).join('')}
+      </div>
+    </div>`;
 
+  // 근무조 섹션: 매니저는 본인 매장만 자동 선택, 관리자는 드롭다운
+  const storeSelectHtml = isMgr
+    ? `<div style="font-size:13px;font-weight:600;color:var(--tm);padding:6px 0">${currentUser.store} <span style="font-size:11px;color:var(--th);font-weight:400">— 본인 매장 근무조만 수정 가능</span></div>`
+    : `<select class="form-input" id="ssStoreSelect" onchange="loadStoreShiftCodes(this.value)" style="padding:7px 10px;font-size:13px">
+        <option value="">매장 선택</option>
+        ${storeList.map(s=>`<option value="${s}"${s===myStore?' selected':''}>${s}</option>`).join('')}
+      </select>`;
+
+  area.innerHTML = `
+    <div class="page-header">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div>
+          <div class="page-title">휴무 기준 설정</div>
+          <div class="page-sub">${isMgr ? '본인 매장 근무조 시간을 설정합니다' : '공휴일, 휴무 종류, 매장별 근무조 시간을 관리합니다'}</div>
+        </div>
+        ${preStore ? `<button class="btn-cancel-sm" onclick="goPage('scheduleEdit')" style="font-size:12px"><i class="ti ti-arrow-left"></i> 스케줄로 돌아가기</button>` : ''}
+      </div>
+    </div>
+    ${holSection}
+    ${leaveSection}
     <div class="notif-card">
       <div class="section-label" style="margin-bottom:10px">매장별 근무조 시간 설정</div>
-      <div style="margin-bottom:10px">
-        <select class="form-input" id="ssStoreSelect" onchange="loadStoreShiftCodes(this.value)" style="padding:7px 10px;font-size:13px">
-          <option value="">매장 선택</option>
-          ${storeList.map(s=>`<option value="${s}">${s}</option>`).join('')}
-        </select>
-      </div>
+      <div style="margin-bottom:10px">${storeSelectHtml}</div>
       <div id="storeShiftList"></div>
     </div>`;
+
+  // 매니저 또는 preStore가 있으면 자동 로드
+  if (myStore) {
+    loadStoreShiftCodes(myStore);
+  }
 }
 
 async function addHoliday() {
