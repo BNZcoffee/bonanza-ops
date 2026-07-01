@@ -9209,10 +9209,16 @@ async function loadMyLeaveInfo() {
     }).eq('user_id', currentUser.id);
   }
 
-  const initTotal   = bal?.init_total   || 0;
-  const initUsed    = bal?.init_used    || 0;
-  const initDate    = bal?.init_date    || null;
-  const totalUsed   = initUsed + scheduleUsed;
+  // 입사일 기반 자동 계산
+  const { data: userInfo } = await sb.from('users').select('hire_date').eq('id', currentUser.id).single();
+  const hireDate   = userInfo?.data?.hire_date || currentUser.hire_date || '';
+  const { days: autoDays, desc: autoDesc } = calcAnnualLeave(hireDate);
+  const initAdjust  = bal?.adjust    || 0;
+  const initUsed    = bal?.init_used || 0;
+  const expireUsed  = bal?.expire_used || 0;
+  const initDate    = bal?.init_date  || null;
+  const initTotal   = autoDays + initAdjust;  // 자동계산 + 보정
+  const totalUsed   = initUsed + expireUsed + scheduleUsed;
   const remaining   = initTotal - totalUsed;
   const isAdmin     = currentUser.role === 'admin' || currentUser.is_master || currentUser.is_vice_master;
 
@@ -9264,43 +9270,116 @@ async function loadMyLeaveInfo() {
 // saveMyLeaveInit 제거됨 — 연차 초기값은 운영팀이 인원현황에서 설정
 
 
+
+// ══════════════════════════════════════════════════════
+// 연차 자동 계산 (근로기준법 입사일 기준)
+// ══════════════════════════════════════════════════════
+
+/**
+ * 입사일 기준 해당 날짜까지 발생한 연차 계산
+ * - 1년 미만: 매월 만근 1일 (최대 11일)
+ * - 1년 이상: 15일 + (근속년수-1)÷2, 최대 25일
+ */
+function calcAnnualLeave(hireDateStr, baseDateStr) {
+  if (!hireDateStr) return { days: 0, desc: '입사일 없음' };
+  const hire = new Date(hireDateStr);
+  const base = baseDateStr ? new Date(baseDateStr) : new Date();
+  if (isNaN(hire) || hire > base) return { days: 0, desc: '입사 전' };
+
+  // 년/월 차이 계산
+  let months = (base.getFullYear() - hire.getFullYear()) * 12
+             + (base.getMonth() - hire.getMonth());
+  // 일수 보정 (기준일이 입사일보다 앞이면 -1개월)
+  if (base.getDate() < hire.getDate()) months -= 1;
+  const years = Math.floor(months / 12);
+
+  if (months < 1) return { days: 0, desc: '입사 1개월 미만' };
+
+  if (years < 1) {
+    const days = Math.min(months, 11);
+    return { days, desc: `입사 ${months}개월 → ${days}일` };
+  } else {
+    const extra = Math.floor((years - 1) / 2);
+    const days  = Math.min(15 + extra, 25);
+    const rem   = months % 12;
+    return { days, desc: `입사 ${years}년 ${rem}개월 → ${days}일` };
+  }
+}
+
+/**
+ * 오늘 기준 실제 차감된 연차 계산
+ * (스케줄 entries 중 오늘까지 도래한 연차/반차만)
+ */
+async function calcUsedLeave(userId) {
+  const today = new Date().toISOString().slice(0,10);
+  const { data } = await sb.from('schedule_entries')
+    .select('entry_type, date')
+    .eq('user_id', userId)
+    .in('entry_type', ['연차','반차','오전반차','오후반차'])
+    .lte('date', today);
+  let used = 0;
+  (data||[]).forEach(e => { used += e.entry_type==='연차' ? 1 : 0.5; });
+  return used;
+}
+
+/**
+ * 최종 연차 잔여 계산
+ * = 자동계산 발생일수 + adjust(인사팀 조정) - 기존사용(init_used) - 소멸(expire_used) - 스케줄 사용
+ */
+function calcLeaveRemain(hireDateStr, alb, schUsedToday) {
+  const auto  = calcAnnualLeave(hireDateStr).days;
+  const total = auto + (alb?.adjust||0);
+  const used  = (alb?.init_used||0) + (alb?.expire_used||0) + (schUsedToday||0);
+  return { total, auto, adjust: alb?.adjust||0, used, remain: total - used };
+}
+
 // ── 인원현황 연차잔여 비동기 로드 ─────────────────────────────
-// 차감 기준: 스케줄 계획일이 아닌 오늘 날짜까지 도래한 날짜만 차감
+// 입사일 기반 자동 계산 + 오늘까지 도래한 사용분만 차감
 async function loadStaffLeaveBalance(userList) {
   if (!userList || !userList.length) return;
   const today = new Date().toISOString().slice(0,10);
-  const ids   = userList.map(u=>u.id);
+  const ids   = userList.filter(u=>u.id).map(u=>u.id);
+  if (!ids.length) return;
 
-  // 연차 초기값
+  // annual_leave_balance (조정값, 기존사용, 소멸)
   const { data: albData } = await sb.from('annual_leave_balance')
-    .select('user_id, init_total, init_used, schedule_used').in('user_id', ids);
+    .select('user_id, init_used, adjust, expire_used').in('user_id', ids);
   const albMap = Object.fromEntries((albData||[]).map(b=>[b.user_id,b]));
 
-  // 오늘까지 도래한 날짜의 연차/반차 entries만 집계
+  // 오늘까지 도래한 연차/반차 스케줄 사용분
   const { data: entries } = await sb.from('schedule_entries')
     .select('user_id, entry_type, date')
     .in('user_id', ids)
     .in('entry_type', ['연차','반차','오전반차','오후반차'])
-    .lte('date', today);  // ← 오늘 이전 날짜만
-
-  // 직원별 실제 사용 집계
+    .lte('date', today);
   const usedMap = {};
   (entries||[]).forEach(e => {
-    const val = (e.entry_type==='연차') ? 1 : 0.5;
-    usedMap[e.user_id] = (usedMap[e.user_id]||0) + val;
+    usedMap[e.user_id] = (usedMap[e.user_id]||0) + (e.entry_type==='연차' ? 1 : 0.5);
   });
 
   // 셀에 반영
-  ids.forEach(uid => {
-    const cell = document.getElementById('alb-cell-'+uid);
+  userList.filter(u=>u.id).forEach(u => {
+    const cell = document.getElementById('alb-cell-'+u.id);
     if (!cell) return;
-    const alb = albMap[uid];
-    if (!alb) { cell.textContent = '-'; cell.style.color='var(--th)'; return; }
-    const remain = (alb.init_total||0) - (alb.init_used||0) - (usedMap[uid]||0);
-    cell.textContent = remain + '일';
-    cell.style.color = remain < 0 ? 'var(--rd)' : remain <= 2 ? '#E8A000' : 'var(--gn)';
+    const { days, desc } = calcAnnualLeave(u.hire_date, today);
+    const alb = albMap[u.id] || {};
+    const total  = days + (alb.adjust||0);
+    const used   = (alb.init_used||0) + (alb.expire_used||0) + (usedMap[u.id]||0);
+    const remain = total - used;
+
+    cell.textContent = `${remain}일`;
+    cell.style.color      = remain < 0 ? 'var(--rd)' : remain <= 3 ? '#E8A000' : 'var(--gn)';
     cell.style.fontWeight = remain < 0 ? '700' : '400';
-    cell.title = `총발생 ${alb.init_total||0} - 초기사용 ${alb.init_used||0} - 스케줄사용(오늘까지) ${usedMap[uid]||0} = ${remain}`;
+    cell.style.cursor     = 'pointer';
+    cell.title = [
+      `[${u.name}] 입사일 기준 자동 계산`,
+      `발생: ${days}일 ${desc}`,
+      alb.adjust ? `조정: ${alb.adjust>0?'+':''}${alb.adjust}일` : '',
+      `기존사용: ${alb.init_used||0}일`,
+      `소멸: ${alb.expire_used||0}일`,
+      `스케줄사용(오늘까지): ${usedMap[u.id]||0}일`,
+      `= 잔여 ${remain}일`
+    ].filter(Boolean).join('\n');
   });
 }
 
@@ -9313,55 +9392,170 @@ function closeEditUserAndOpenLeave(userId, userName) {
 
 // 운영팀이 특정 직원 연차 초기값 설정 (인원현황 직원 카드에서 호출)
 async function openStaffLeaveEdit(userId, userName) {
-  const { data: bal } = await sb.from('annual_leave_balance').select('*').eq('user_id', userId).maybeSingle();
+  // 해당 직원 정보 + 연차 잔여 로드
+  const [userRes, balRes, expireRes] = await Promise.all([
+    sb.from('users').select('hire_date').eq('id', userId).single(),
+    sb.from('annual_leave_balance').select('*').eq('user_id', userId).maybeSingle(),
+    sb.from('annual_leave_expire').select('*').eq('user_id', userId).order('expire_date', {ascending:false})
+  ]);
+  const hireDate  = userRes.data?.hire_date || '';
+  const bal       = balRes.data || {};
+  const expires   = expireRes.data || [];
+  const today     = new Date().toISOString().slice(0,10);
+
+  // 자동 계산
+  const { days: autoDays, desc: autoDesc } = calcAnnualLeave(hireDate, today);
+  const schUsed = await calcUsedLeave(userId);
+  const total   = autoDays + (bal.adjust||0);
+  const used    = (bal.init_used||0) + (bal.expire_used||0) + schUsed;
+  const remain  = total - used;
+
   const old = document.getElementById('staffLeaveModal');
   if (old) old.remove();
   const m = document.createElement('div');
   m.id = 'staffLeaveModal';
   m.className = 'modal-bg open';
   m.innerHTML = `
-    <div class="modal-inner" style="width:360px">
-      <div class="modal-title"><i class="ti ti-calendar-check"></i> ${userName} 연차 초기값 설정</div>
-      <div style="font-size:12px;color:var(--th);margin-bottom:14px">시스템 도입 전 발생·사용 연차를 입력하세요.</div>
-      <div class="form-row">
-        <label class="form-label">총 발생 연차</label>
-        <input type="number" class="form-input" id="sl-total" value="${bal?.init_total||0}" min="0" step="0.5" />
+    <div class="modal-inner" style="width:min(96vw,460px);max-height:90vh;overflow-y:auto">
+      <div style="font-size:15px;font-weight:600;color:var(--tm);margin-bottom:14px">
+        <i class="ti ti-calendar-check" style="color:var(--brm)"></i> ${userName} 연차 관리
       </div>
-      <div class="form-row">
-        <label class="form-label">기존 사용 연차</label>
-        <input type="number" class="form-input" id="sl-used" value="${bal?.init_used||0}" min="0" step="0.5" />
-      </div>
-      <div class="form-row">
-        <label class="form-label">입력기준일</label>
-        <div style="position:relative">
-          <input type="date" class="form-input" id="sl-date" value="${bal?.init_date||''}"
-            placeholder="${new Date().toISOString().slice(0,10)}"
-            style="color:${bal?.init_date?'var(--tm)':'var(--th)'}"
-            onfocus="if(!this.value)this.style.color='var(--tm)'"
-            onblur="if(!this.value)this.style.color='var(--th)'"
-          />
-          ${!bal?.init_date?`<div style="position:absolute;top:50%;left:14px;transform:translateY(-50%);font-size:14px;color:var(--th);pointer-events:none;font-family:inherit" id="sl-date-placeholder">${new Date().toISOString().slice(0,10)}</div>`:''}
+
+      <!-- 자동 계산 요약 -->
+      <div style="background:var(--cr);border-radius:10px;padding:13px 15px;margin-bottom:16px">
+        <div style="font-size:11px;font-weight:700;color:var(--th);margin-bottom:8px">📌 입사일 기준 자동 계산</div>
+        <div style="font-size:12px;color:var(--ts);margin-bottom:6px">
+          입사일: <strong>${hireDate||'미등록'}</strong> · ${autoDesc}
         </div>
-        <div style="font-size:11px;color:var(--th);margin-top:3px">이 초기값이 적용되는 기준 시점 (시스템 도입일 · 연차 정산일) — 미입력 시 오늘 날짜로 저장</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center">
+          <div style="background:#fff;border-radius:8px;padding:8px">
+            <div style="font-size:18px;font-weight:600;color:var(--br)">${total}</div>
+            <div style="font-size:10px;color:var(--th)">총 발생</div>
+          </div>
+          <div style="background:#fff;border-radius:8px;padding:8px">
+            <div style="font-size:18px;font-weight:600;color:var(--ts)">${used}</div>
+            <div style="font-size:10px;color:var(--th)">총 사용</div>
+          </div>
+          <div style="background:#fff;border-radius:8px;padding:8px">
+            <div style="font-size:18px;font-weight:600;color:${remain<0?'var(--rd)':remain<=3?'#E8A000':'var(--gn)'}">${remain}</div>
+            <div style="font-size:10px;color:var(--th)">잔여</div>
+          </div>
+          <div style="background:#fff;border-radius:8px;padding:8px">
+            <div style="font-size:18px;font-weight:600;color:var(--ts)">${schUsed}</div>
+            <div style="font-size:10px;color:var(--th)">스케줄사용</div>
+          </div>
+        </div>
       </div>
+
+      <!-- 보정값 입력 -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:12px;font-weight:700;color:var(--ts);margin-bottom:8px">인사팀 보정</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div>
+            <label class="form-label" style="font-size:11px">조정값 (±일)</label>
+            <input type="number" class="form-input" id="sl-adjust" value="${bal.adjust||0}" step="0.5"
+              style="padding:7px 9px;font-size:13px" />
+            <div style="font-size:10px;color:var(--th);margin-top:2px">자동계산에 추가·차감</div>
+          </div>
+          <div>
+            <label class="form-label" style="font-size:11px">기존 사용 (도입 전)</label>
+            <input type="number" class="form-input" id="sl-used" value="${bal.init_used||0}" min="0" step="0.5"
+              style="padding:7px 9px;font-size:13px" />
+            <div style="font-size:10px;color:var(--th);margin-top:2px">시스템 도입 전 사용분</div>
+          </div>
+        </div>
+        <div style="margin-top:8px">
+          <label class="form-label" style="font-size:11px">비고</label>
+          <input class="form-input" id="sl-note" value="${bal.note||''}" placeholder="특이사항 메모"
+            style="padding:7px 9px;font-size:12px" />
+        </div>
+      </div>
+
+      <!-- 연차 소멸 처리 -->
+      <div style="border-top:0.5px solid var(--crd);padding-top:14px;margin-bottom:14px">
+        <div style="font-size:12px;font-weight:700;color:var(--ts);margin-bottom:8px">
+          연차 소멸 처리
+          <span style="font-size:10px;color:var(--th);font-weight:400;margin-left:6px">미사용 연차 기간 만료 처리</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 2fr auto;gap:6px;align-items:end;margin-bottom:8px">
+          <div>
+            <div style="font-size:10px;color:var(--th);margin-bottom:3px">소멸일</div>
+            <input type="date" class="form-input" id="sl-expire-date" value="${today}" style="padding:6px 8px;font-size:12px" />
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--th);margin-bottom:3px">소멸 일수</div>
+            <input type="number" class="form-input" id="sl-expire-days" value="0" min="0" step="0.5" style="padding:6px 8px;font-size:12px" />
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--th);margin-bottom:3px">사유</div>
+            <input class="form-input" id="sl-expire-reason" placeholder="예: 2025년 미사용 연차 소멸" style="padding:6px 8px;font-size:12px" />
+          </div>
+          <button class="btn-submit" onclick="addLeaveExpire('${userId}')" style="padding:7px 12px;font-size:12px;white-space:nowrap">추가</button>
+        </div>
+        <!-- 소멸 이력 -->
+        <div style="max-height:120px;overflow-y:auto">
+          ${expires.length ? expires.map(e=>`
+            <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--crd);font-size:11px">
+              <span style="color:var(--th);width:80px">${e.expire_date}</span>
+              <span style="color:var(--rd);font-weight:600;width:40px">-${e.days}일</span>
+              <span style="flex:1;color:var(--ts)">${e.reason||''}</span>
+              <button onclick="deleteLeaveExpire(${e.id},'${userId}','${userName}')" style="background:none;border:none;cursor:pointer;color:var(--th);font-size:11px">✕</button>
+            </div>`).join('') : '<div style="font-size:11px;color:var(--th);padding:6px 0">소멸 이력 없음</div>'}
+        </div>
+      </div>
+
       <div class="modal-footer">
-        <button class="btn-sm ghost" onclick="document.getElementById('staffLeaveModal').remove()">취소</button>
-        <button class="btn-sm primary" onclick="saveStaffLeaveInit('${userId}')">저장</button>
+        <button class="btn-sm ghost" onclick="document.getElementById('staffLeaveModal').remove()">닫기</button>
+        <button class="btn-sm primary" onclick="saveStaffLeaveInit('${userId}','${userName}')">보정값 저장</button>
       </div>
     </div>`;
   document.body.appendChild(m);
 }
 
-async function saveStaffLeaveInit(userId) {
-  const total = parseFloat(document.getElementById('sl-total')?.value) || 0;
-  const used  = parseFloat(document.getElementById('sl-used')?.value)  || 0;
-  const date  = document.getElementById('sl-date')?.value || new Date().toISOString().slice(0,10);
+async function saveStaffLeaveInit(userId, userName) {
+  const adjust = parseFloat(document.getElementById('sl-adjust')?.value) || 0;
+  const used   = parseFloat(document.getElementById('sl-used')?.value)   || 0;
+  const note   = document.getElementById('sl-note')?.value.trim() || null;
   await sb.from('annual_leave_balance').upsert({
-    user_id: userId, init_total: total, init_used: used, init_date: date,
+    user_id: userId, adjust, init_used: used, note,
     updated_at: new Date().toISOString()
   }, {onConflict: 'user_id'});
   document.getElementById('staffLeaveModal')?.remove();
   alert('저장되었습니다.');
+  // 인원현황 연차 셀 즉시 갱신
+  const { data: u } = await sb.from('users').select('id,name,hire_date').eq('id',userId).single();
+  if (u) loadStaffLeaveBalance([u]);
+}
+
+// 연차 소멸 추가
+async function addLeaveExpire(userId) {
+  const expireDate = document.getElementById('sl-expire-date')?.value;
+  const days       = parseFloat(document.getElementById('sl-expire-days')?.value) || 0;
+  const reason     = document.getElementById('sl-expire-reason')?.value.trim();
+  if (!expireDate || days <= 0) { alert('소멸일과 소멸 일수를 입력해주세요.'); return; }
+  if (!confirm(`${expireDate} 기준 ${days}일을 소멸 처리할까요?`)) return;
+  await sb.from('annual_leave_expire').insert({
+    user_id: userId, expire_date: expireDate, days, reason: reason||null, created_by: currentUser.id
+  });
+  const { data: all } = await sb.from('annual_leave_expire').select('days').eq('user_id', userId);
+  const totalExpire = (all||[]).reduce((s,e)=>s+(e.days||0), 0);
+  await sb.from('annual_leave_balance').upsert({
+    user_id: userId, expire_used: totalExpire, updated_at: new Date().toISOString()
+  }, {onConflict:'user_id'});
+  const { data: u } = await sb.from('users').select('name').eq('id',userId).single();
+  openStaffLeaveEdit(userId, u?.name||'');
+}
+
+// 연차 소멸 삭제
+async function deleteLeaveExpire(expireId, userId, userName) {
+  if (!confirm('이 소멸 이력을 삭제할까요?')) return;
+  await sb.from('annual_leave_expire').delete().eq('id', expireId);
+  const { data: all } = await sb.from('annual_leave_expire').select('days').eq('user_id', userId);
+  const totalExpire = (all||[]).reduce((s,e)=>s+(e.days||0), 0);
+  await sb.from('annual_leave_balance').upsert({
+    user_id: userId, expire_used: totalExpire, updated_at: new Date().toISOString()
+  }, {onConflict:'user_id'});
+  openStaffLeaveEdit(userId, userName);
 }
 
 async function renderReqAdmin(area) {
