@@ -7172,8 +7172,12 @@ async function confirmDeleteSchedule(id, store, year, month) {
 
   alert(`"${label}" 삭제 완료`);
 
-  // 목록 새로고침 — 현재 페이지 재렌더
-  goPage('schedules');
+  // 목록 강제 새로고침
+  currentPage = 'schedules';
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  const nb = document.getElementById('nav-schedules');
+  if (nb) nb.classList.add('active');
+  renderSchedules(document.getElementById('contentArea'));
 }
 
 async function goToScheduleEdit() {
@@ -7412,6 +7416,9 @@ async function renderScheduleEdit(area) {
           <div id="schNotesView" style="background:var(--cr);border:0.5px solid var(--crd);border-radius:8px;padding:9px 12px;font-size:13px;min-height:72px;white-space:pre-wrap;line-height:1.7;color:var(--tm)">${curSchedule?.special_notes||'<span style="color:var(--th)">입퇴사, 휴점, 행사, 지각인원 등 특이사항</span>'}</div>
           <textarea class="form-input" id="schNotes" rows="4" style="display:none;margin-top:4px" placeholder="입퇴사, 휴점, 행사, 지각인원 등 특이사항" oninput="cacheMemo('notes',this.value)">${curSchedule?.special_notes||''}</textarea>
           <!-- 퇴사 예정자 패널 -->
+          <!-- 당월 신규 입사자 패널 -->
+          <div id="newHirePanel" style="margin-top:8px;display:none"></div>
+          <!-- 퇴사 예정자 패널 -->
           <div id="retirePanel" style="margin-top:8px;display:none"></div>
         </div>
       </div>
@@ -7506,6 +7513,8 @@ async function renderScheduleEdit(area) {
     if (curSchedule?.id) initBalancePanel();
     else updateDailyCountRow();
     restoreMemoCache();
+    renderNewHirePanel();
+    if (window.__retireList?.length) renderRetirePanel();
   }, 300);
 }
 
@@ -7733,6 +7742,80 @@ function addExtraStaff() {
 // ═══════════════════════════════════════════
 
 // 퇴사 예정 패널 렌더 (특이사항 아래)
+
+// ═══════════════════════════════════════════
+// 당월 신규 입사자 패널
+// ═══════════════════════════════════════════
+async function renderNewHirePanel() {
+  const panel = document.getElementById('newHirePanel');
+  if (!panel) return;
+
+  const year  = window.__schYear;
+  const month = window.__schMonth;
+  const store = window.__schStore;
+  const monthStart = `${year}-${String(month).padStart(2,'0')}-01`;
+  const monthEnd   = `${year}-${String(month).padStart(2,'0')}-${String(new Date(year,month,0).getDate()).padStart(2,'0')}`;
+
+  const { data: newHires } = await sb.from('users')
+    .select('id,name,hire_date,role,employment_type,pt_work_hours,pt_break_minutes,pt_hours_per_day')
+    .eq('store', store).eq('active', true)
+    .gte('hire_date', monthStart).lte('hire_date', monthEnd);
+
+  if (!newHires || newHires.length === 0) { panel.style.display='none'; return; }
+
+  // 공휴일 로드 (정규직 휴무 계산용)
+  const { data: hols } = await sb.from('holidays').select('date').gte('date',monthStart).lte('date',monthEnd);
+  const holSet = new Set((hols||[]).map(h=>h.date));
+
+  const items = newHires.map(u => {
+    const isPT  = u.employment_type === 'parttime';
+    const hireD = u.hire_date;
+    const daysInM = new Date(year, month, 0).getDate();
+    let infoHtml = '';
+
+    if (isPT) {
+      // PT: 계약 근로시간 / 총 체류시간 표시
+      const workH  = u.pt_work_hours || '-';
+      const breakM = u.pt_break_minutes != null ? u.pt_break_minutes : 30;
+      const totalH = u.pt_work_hours
+        ? (parseFloat(u.pt_work_hours) + breakM/60).toFixed(1) : '-';
+      infoHtml = `입사일: <strong>${hireD}</strong> &nbsp;|&nbsp;
+        계약 근로시간: <strong>${workH}h</strong> &nbsp;|&nbsp;
+        총 체류시간: <strong>${totalH}h</strong>
+        <span style="font-size:10px;color:var(--th);margin-left:3px">(휴게 ${breakM}분 포함)</span>`;
+    } else {
+      // 정규직: 입사일~월말 주말/공휴일 = 당월 휴무 발생 기준
+      let offDays = 0;
+      for (let d = parseInt(hireD.slice(8,10)); d <= daysInM; d++) {
+        const ds  = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const dow = new Date(year, month-1, d).getDay();
+        if (dow===0 || dow===6 || holSet.has(ds)) offDays++;
+      }
+      infoHtml = `입사일: <strong>${hireD}</strong> &nbsp;|&nbsp;
+        입사일~월말 주말/공휴일: <strong>${offDays}일</strong>
+        <span style="font-size:10px;color:var(--th);margin-left:3px">(= 당월 휴무 발생 기준)</span>`;
+    }
+
+    return `<div style="padding:7px 10px;background:#fff;border-radius:7px;margin-bottom:5px">
+      <div>
+        <span style="font-size:12px;font-weight:600;color:var(--tm)">${u.name}</span>
+        <span style="font-size:10px;color:var(--th);margin-left:6px">${u.role||''}</span>
+        ${isPT ? '<span style="font-size:9px;background:var(--blb);color:var(--bl);border-radius:4px;padding:1px 5px;margin-left:4px;font-weight:600">PT</span>' : ''}
+        <div style="font-size:11px;color:var(--ts);margin-top:3px;line-height:1.8">${infoHtml}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  panel.style.display = 'block';
+  panel.innerHTML = `
+    <div style="background:var(--gnb);border:0.5px solid var(--gn);border-radius:8px;padding:10px 12px">
+      <div style="font-size:11px;font-weight:700;color:var(--gn);margin-bottom:7px">
+        <i class="ti ti-user-plus"></i> 당월 신규 입사 인원
+      </div>
+      ${items}
+    </div>`;
+}
+
 async function renderRetirePanel() {
   const panel = document.getElementById('retirePanel');
   if (!panel) return;
@@ -7769,12 +7852,15 @@ async function renderRetirePanel() {
     }
 
     return `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:8px 10px;background:#fff;border-radius:7px;margin-bottom:5px">
-      <div>
+      <div style="flex:1">
         <span style="font-size:12px;font-weight:600;color:var(--tm)">${r.name}</span>
         <span style="font-size:10px;color:var(--th);margin-left:6px">${r.store}</span>
         ${leaveInfo}
       </div>
-      <button onclick="removeRetireEntry(${i})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:13px;flex-shrink:0;padding:2px 4px" title="삭제"><i class="ti ti-x"></i></button>
+      <div style="display:flex;gap:4px;flex-shrink:0;align-items:flex-start;padding-top:2px">
+        <button onclick="editRetireEntry(${i})" style="background:none;border:0.5px solid var(--crd);border-radius:5px;color:var(--ts);cursor:pointer;font-size:12px;padding:2px 6px" title="퇴사일 수정"><i class="ti ti-pencil"></i></button>
+        <button onclick="removeRetireEntry(${i})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:13px;padding:2px 4px" title="삭제"><i class="ti ti-x"></i></button>
+      </div>
     </div>`;
   }).join('');
 
@@ -7790,8 +7876,42 @@ async function renderRetirePanel() {
 
 function removeRetireEntry(idx) {
   if (!window.__retireList) return;
+  const r = window.__retireList[idx];
+  // 해당 직원의 퇴사 후 셀 비활성 해제 (다시 편집 가능하게)
+  if (r) restoreRetireCells(r.id);
   window.__retireList.splice(idx, 1);
   renderRetirePanel();
+}
+
+function editRetireEntry(idx) {
+  if (!window.__retireList) return;
+  const r = window.__retireList[idx];
+  if (!r) return;
+  const newDate = prompt(`[${r.name}] 퇴사일 수정\n현재: ${r.retireDate}\n\n새 퇴사일을 입력하세요 (YYYY-MM-DD):`, r.retireDate);
+  if (!newDate) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) { alert('날짜 형식이 올바르지 않습니다.'); return; }
+  // 이전 퇴사일 기준 셀 복원 후 새 날짜 적용
+  restoreRetireCells(r.id);
+  r.retireDate = newDate;
+  applyRetireToSchedule(r.id, newDate);
+  renderRetirePanel();
+}
+
+// 퇴사 비활성 셀 복원 (삭제/수정 시)
+function restoreRetireCells(userId) {
+  if (!userId) return;
+  const tbody = document.getElementById('schTbody');
+  if (!tbody) return;
+  tbody.querySelectorAll(`select[data-staff="${userId}"]`).forEach(sel => {
+    sel.disabled = false;
+    sel.style.color = '';
+    sel.style.cursor = '';
+    const td = sel.closest('td');
+    if (td) {
+      td.style.background = '';
+      td.title = '';
+    }
+  });
 }
 
 /**
@@ -7994,7 +8114,9 @@ async function buildStaffRowWithCross(staff, si, daysInMonth, year, month, allCo
       <div style="display:flex;align-items:center;gap:4px">
         <span class="sch-drag-handle" style="cursor:grab;color:var(--th);font-size:15px;padding:2px 3px;flex-shrink:0;user-select:none" title="드래그하여 순서 변경">⠿</span>
         <span style="flex:1">${staff.name}${staff.isExtra?' <span style="font-size:9px;color:var(--th)">(지원)</span>':''}</span>
-        ${!staff.isExtra?`<button onclick="removeStaffFromSchedule(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px" title="목록에서 제외">✕</button>`:''}
+        ${!staff.isExtra
+          ? `<button onclick="removeStaffFromSchedule(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px" title="목록에서 제외">✕</button>`
+          : `<button onclick="removeExtraStaff(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px" title="지원인력 제외">✕</button>`}
       </div>
     </td>`;
 
@@ -8804,24 +8926,24 @@ async function initBalancePanel() {
 async function enterSchEditMode() {
   window.__schEditMode = true;
 
-  // 버튼 전환
+  // 버튼 전환 — 없으면 show, 있으면 display 변경
   const btnEdit    = document.getElementById('btnSchEdit');
   const btnCancel  = document.getElementById('btnSchEditCancel');
   const btnSave    = document.getElementById('btnSchSave');
   const btnConfirm = document.getElementById('btnSchConfirm');
-  if (btnEdit)    btnEdit.style.display    = 'none';
-  if (btnCancel)  btnCancel.style.display  = '';
-  if (btnSave)    btnSave.style.display    = '';
+  if (btnEdit)    btnEdit.style.display = 'none';
+  if (btnCancel)  btnCancel.style.display = '';
+  if (btnSave)    btnSave.style.display = '';
   if (btnConfirm) btnConfirm.style.display = '';
 
   // 셀 전체를 select로 다시 그리기
   await rebuildScheduleCells(true);
 
-  // 셀 컨텍스트 메뉴(메모) 재등록
+  // 드래그 재등록 (편집 모드에서만)
   setTimeout(() => {
     registerCellMemoEvents();
     registerDragSort();
-  }, 100);
+  }, 150);
 }
 
 async function exitSchEditMode(skipConfirm = false) {
@@ -8842,8 +8964,13 @@ async function exitSchEditMode(skipConfirm = false) {
   if (btnConfirm) btnConfirm.style.display = 'none';
 
   // 셀 전체를 뷰 모드 div로 다시 그리기
-  // DB에서 다시 불러오지 않고 메모리(curScheduleEntries) 기준으로 렌더
   await rebuildScheduleCells(false);
+  // 뷰 모드에서 드래그 비활성
+  const tbody = document.getElementById('schTbody');
+  if (tbody) {
+    if (tbody._dragCleanup) { tbody._dragCleanup(); }
+    tbody.querySelectorAll('tr').forEach(r => r.setAttribute('draggable','false'));
+  }
 }
 
 // 셀만 다시 렌더 (전체 페이지 재로드 없이)
@@ -8870,28 +8997,33 @@ async function rebuildScheduleCells(editMode) {
   );
   const rowsArray = await Promise.all(rowPromises);
   const tbody = document.getElementById('schTbody');
-  if (tbody) tbody.innerHTML = rowsArray.join('');
+  if (tbody) {
+    tbody.innerHTML = rowsArray.join('');
+    // 재렌더 후 드래그 재등록 (이전 이벤트 cleanup 후 재부착)
+    if (editMode) registerDragSort();
+  }
 
   updateDailyCountRow();
 }
 
 function registerDragSort() {
   const tbody = document.getElementById('schTbody');
-  if (!tbody || tbody._dragRegistered) return;
-  tbody._dragRegistered = true;
+  if (!tbody) return;
+  // 기존 이벤트 제거 후 재등록 (rebuildScheduleCells 이후에도 동작)
+  if (tbody._dragCleanup) tbody._dragCleanup();
 
   let dragSrc = null;
 
-  tbody.addEventListener('dragstart', e => {
+  const onDragStart = e => {
     const handle = e.target.closest('.sch-drag-handle');
     if (!handle) { e.preventDefault(); return; }
     dragSrc = handle.closest('tr');
     if (!dragSrc) return;
-    dragSrc.style.opacity = '0.5';
+    dragSrc.style.opacity = '0.4';
     e.dataTransfer.effectAllowed = 'move';
-  });
-
-  tbody.addEventListener('dragover', e => {
+    e.dataTransfer.setData('text/plain', '');
+  };
+  const onDragOver = e => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     const tr = e.target.closest('tr');
@@ -8900,66 +9032,71 @@ function registerDragSort() {
     const srcIdx = rows.indexOf(dragSrc);
     const tgtIdx = rows.indexOf(tr);
     if (srcIdx < 0 || tgtIdx < 0) return;
-    // 드래그 중 행 위치 미리 보기
-    tbody.querySelectorAll('tr').forEach(r => r.style.borderTop = '');
-    tr.style.borderTop = srcIdx > tgtIdx ? '2px solid var(--br)' : '';
-    tr.style.borderBottom = srcIdx < tgtIdx ? '2px solid var(--br)' : '';
-  });
-
-  tbody.addEventListener('dragleave', e => {
-    tbody.querySelectorAll('tr').forEach(r => {
-      r.style.borderTop = ''; r.style.borderBottom = '';
-    });
-  });
-
-  tbody.addEventListener('dragend', e => {
+    tbody.querySelectorAll('tr').forEach(r => { r.style.borderTop=''; r.style.borderBottom=''; });
+    if (srcIdx > tgtIdx) tr.style.borderTop = '2px solid var(--br)';
+    else tr.style.borderBottom = '2px solid var(--br)';
+  };
+  const onDragLeave = () => {
+    tbody.querySelectorAll('tr').forEach(r => { r.style.borderTop=''; r.style.borderBottom=''; });
+  };
+  const onDragEnd = () => {
     if (dragSrc) dragSrc.style.opacity = '';
-    tbody.querySelectorAll('tr').forEach(r => {
-      r.style.borderTop = ''; r.style.borderBottom = '';
-    });
+    tbody.querySelectorAll('tr').forEach(r => { r.style.borderTop=''; r.style.borderBottom=''; });
+    // draggable 해제
+    tbody.querySelectorAll('tr').forEach(r => r.setAttribute('draggable','false'));
     dragSrc = null;
-  });
-
-  tbody.addEventListener('drop', e => {
+  };
+  const onDrop = e => {
     e.preventDefault();
     const tr = e.target.closest('tr');
     if (!tr || tr === dragSrc || !dragSrc) return;
-
-    // 현재 셀 값 메모리에 저장
     syncCellsToMemory();
-
     const rows = Array.from(tbody.rows);
     const srcIdx = rows.indexOf(dragSrc);
     const tgtIdx = rows.indexOf(tr);
-
-    // DOM 순서 변경
-    if (srcIdx < tgtIdx) {
-      tbody.insertBefore(dragSrc, tr.nextSibling);
-    } else {
-      tbody.insertBefore(dragSrc, tr);
-    }
-
-    // curScheduleStaff 배열도 동일하게 재정렬
+    if (srcIdx < 0 || tgtIdx < 0) return;
+    if (srcIdx < tgtIdx) tbody.insertBefore(dragSrc, tr.nextSibling);
+    else tbody.insertBefore(dragSrc, tr);
+    // DOM 이동 후 실제 위치로 배열 재정렬
     const moved = curScheduleStaff.splice(srcIdx, 1)[0];
-    const newIdx = srcIdx < tgtIdx ? tgtIdx - 1 : tgtIdx;
-    curScheduleStaff.splice(newIdx, 0, moved);
+    const newDomIdx = Array.from(tbody.rows).indexOf(dragSrc);
+    curScheduleStaff.splice(newDomIdx, 0, moved);
+    Array.from(tbody.rows).forEach((row,i) => { row.dataset.staffIdx = i; });
+    updateDailyCountRow();
+  };
 
-    // 행 idx 갱신
-    Array.from(tbody.rows).forEach((row, i) => {
-      row.dataset.staffIdx = i;
-    });
-  });
+  tbody.addEventListener('dragstart', onDragStart);
+  tbody.addEventListener('dragover', onDragOver);
+  tbody.addEventListener('dragleave', onDragLeave);
+  tbody.addEventListener('dragend', onDragEnd);
+  tbody.addEventListener('drop', onDrop);
 
-  // 핸들에 draggable 설정
-  tbody.querySelectorAll('.sch-drag-handle').forEach(h => {
-    h.parentElement.closest('tr').setAttribute('draggable', 'false');
-    h.addEventListener('mousedown', e => {
-      h.closest('tr').setAttribute('draggable', 'true');
+  // 핸들 mousedown → tr.draggable=true
+  function attachHandles() {
+    tbody.querySelectorAll('.sch-drag-handle').forEach(h => {
+      if (h._dragAttached) return;
+      h._dragAttached = true;
+      h.addEventListener('mousedown', () => {
+        const tr = h.closest('tr');
+        if (tr) tr.setAttribute('draggable', 'true');
+      });
     });
-    h.addEventListener('mouseup', e => {
-      h.closest('tr').setAttribute('draggable', 'false');
-    });
-  });
+  }
+  attachHandles();
+  // 새 행 추가 시 자동 핸들 등록
+  const obs = new MutationObserver(attachHandles);
+  obs.observe(tbody, {childList:true});
+
+  // cleanup 등록 (재호출 시 이전 이벤트 제거)
+  tbody._dragCleanup = () => {
+    tbody.removeEventListener('dragstart', onDragStart);
+    tbody.removeEventListener('dragover', onDragOver);
+    tbody.removeEventListener('dragleave', onDragLeave);
+    tbody.removeEventListener('dragend', onDragEnd);
+    tbody.removeEventListener('drop', onDrop);
+    obs.disconnect();
+    delete tbody._dragCleanup;
+  };
 }
 
 
