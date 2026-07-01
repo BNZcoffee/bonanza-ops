@@ -2476,10 +2476,9 @@ async function renderStaff(area) {
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-left:auto">
         ${canEditStaff() ? `
         <button class="btn-new" style="background:var(--brm)" onclick="openEditUser(null)"><i class="ti ti-user-plus"></i> 직원 추가</button>
-        <button class="btn-new" style="background:#4A6FA5" onclick="openBulkAddUser()"><i class="ti ti-users-plus"></i> 일괄 등록</button>
+        <button class="btn-new" style="background:#4A6FA5" onclick="openBulkImport()"><i class="ti ti-users-plus"></i> 일괄 등록</button>
         <button class="btn-new" style="background:var(--gn)" onclick="openStoreManager()"><i class="ti ti-building"></i> 매장 관리</button>
         <button class="btn-new" style="background:var(--brm)" onclick="openRoleManager()"><i class="ti ti-id-badge-2"></i> 직위 관리</button>
-        <button class="btn-new" onclick="openBulkImport()"><i class="ti ti-table-import"></i> 일괄 등록</button>
         ` : '<span style="font-size:12px;color:var(--th);align-self:center">조회 전용 (수정 권한: 운영총괄·인사팀)</span>'}
       </div>
     </div>
@@ -2659,15 +2658,19 @@ function togglePtFields(val) {
   const wrap = document.getElementById('eu_pt_wrap');
   if (!wrap) return;
   wrap.style.display = val === 'parttime' ? 'grid' : 'none';
-  // 실 근로시간 자동 계산
   calcPtNet();
 }
 function calcPtNet() {
-  const work  = parseFloat(document.getElementById('eu_pt_work')?.value || 0);
+  const work  = parseFloat(document.getElementById('eu_pt_work')?.value  || 0);
   const brk   = parseFloat(document.getElementById('eu_pt_break')?.value || 0);
-  const net   = work - brk / 60;
-  const netEl = document.getElementById('eu_pt_net');
-  if (netEl) netEl.textContent = (net > 0 ? net.toFixed(1) + 'h' : '-');
+  // 총 체류시간 = 근로시간 + 휴게시간 (근무조 매칭 기준)
+  const total = work + brk / 60;
+  // 실 근로시간 = 근로시간만 (휴게 제외, 시급 계산용)
+  const net   = work;
+  const totalEl = document.getElementById('eu_pt_total');
+  const netEl   = document.getElementById('eu_pt_net');
+  if (totalEl) totalEl.textContent = total > 0 ? total.toFixed(1) + 'h' : '-';
+  if (netEl)   netEl.textContent   = net   > 0 ? net.toFixed(1)   + 'h' : '-';
 }
 
 function toggleOfficeCode(checked){
@@ -2725,26 +2728,31 @@ async function openEditUser(userId){
           <option value="parttime"${u?.employment_type==='parttime'?' selected':''}>PT (시간제)</option>
         </select>
       </div>
-      <div id="eu_pt_wrap" style="grid-column:1/-1;display:${u?.employment_type==='parttime'?'grid':'none'};grid-template-columns:1fr 1fr 1fr;gap:10px;background:var(--blb);border-radius:8px;padding:10px 12px">
+      <div id="eu_pt_wrap" style="grid-column:1/-1;display:${u?.employment_type==='parttime'?'grid':'none'};grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;background:var(--blb);border-radius:8px;padding:10px 12px">
         <div><label class="form-label">계약 근로시간 <span style="color:var(--rd)">*</span></label>
           <div style="display:flex;align-items:center;gap:6px">
-            <input class="form-input" type="number" id="eu_pt_work" value="${u?.pt_work_hours||''}" placeholder="예: 6" min="1" max="12" step="0.5" style="width:80px" oninput="calcPtNet()"/>
+            <input class="form-input" type="number" id="eu_pt_work" value="${u?.pt_work_hours||''}" placeholder="예: 6" min="1" max="12" step="0.5" style="width:70px" oninput="calcPtNet()"/>
             <span style="font-size:12px;color:var(--ts)">시간</span>
           </div>
         </div>
         <div><label class="form-label">휴게시간</label>
           <div style="display:flex;align-items:center;gap:6px">
-            <input class="form-input" type="number" id="eu_pt_break" value="${u?.pt_break_minutes||30}" placeholder="30" min="0" max="120" step="15" style="width:80px" oninput="calcPtNet()"/>
+            <input class="form-input" type="number" id="eu_pt_break" value="${u?.pt_break_minutes||30}" placeholder="30" min="0" max="120" step="15" style="width:70px" oninput="calcPtNet()"/>
             <span style="font-size:12px;color:var(--ts)">분</span>
           </div>
         </div>
-        <div><label class="form-label">실 근로시간 (자동)</label>
-          <div style="background:var(--cr);border-radius:8px;padding:9px 12px;font-size:13px;font-weight:600;color:var(--bl)" id="eu_pt_net">
-            ${u?.employment_type==='parttime' ? ((u?.pt_work_hours||0) - (u?.pt_break_minutes||0)/60).toFixed(1)+'h' : '-'}
+        <div><label class="form-label">총 체류시간 <span style="font-size:9px;color:var(--th)">(자동·근무조 매칭)</span></label>
+          <div style="background:var(--cr);border-radius:8px;padding:9px 12px;font-size:13px;font-weight:600;color:var(--bl)" id="eu_pt_total">
+            ${u?.employment_type==='parttime' ? ((u?.pt_work_hours||0) + (u?.pt_break_minutes||0)/60).toFixed(1)+'h' : '-'}
+          </div>
+        </div>
+        <div><label class="form-label">실 근로시간 <span style="font-size:9px;color:var(--th)">(자동·시급 계산용)</span></label>
+          <div style="background:var(--cr);border-radius:8px;padding:9px 12px;font-size:13px;font-weight:600;color:var(--gn)" id="eu_pt_net">
+            ${u?.employment_type==='parttime' ? ((u?.pt_work_hours||0)).toFixed(1)+'h' : '-'}
           </div>
         </div>
         <div style="grid-column:1/-1;font-size:11px;color:var(--th)">
-          ※ 실 근로시간과 일치하는 근무조만 PT 직원에게 배정됩니다.
+          ※ <strong>총 체류시간</strong>(근로+휴게)과 일치하는 근무조만 PT 직원에게 배정됩니다. &nbsp;|&nbsp; 실 근로시간 = 계약 근로시간만 (휴게 제외, 시급 계산 기준)
         </div>
       </div>
       <div><label class="form-label">소속 매장 *</label>
@@ -2759,7 +2767,7 @@ async function openEditUser(userId){
       </div>
       <div><label class="form-label">연락처</label><input class="form-input" id="eu_phone" value="${u?.phone||''}" placeholder="010-0000-0000"/></div>
       <div><label class="form-label">이메일</label><input class="form-input" id="eu_email" value="${u?.email||''}" placeholder="email@bonanza.kr"/></div>
-      <div><label class="form-label">입사일</label><input class="form-input" type="date" id="eu_hire" value="${u?.hire_date||''}"/></div>
+      <div><label class="form-label">입사일 <span style="color:var(--rd)">*</span></label><input class="form-input" type="date" id="eu_hire" value="${u?.hire_date||''}" required/></div>
       <div><label class="form-label">퇴사일 <span style="font-size:10px;color:var(--th)">(익일 자동 비활성)</span></label>
         <input class="form-input" type="date" id="eu_retire" value="${u?.retire_date||''}"/>
       </div>
@@ -2854,6 +2862,7 @@ async function submitEditUser(){
   const isMaster = document.getElementById('eu_master')?.checked || false;
   const isVice = document.getElementById('eu_vice')?.checked || false;
   if(!name||!store){alert('이름과 소속매장은 필수입니다.');return;}
+  if(!hire){alert('입사일은 필수 항목입니다.');return;}
   const today = new Date().toISOString().slice(0,10);
   const active = !retire || (retire >= today);
   const employmentType = document.getElementById('eu_employment')?.value || 'fulltime';
@@ -2861,8 +2870,11 @@ async function submitEditUser(){
     ? parseFloat(document.getElementById('eu_pt_work')?.value || 0) : null;
   const ptBreakMin     = employmentType === 'parttime'
     ? parseInt(document.getElementById('eu_pt_break')?.value || 30) : null;
-  const ptNetHours     = (ptWorkHours && ptBreakMin != null)
-    ? Math.round((ptWorkHours - ptBreakMin / 60) * 100) / 100 : null;
+  // 총 체류시간 = 근로시간 + 휴게시간 → 근무조 매칭 기준
+  const ptTotalHours   = (ptWorkHours && ptBreakMin != null)
+    ? Math.round((ptWorkHours + ptBreakMin / 60) * 100) / 100 : null;
+  // 실 근로시간 = 근로시간만 → 시급 계산 기준 (저장은 pt_work_hours 그대로)
+  const ptNetHours     = ptTotalHours; // pt_hours_per_day에는 체류시간 저장
 
   if (employmentType === 'parttime' && (!ptWorkHours || ptWorkHours <= 0)) {
     alert('PT 직원은 계약 근로시간을 입력해주세요.'); return;
@@ -2934,8 +2946,11 @@ async function toggleActive(id, cur){
 }
 
 
-// ── 직원 일괄 등록 ────────────────────────────────────────────────
+// ── 직원 일괄 등록 (openBulkImport로 통합) ────────────────────────
 async function openBulkAddUser() {
+  return openBulkImport();
+}
+async function openBulkAddUser_legacy() {
   if (!canEditStaff()) { alert('인원현황 수정 권한이 없습니다.'); return; }
   const [{ data: stores }, { data: partList }] = await Promise.all([
     sb.from('store_options').select('*').order('sort_order'),
@@ -3122,7 +3137,8 @@ async function submitBulkAdd() {
     const part  = document.getElementById('b_part_'  + rowId)?.value || null;
     const ptWrk = emp === 'parttime' ? parseFloat(document.getElementById('b_pth_' + rowId)?.value || 0) : null;
     const ptBrk = emp === 'parttime' ? parseInt(document.getElementById('b_brk_' + rowId)?.value || 30) : null;
-    const ptNet = (ptWrk && ptBrk != null) ? Math.round((ptWrk - ptBrk/60)*100)/100 : null;
+    // 총 체류시간 = 근로+휴게 (근무조 매칭)
+  const ptNet = (ptWrk && ptBrk != null) ? Math.round((ptWrk + ptBrk/60)*100)/100 : null;
 
     if (!name) { skipped++; continue; }
     if (!store) { errors.push(`${name}: 매장 미선택`); failed++; continue; }
@@ -3245,36 +3261,43 @@ async function delStore(id, elemId){
 
 
 async function openBulkImport(){
-  // 일괄 등록 모달 열기
   document.querySelector('#catModal .modal-inner').classList.add('wide');
   document.getElementById('catModalTitle').textContent='직원 일괄 등록';
   document.getElementById('catList').innerHTML=`
-    <div class="hint-box" style="background:var(--gnb);border:0.5px solid var(--gn);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--gn);margin-bottom:12px">
-      아래 표에 직접 입력하거나, Google Sheets/Excel에서 복사 후 이름 첫 셀 클릭 → Cmd+V 붙여넣기<br>
-      직위: <strong>매니저/바리스타/파티쉐/구매팀/인사팀</strong> | 날짜: YYYY-MM-DD | 초기 비밀번호: 자동(bnz+코드숫자)
+    <div style="background:var(--gnb);border:0.5px solid var(--gn);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--gn);margin-bottom:12px;line-height:1.7">
+      <i class="ti ti-info-circle"></i> Google Sheets / Excel에서 복사 후 이름 첫 셀 클릭 → <strong>Ctrl+V</strong> 붙여넣기<br>
+      직위: <strong>매니저/바리스타/파티쉐/구매팀/인사팀</strong> &nbsp;|&nbsp; 날짜: <strong>YYYY-MM-DD</strong> &nbsp;|&nbsp; 고용형태: <strong>정규직/PT</strong><br>
+      초기 비밀번호: <strong>bnz+코드번호4자리</strong> 자동 부여 &nbsp;|&nbsp; 오류 인원은 건너뛰고 나머지 먼저 등록됩니다.
     </div>
     <div style="overflow-x:auto;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:8px">
-      <table style="width:100%;border-collapse:collapse">
+      <table style="width:100%;border-collapse:collapse;font-size:12px" id="bulkTable">
         <thead><tr style="background:var(--crm)">
-          <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd)">이름*</th>
-          <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd)">소속매장*</th>
-          <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd)">직위*</th>
-          <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd)">입사일</th>
-          <th style="padding:8px;font-size:11px;font-weight:700;color:var(--ts)">퇴사일</th>
-          <th style="width:30px"></th>
+          <th style="padding:7px 8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd);white-space:nowrap">이름*</th>
+          <th style="padding:7px 8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd);white-space:nowrap">소속매장*</th>
+          <th style="padding:7px 8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd);white-space:nowrap">직위*</th>
+          <th style="padding:7px 8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd);white-space:nowrap">입사일*</th>
+          <th style="padding:7px 8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd);white-space:nowrap">고용형태</th>
+          <th style="padding:7px 8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd);white-space:nowrap">계약근로(h)</th>
+          <th style="padding:7px 8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd);white-space:nowrap">휴게(분)</th>
+          <th style="padding:7px 8px;font-size:11px;font-weight:700;color:var(--ts);border-right:0.5px solid var(--crd);white-space:nowrap">이메일</th>
+          <th style="padding:7px 8px;font-size:11px;font-weight:700;color:var(--ts);white-space:nowrap">퇴사일</th>
+          <th style="width:28px"></th>
         </tr></thead>
         <tbody id="bulkTbody"></tbody>
       </table>
     </div>
-    <button onclick="addBulkRow()" style="background:none;border:0.5px dashed var(--crd);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--ts);cursor:pointer;margin-bottom:8px"><i class="ti ti-plus"></i> 행 추가</button>
+    <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+      <button onclick="addBulkRow()" style="background:none;border:0.5px dashed var(--crd);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--ts);cursor:pointer"><i class="ti ti-plus"></i> 행 추가</button>
+      <span style="font-size:11px;color:var(--th)">* 필수 항목 | PT 선택 시 계약근로/휴게 입력 필수</span>
+    </div>
+    <div id="bulkResult" style="margin-bottom:8px"></div>
     <div id="bulkErr" style="font-size:12px;color:var(--rd);min-height:16px"></div>`;
-  
+
   document.getElementById('catModalAddBtn').style.display='none';
-  document.getElementById('catModalOkBtn').textContent='등록하기';
+  document.getElementById('catModalOkBtn').textContent='일괄 등록';
   document.getElementById('catModalOkBtn').onclick=submitBulk;
   document.getElementById('catModal').classList.add('open');
-  
-  // 기본 5행
+  bulkRowCnt=0;
   for(let i=0;i<5;i++) addBulkRow();
 }
 
@@ -3282,29 +3305,50 @@ let bulkRowCnt=0;
 function addBulkRow(){
   const tbody=document.getElementById('bulkTbody');if(!tbody)return;
   const i=bulkRowCnt++;
-  const cs='border:none;padding:7px 8px;font-size:13px;width:100%;background:transparent;outline:none;font-family:inherit';
+  const cs='border:none;padding:6px 7px;font-size:12px;width:100%;background:transparent;outline:none;font-family:inherit';
+  const bd='border-right:0.5px solid var(--crd);border-bottom:0.5px solid var(--crd)';
   const tr=document.createElement('tr');
+  tr.id='bulk-tr-'+i;
   tr.innerHTML=`
-    <td style="border-right:0.5px solid var(--crd);border-bottom:0.5px solid var(--crd)"><input class="bcell" data-col="name" data-row="${i}" style="${cs}" placeholder="홍길동" onpaste="handleBulkPaste(event,${i},'name')"/></td>
-    <td style="border-right:0.5px solid var(--crd);border-bottom:0.5px solid var(--crd)"><input class="bcell" data-col="store" data-row="${i}" style="${cs}" placeholder="강남점"/></td>
-    <td style="border-right:0.5px solid var(--crd);border-bottom:0.5px solid var(--crd)">
+    <td style="${bd}"><input class="bcell" data-col="name" data-row="${i}" style="${cs}" placeholder="홍길동" onpaste="handleBulkPaste(event,${i},'name')"/></td>
+    <td style="${bd}"><input class="bcell" data-col="store" data-row="${i}" style="${cs}" placeholder="강남점"/></td>
+    <td style="${bd}">
       <select class="bcell" data-col="role" data-row="${i}" style="${cs};cursor:pointer">
         <option value="">선택</option>
         <option>매니저</option><option>바리스타</option><option>파티쉐</option>
-        <option>구매팀</option><option>인사팀</option>
+        <option>구매팀</option><option>인사팀</option><option>운영팀</option>
       </select>
     </td>
-    <td style="border-right:0.5px solid var(--crd);border-bottom:0.5px solid var(--crd)"><input class="bcell" data-col="hire" data-row="${i}" style="${cs}" placeholder="2024-01-01"/></td>
+    <td style="${bd}"><input class="bcell" data-col="hire" data-row="${i}" style="${cs}" placeholder="YYYY-MM-DD"/></td>
+    <td style="${bd}">
+      <select class="bcell" data-col="emp" data-row="${i}" style="${cs};cursor:pointer" onchange="toggleBulkEmp(${i},this.value)">
+        <option value="fulltime">정규직</option>
+        <option value="parttime">PT</option>
+      </select>
+    </td>
+    <td style="${bd}" id="bulk-pth-td-${i}"><input class="bcell" data-col="pth" data-row="${i}" style="${cs};background:var(--crm);color:var(--th)" placeholder="-" disabled/></td>
+    <td style="${bd}" id="bulk-brk-td-${i}"><input class="bcell" data-col="brk" data-row="${i}" style="${cs};background:var(--crm);color:var(--th)" placeholder="-" disabled/></td>
+    <td style="${bd}"><input class="bcell" data-col="email" data-row="${i}" style="${cs}" placeholder="email@bonanza.kr"/></td>
     <td style="border-bottom:0.5px solid var(--crd)"><input class="bcell" data-col="retire" data-row="${i}" style="${cs}" placeholder="(없으면 빈칸)"/></td>
-    <td style="border-bottom:0.5px solid var(--crd);text-align:center"><button onclick="this.closest('tr').remove()" style="background:none;border:none;color:var(--th);cursor:pointer"><i class="ti ti-x"></i></button></td>`;
+    <td style="border-bottom:0.5px solid var(--crd);text-align:center">
+      <button onclick="this.closest('tr').remove()" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:13px"><i class="ti ti-x"></i></button>
+    </td>`;
   tbody.appendChild(tr);
+}
+
+function toggleBulkEmp(i, val) {
+  const pthInp = document.querySelector('#bulk-tr-'+i+' [data-col="pth"]');
+  const brkInp = document.querySelector('#bulk-tr-'+i+' [data-col="brk"]');
+  const isPT   = val === 'parttime';
+  if (pthInp) { pthInp.disabled = !isPT; pthInp.style.background = isPT ? 'var(--cr)' : 'var(--crm)'; pthInp.style.color = isPT ? 'var(--tm)' : 'var(--th)'; pthInp.placeholder = isPT ? '예: 6' : '-'; }
+  if (brkInp) { brkInp.disabled = !isPT; brkInp.style.background = isPT ? 'var(--cr)' : 'var(--crm)'; brkInp.style.color = isPT ? 'var(--tm)' : 'var(--th)'; brkInp.placeholder = isPT ? '30' : '-'; }
 }
 
 function handleBulkPaste(e,startRow,startCol){
   const text=e.clipboardData?.getData('text');
   if(!text||(!text.includes('\t')&&!text.includes('\n')))return;
   e.preventDefault();
-  const cols=['name','store','role','hire','retire'];
+  const cols=['name','store','role','hire','emp','pth','brk','email','retire'];
   const startIdx=cols.indexOf(startCol);
   const tbody=document.getElementById('bulkTbody');
   const rows=Array.from(tbody.querySelectorAll('tr'));
@@ -3322,44 +3366,122 @@ function handleBulkPaste(e,startRow,startCol){
   });
 }
 
-const roleMap={'매니저':'manager','바리스타':'barista','파티쉐':'pastry','구매팀':'purchase','인사팀':'hr','운영팀':'admin'};
+const roleMap={'매니저':'manager','바리스타':'barista','파티쉐':'pastry','구매팀':'purchase','인사팀':'hr','운영팀':'admin','PT':'barista'};
 async function submitBulk(){
   if(!canEditStaff()){alert('등록 권한이 없습니다.');return;}
   const tbody=document.getElementById('bulkTbody');
   const rows=Array.from(tbody.querySelectorAll('tr'));
   const today=new Date().toISOString().slice(0,10);
-  const valid=[],errors=[];
+  const toRegister=[], skipErrors=[];
+
   rows.forEach((row,i)=>{
-    const name=row.querySelector('[data-col="name"]')?.value.trim();
-    const store=row.querySelector('[data-col="store"]')?.value.trim();
-    const roleKor=row.querySelector('[data-col="role"]')?.value.trim();
-    const hire=row.querySelector('[data-col="hire"]')?.value.trim()||null;
-    const retire=row.querySelector('[data-col="retire"]')?.value.trim()||null;
-    if(!name&&!store&&!roleKor)return;
-    if(!name){errors.push((i+1)+'행: 이름 없음');return;}
-    if(!store){errors.push((i+1)+'행: 매장 없음');return;}
+    const name    = row.querySelector('[data-col="name"]')?.value.trim();
+    const store   = row.querySelector('[data-col="store"]')?.value.trim();
+    const roleKor = row.querySelector('[data-col="role"]')?.value.trim();
+    const hire    = row.querySelector('[data-col="hire"]')?.value.trim()||null;
+    const retire  = row.querySelector('[data-col="retire"]')?.value.trim()||null;
+    const emp     = row.querySelector('[data-col="emp"]')?.value||'fulltime';
+    const pthVal  = row.querySelector('[data-col="pth"]')?.value.trim();
+    const brkVal  = row.querySelector('[data-col="brk"]')?.value.trim();
+    const email   = row.querySelector('[data-col="email"]')?.value.trim()||null;
+    if(!name&&!store&&!roleKor)return; // 빈 행 무시
+    const rowErrors=[];
+    if(!name)  rowErrors.push('이름 없음');
+    if(!store) rowErrors.push('매장 없음');
     const role=roleMap[roleKor];
-    if(!role){errors.push((i+1)+'행: 직위 오류('+roleKor+')');return;}
-    valid.push({name,store,role,hire,retire,active:!retire||(retire>=today)});
+    if(!role)  rowErrors.push('직위 오류('+roleKor+')');
+    if(!hire)  rowErrors.push('입사일 없음');
+    const isPT = emp==='parttime';
+    const ptWrk = isPT ? parseFloat(pthVal||0) : null;
+    const ptBrk = isPT ? parseInt(brkVal||30) : null;
+    if(isPT && (!ptWrk||ptWrk<=0)) rowErrors.push('PT 계약근로시간 없음');
+    // 오류 있어도 목록에 추가 (오류 표시 후 건너뜀)
+    const ptTotal = isPT&&ptWrk ? Math.round((ptWrk+ptBrk/60)*100)/100 : null;
+    toRegister.push({
+      rowNum:i+1, name, store, role, hire, retire, email, emp,
+      ptWrk, ptBrk, ptTotal,
+      active:!retire||(retire>=today),
+      errors: rowErrors
+    });
   });
-  const errEl=document.getElementById('bulkErr');
-  if(errors.length){if(errEl)errEl.textContent='오류: '+errors.join(' / ');return;}
-  if(!valid.length){if(errEl)errEl.textContent='등록할 내용이 없습니다.';return;}
+
+  if(!toRegister.length){
+    document.getElementById('bulkErr').textContent='등록할 내용이 없습니다.'; return;
+  }
+
   const btn=document.getElementById('catModalOkBtn');
-  btn.textContent='등록 중...';btn.disabled=true;
-  let ok=0,fail=0;
-  const registered=[];
-  for(const r of valid){
+  btn.textContent='등록 중...'; btn.disabled=true;
+
+  const results=[]; // {name, code, status, error}
+  for(const r of toRegister){
+    if(r.errors.length){
+      results.push({rowNum:r.rowNum, name:r.name||'(이름없음)', status:'skip', error:r.errors.join(', ')});
+      continue;
+    }
     const code=await getNextCode();
     const initPw=initPwFromCode(code);
-    const{error}=await sb.from('users').insert({code,name:r.name,store:r.store,role:r.role,password_hash:initPw,hire_date:r.hire||null,retire_date:r.retire||null,active:r.active});
-    if(error){ fail++; }
-    else { ok++; registered.push({...r, code, hire_date:r.hire||null}); }
+    const payload={
+      code, name:r.name, store:r.store, role:r.role,
+      password_hash:initPw, pw_set:false,
+      hire_date:r.hire, retire_date:r.retire||null,
+      email:r.email, active:r.active,
+      employment_type:r.emp,
+      pt_work_hours:r.ptWrk||null,
+      pt_break_minutes:r.ptBrk||null,
+      pt_hours_per_day:r.ptTotal||null
+    };
+    const{error}=await sb.from('users').insert(payload);
+    if(error){
+      results.push({rowNum:r.rowNum, name:r.name, code, status:'fail',
+        error: error.message.includes('unique') ? '코드 중복' : error.message.slice(0,60)});
+    } else {
+      // PT 계약 저장
+      if(r.emp==='parttime'&&r.ptWrk){
+        const{data:nu}=await sb.from('users').select('id').eq('code',code).maybeSingle();
+        if(nu) await sb.from('pt_contracts').insert({
+          user_id:nu.id, work_hours:r.ptWrk, break_minutes:r.ptBrk||30,
+          start_date:r.hire, note:'일괄 등록', created_by:currentUser.id
+        });
+      }
+      results.push({rowNum:r.rowNum, name:r.name, code, status:'ok', initPw});
+    }
   }
-  btn.textContent='등록하기';btn.disabled=false;
-  document.getElementById('catModal').classList.remove('open');
-  renderStaff(document.getElementById('contentArea'));
-  if(ok > 0) showBulkGuide(registered, fail);
+
+  btn.textContent='일괄 등록'; btn.disabled=false;
+
+  // 결과 표시
+  const okList   = results.filter(r=>r.status==='ok');
+  const failList = results.filter(r=>r.status==='fail');
+  const skipList = results.filter(r=>r.status==='skip');
+
+  const resultHtml = `
+    <div style="border:0.5px solid var(--crd);border-radius:10px;overflow:hidden;font-size:12px">
+      <div style="background:var(--crm);padding:8px 12px;font-size:13px;font-weight:600;color:var(--tm)">
+        등록 결과: 성공 ${okList.length}명 / 실패 ${failList.length}명 / 건너뜀 ${skipList.length}행
+      </div>
+      <div style="max-height:280px;overflow-y:auto">
+        ${results.map(r=>`
+          <div style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:0.5px solid var(--crd);background:${r.status==='ok'?'#fff':r.status==='fail'?'var(--rdb)':'var(--cr)'}">
+            <span style="font-size:10px;color:var(--th);min-width:28px">${r.rowNum}행</span>
+            <span style="font-weight:600;min-width:80px">${r.name||''}</span>
+            ${r.status==='ok'
+              ? `<span style="color:var(--gn)">✓ 등록 완료</span>
+                 <span style="color:var(--th);font-family:monospace;font-size:11px">${r.code}</span>
+                 <span style="color:var(--th);font-size:11px">초기PW: ${r.initPw}</span>`
+              : r.status==='fail'
+              ? `<span style="color:var(--rd)">✗ 오류: ${r.error}</span>`
+              : `<span style="color:var(--th)">⚠ 건너뜀: ${r.error}</span>`}
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+  document.getElementById('bulkResult').innerHTML = resultHtml;
+  document.getElementById('bulkErr').textContent = '';
+
+  if(okList.length>0){
+    renderStaff(document.getElementById('contentArea'));
+  }
+  btn.textContent='닫기'; btn.onclick=()=>document.getElementById('catModal').classList.remove('open');
 }
 
 // 일괄 등록 완료 후 안내문 모달
@@ -7474,8 +7596,9 @@ function onCellChange(sel) {
       if (shiftCode && shiftCode.start_time && shiftCode.end_time) {
         const [sh, sm] = shiftCode.start_time.split(':').map(Number);
         const [eh, em] = shiftCode.end_time.split(':').map(Number);
-        const shiftHours = ((eh*60+em) - (sh*60+sm)) / 60;
-        const contractHours = parseFloat(staffInfo.pt_hours_per_day);
+        // 근무조 시간 = 출근~퇴근 총 시간 (체류시간 기준으로 매칭)
+        const shiftHours    = ((eh*60+em) - (sh*60+sm)) / 60;
+        const contractHours = parseFloat(staffInfo.pt_hours_per_day); // 총 체류시간
         if (Math.abs(shiftHours - contractHours) > 0.5) {
           // 계약 시간과 30분 이상 차이나면 경고 후 차단
           const prev = curScheduleEntries[key];
