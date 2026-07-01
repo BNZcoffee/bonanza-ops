@@ -6791,7 +6791,9 @@ async function renderScheduleEdit(area) {
   const leaveColorMap = {};
   leaveTypes.forEach(l => leaveColorMap[l.code] = l.color);
 
-  // 근무조 코드 옵션 (select용)
+  // 근무조 코드 옵션 (select용) — 전역 캐시에도 저장
+  window.__cachedShiftCodes = shiftCodes;
+  window.__cachedLeaveTypes = leaveTypes;
   const allCodeOptions = [
     ...shiftCodes.map(s=>({value:s.code, label:s.code+(s.label?'('+s.label+')':'')+' '+(s.start_time||'')+'~'+(s.end_time||''), isShift:true})),
     ...leaveTypes.map(l=>({value:l.code, label:l.code, isShift:false}))
@@ -6887,7 +6889,11 @@ async function renderScheduleEdit(area) {
 
       ${canEdit ? `<div style="background:var(--cr);border-radius:8px;padding:10px 12px;margin-bottom:10px">
         <div style="font-size:11px;color:var(--th);margin-bottom:7px;font-weight:600">지원/교육 인력 추가</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center">
+        <div style="display:grid;grid-template-columns:100px 1fr 1fr auto;gap:6px;align-items:center">
+          <select class="form-input" id="extraTypeSelect" style="padding:7px 8px;font-size:12px">
+            <option value="지원">지원</option>
+            <option value="교육">교육</option>
+          </select>
           <select class="form-input" id="extraStoreSelect" onchange="loadExtraStaffByStore(this.value)"
             style="padding:7px 8px;font-size:12px">
             <option value="">매장 선택</option>
@@ -6919,6 +6925,8 @@ async function renderScheduleEdit(area) {
     </div>`;
 
   if (canEdit) loadExtraStoreOptions();
+  // 메모 이벤트 등록 (약간 딜레이)
+  setTimeout(registerCellMemoEvents, 200);
 }
 
 // 셀 변경 시 메모리에 즉시 반영 (저장은 별도 버튼)
@@ -7006,24 +7014,28 @@ function syncCellsToMemory() {
 }
 
 function addExtraStaff() {
-  const sel = document.getElementById('extraStaffSelect');
-  const val = sel?.value;
+  // 지원/교육 추가는 총괄·부총괄·인사팀만
+  const canAddExtra = currentUser.is_master || currentUser.is_vice_master ||
+                      currentUser.role === 'hr' || currentUser.role === 'admin';
+  if (!canAddExtra) { alert('지원/교육 인력 추가는 총괄·부총괄·인사팀만 가능합니다.'); return; }
+
+  const typeSel  = document.getElementById('extraTypeSelect');
+  const staffSel = document.getElementById('extraStaffSelect');
+  const extraType = typeSel?.value || '지원';
+  const val = staffSel?.value;
   if (!val) { alert('매장과 직원을 선택해주세요.'); return; }
   const [id, name, store] = val.split('|');
   if (curScheduleStaff.some(s => s.id === id)) { alert('이미 추가된 직원입니다.'); return; }
 
-  // ① 현재 DOM 셀 값 메모리에 저장 (리렌더 전)
   syncCellsToMemory();
 
-  // ② 직원 목록에 추가
-  const newStaff = {id, name: `${name}(${store})`, isExtra:true, _supportStore:store};
+  const displayTag = extraType === '교육' ? '교육' : '지원';
+  const newStaff = {id, name: `${name}(${store})`, isExtra:true, extraType: displayTag, _supportStore:store};
   curScheduleStaff.push(newStaff);
   const si = curScheduleStaff.length - 1;
 
-  // ③ DOM에 행만 추가 (전체 리렌더 없음)
   appendStaffRow(newStaff, si);
 
-  // ④ 선택 초기화
   document.getElementById('extraStoreSelect').value = '';
   document.getElementById('extraStaffSelect').innerHTML = '<option value="">직원 선택</option>';
 }
@@ -7051,29 +7063,45 @@ function appendStaffRow(staff, si) {
 
   const year  = window.__schYear;
   const month = window.__schMonth;
-  const store = window.__schStore;
   if (!year || !month) return;
 
   const daysInMonth = new Date(year, month, 0).getDate();
-  // 근무조 옵션은 기존 행에서 복사
-  const existSelect = tbody.querySelector('select');
-  const optionsHtml = existSelect
-    ? existSelect.innerHTML
-    : '<option value="">-</option>';
+
+  // 최신 근무조 옵션 빌드 (DB 캐시 사용)
+  const buildOptions = () => {
+    const shiftCodes = window.__cachedShiftCodes || [];
+    const leaveTypes = window.__cachedLeaveTypes || [];
+    let html = '<option value="">-</option>';
+    shiftCodes.forEach(s => {
+      html += `<option value="${s.code}">${s.code}${s.label?'('+s.label+')':''}</option>`;
+    });
+    leaveTypes.forEach(l => {
+      html += `<option value="${l.code}">${l.code}</option>`;
+    });
+    return html;
+  };
 
   const tr = document.createElement('tr');
   tr.dataset.staffIdx = si;
+  tr.id = `staff-row-extra-${si}`;
 
-  // 이름 셀
+  // 이름 셀 (X 버튼 포함)
+  const tag = staff.extraType || '지원';
+  const tagColor = tag === '교육' ? 'var(--bl)' : 'var(--gn)';
   const nameTd = document.createElement('td');
   nameTd.style.cssText = 'position:sticky;left:0;background:#fff;z-index:2;padding:6px 8px;font-size:12px;font-weight:600;border:0.5px solid var(--crd);white-space:nowrap;min-width:90px';
-  nameTd.innerHTML = `${staff.name} <span style="font-size:9px;color:var(--th)">(지원)</span>`;
+  nameTd.innerHTML = `
+    <span>${staff.name}</span>
+    <span style="font-size:9px;color:${tagColor};margin-left:3px">(${tag})</span>
+    <button onclick="removeExtraStaff(${si})" title="목록에서 제외"
+      style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:12px;margin-left:4px;vertical-align:middle">✕</button>`;
   tr.appendChild(nameTd);
 
   // 날짜별 셀
+  const optionsHtml = buildOptions();
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const key = (staff.id||staff.extra_name) + '_' + dateStr;
+    const key = (staff.id||staff.extra_name||staff.name) + '_' + dateStr;
     const existing = curScheduleEntries[key];
     const displayVal = existing ? (existing._rawCode || existing.entry_type || existing.shift_code || '') : '';
 
@@ -7082,18 +7110,45 @@ function appendStaffRow(staff, si) {
 
     const sel = document.createElement('select');
     sel.dataset.staff = staff.id || '';
-    sel.dataset.extra = staff.isExtra ? (staff.extra_name || '') : '';
+    sel.dataset.extra = staff.isExtra ? (staff.name||staff.extra_name||'') : '';
     sel.dataset.date  = dateStr;
     sel.setAttribute('onchange', 'onCellChange(this)');
     sel.style.cssText = 'width:100%;border:none;background:transparent;font-size:11px;text-align:center;padding:6px 1px;cursor:pointer;appearance:none;-webkit-appearance:none';
     sel.innerHTML = optionsHtml;
-    sel.value = displayVal;
+    if (displayVal) sel.value = displayVal;
+
+    // 메모 복원 + dot 표시
+    const note = existing?._note || '';
+    if (note) {
+      sel.dataset.note = note;
+      td.style.position = 'relative';
+      const dot = document.createElement('div');
+      dot.className = 'memo-dot';
+      dot.style.cssText = 'position:absolute;top:2px;right:2px;width:5px;height:5px;background:var(--bl);border-radius:50%;pointer-events:none;z-index:1';
+      td.appendChild(dot);
+    }
 
     td.appendChild(sel);
     tr.appendChild(td);
   }
 
   tbody.appendChild(tr);
+}
+
+// 지원/교육 인력 행 삭제
+function removeExtraStaff(si) {
+  if (!confirm('이 지원/교육 인원을 목록에서 제외할까요?')) return;
+  syncCellsToMemory();
+  curScheduleStaff.splice(si, 1);
+  document.getElementById(`staff-row-extra-${si}`)?.remove();
+  // 나머지 행 idx 갱신
+  document.querySelectorAll('#schTbody tr').forEach((tr, i) => {
+    tr.dataset.staffIdx = i;
+    const btn = tr.querySelector(`button[onclick^="removeExtraStaff"]`);
+    if (btn) btn.setAttribute('onclick', `removeExtraStaff(${i})`);
+    const btn2 = tr.querySelector(`button[onclick^="removeStaffFromSchedule"]`);
+    if (btn2) btn2.setAttribute('onclick', `removeStaffFromSchedule(${i})`);
+  });
 }
 
 
@@ -7234,7 +7289,8 @@ async function persistScheduleEntries(scheduleId) {
       shift_code: isShift ? val : null,
       is_extra: !!extraName,
       support_store: sel.dataset.supportStore || null,
-      support_time:  sel.dataset.supportTime  || null
+      support_time:  sel.dataset.supportTime  || null,
+      note: sel.dataset.note || null
     });
   });
 
@@ -7441,8 +7497,12 @@ async function saveInlineShifts(store) {
     if (code) await sb.from('store_shift_codes').update({code,label,start_time:start,end_time:end}).eq('id',parseInt(id));
   }
   closeInlineShiftModal();
-  // 범례 새로고침
+  // 범례 + 전체 드롭다운 옵션 새로고침
   const { data: newCodes } = await sb.from('store_shift_codes').select('*').eq('store',store).eq('active',true).order('sort_order');
+  const { data: lt } = await sb.from('leave_types').select('*').order('sort_order');
+  if (newCodes) window.__cachedShiftCodes = newCodes;
+  if (lt)       window.__cachedLeaveTypes = lt;
+
   const legendArea = document.getElementById('shiftLegendArea');
   if (legendArea && newCodes) {
     legendArea.innerHTML = newCodes.map(s=>`
@@ -7450,6 +7510,16 @@ async function saveInlineShifts(store) {
         <strong>${s.code}</strong>${s.label?'('+s.label+')':''} ${s.start_time||''}~${s.end_time||''}
       </span>`).join('') || '<span style="font-size:12px;color:var(--th)">근무조 없음</span>';
   }
+
+  // 모든 드롭다운 옵션 동기화
+  const newOptionsHtml = '<option value="">-</option>' +
+    (newCodes||[]).map(s=>`<option value="${s.code}">${s.code}${s.label?'('+s.label+')':''}</option>`).join('') +
+    (lt||[]).map(l=>`<option value="${l.code}">${l.code}</option>`).join('');
+  document.querySelectorAll('#schTbody select[data-date]').forEach(sel => {
+    const cur = sel.value;
+    sel.innerHTML = newOptionsHtml;
+    if (cur) sel.value = cur;
+  });
 }
 
 // 기존 openShiftSettings 유지 (사이드바 메뉴에서 접근 시)
@@ -7457,15 +7527,113 @@ function openShiftSettings() {
   openInlineShiftEditor();
 }
 
+
+// ── 셀 비고 메모 ────────────────────────────────────────────
+function openCellMemo(sel) {
+  const key  = (sel.dataset.staff||sel.dataset.extra) + '_' + sel.dataset.date;
+  const cur  = sel.dataset.note || (curScheduleEntries[key]?._note || '');
+  const name = sel.closest('tr')?.querySelector('td')?.textContent?.trim() || '';
+  const date = sel.dataset.date || '';
+
+  document.getElementById('cellMemoModal')?.remove();
+  const m = document.createElement('div');
+  m.id = 'cellMemoModal';
+  m.className = 'modal-bg open';
+  m.innerHTML = `
+    <div class="modal-inner" style="width:min(96vw,340px)">
+      <div style="font-size:13px;font-weight:600;color:var(--tm);margin-bottom:10px">
+        <i class="ti ti-notes" style="color:var(--brm)"></i> 셀 메모
+        <span style="font-size:11px;color:var(--th);font-weight:400;margin-left:6px">${name} · ${date}</span>
+      </div>
+      <textarea id="cellMemoInput" class="form-input" rows="4"
+        placeholder="해당 날짜 특이사항을 입력하세요&#10;(예: 오전 병원 방문 후 출근, 조기 퇴근 예정 등)"
+        style="font-size:13px;resize:vertical">${cur}</textarea>
+      <div class="modal-footer">
+        <button class="btn-sm ghost" onclick="document.getElementById('cellMemoModal')?.remove()">취소</button>
+        <button class="btn-sm ghost" style="color:var(--rd)" onclick="saveCellMemo(null)">메모 삭제</button>
+        <button class="btn-sm primary" onclick="saveCellMemo('${key}',arguments[0])">저장</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+  // 저장 버튼에 sel 참조 전달
+  m.querySelector('.btn-sm.primary').onclick = () => saveCellMemo(key, sel);
+}
+
+function saveCellMemo(key, sel) {
+  const val = sel ? document.getElementById('cellMemoInput')?.value.trim() : '';
+  if (sel) {
+    sel.dataset.note = val;
+    if (!curScheduleEntries[key]) curScheduleEntries[key] = {};
+    curScheduleEntries[key]._note = val;
+    // 메모 있는 셀은 우상단에 파란 점 표시
+    sel.parentElement.style.position = 'relative';
+    const existing = sel.parentElement.querySelector('.memo-dot');
+    if (val) {
+      if (!existing) {
+        const dot = document.createElement('div');
+        dot.className = 'memo-dot';
+        dot.style.cssText = 'position:absolute;top:2px;right:2px;width:5px;height:5px;background:var(--bl);border-radius:50%;pointer-events:none;z-index:1';
+        sel.parentElement.appendChild(dot);
+      }
+    } else {
+      existing?.remove();
+    }
+  } else {
+    // 삭제
+    const focused = document.querySelector('#schTbody select:focus');
+    if (focused) {
+      focused.dataset.note = '';
+      const k = (focused.dataset.staff||focused.dataset.extra) + '_' + focused.dataset.date;
+      if (curScheduleEntries[k]) curScheduleEntries[k]._note = '';
+      focused.parentElement.querySelector('.memo-dot')?.remove();
+    }
+  }
+  document.getElementById('cellMemoModal')?.remove();
+}
+
+// 스케줄 테이블 우클릭/길게누르기 이벤트 등록
+function registerCellMemoEvents() {
+  const tbody = document.getElementById('schTbody');
+  if (!tbody || tbody._memoRegistered) return;
+  tbody._memoRegistered = true;
+
+  // 데스크톱: 우클릭
+  tbody.addEventListener('contextmenu', e => {
+    const sel = e.target.closest('select[data-date]');
+    if (!sel) return;
+    e.preventDefault();
+    openCellMemo(sel);
+  });
+
+  // 모바일: 500ms 길게 누르기
+  let holdTimer = null;
+  tbody.addEventListener('touchstart', e => {
+    const sel = e.target.closest('select[data-date]');
+    if (!sel) return;
+    holdTimer = setTimeout(() => openCellMemo(sel), 500);
+  }, {passive:true});
+  tbody.addEventListener('touchend',  () => clearTimeout(holdTimer), {passive:true});
+  tbody.addEventListener('touchmove', () => clearTimeout(holdTimer), {passive:true});
+}
+
 // ── 붙여넣기 핸들러 ──────────────────────────────────────
 async function handleSchedulePaste(e) {
   e.preventDefault();
-  const text = e.clipboardData?.getData('text') || '';
+  // 서식 없이 순수 텍스트만 추출
+  const raw = e.clipboardData?.getData('text/plain') || e.clipboardData?.getData('text') || '';
+  const text = raw.split('\r').join('')
   if (!text.trim()) return;
-  const { data: shiftCodes } = await sb.from('store_shift_codes').select('code').eq('store', window.__schStore);
-  const { data: leaveTypes } = await sb.from('leave_types').select('code');
-  const sc = shiftCodes||[], lt = leaveTypes||[];
-  const TAB=String.fromCharCode(9),NL=String.fromCharCode(10);
+
+  // 캐시 우선 사용, 없으면 DB 조회
+  const sc = window.__cachedShiftCodes?.length
+    ? window.__cachedShiftCodes
+    : (await sb.from('store_shift_codes').select('*').eq('store', window.__schStore)).data || [];
+  const lt = window.__cachedLeaveTypes?.length
+    ? window.__cachedLeaveTypes
+    : (await sb.from('leave_types').select('*')).data || [];
+
+  const TAB = String.fromCharCode(9);
+  const NL = String.fromCharCode(10);
   if (text.includes(TAB) || text.includes(NL)) {
     await pasteScheduleGrid(text, sc, lt); return;
   }
@@ -7476,13 +7644,25 @@ async function handleSchedulePaste(e) {
 }
 
 function applyValueToSelect(sel, val, shiftCodes, leaveTypes, showAlert) {
-  if (!val) { sel.value=''; sel.dispatchEvent(new Event('change')); return true; }
-  const upper = val.toUpperCase();
+  // 붙여넣기 시 셀 서식 강제 초기화
+  sel.style.fontSize   = '';
+  sel.style.color      = '';
+  sel.style.background = '';
+  sel.style.fontWeight = '';
+  sel.parentElement.style.background = '#fff';
+
+  const clean = (val||'').trim();
+  if (!clean) { sel.value=''; sel.dispatchEvent(new Event('change')); return true; }
+  const upper = clean.toUpperCase();
   const ms = shiftCodes.find(s=>s.code.toUpperCase()===upper);
-  const ml = leaveTypes.find(l=>l.code===val);
-  if (ms) { sel.value=ms.code; sel.dispatchEvent(new Event('change')); if(ms.code==='지원') openSupportModal(sel); return true; }
+  const ml = leaveTypes.find(l=>l.code===clean);
+  if (ms) {
+    sel.value=ms.code; sel.dispatchEvent(new Event('change'));
+    if(ms.code==='지원') openSupportModal(sel);
+    return true;
+  }
   if (ml) { sel.value=ml.code; sel.dispatchEvent(new Event('change')); return true; }
-  if (showAlert) alert('붙여넣기 불가\n\n입력값: "'+val+'"\n\n사유: 근무조('+shiftCodes.map(s=>s.code).join(',')+') 또는 휴무종류('+leaveTypes.map(l=>l.code).join(',')+')\에 해당하지 않습니다.');
+  if (showAlert) alert('붙여넣기 불가\n\n입력값: "'+clean+'"\n\n근무조('+shiftCodes.map(s=>s.code).join(', ')+') 또는 휴무종류('+leaveTypes.map(l=>l.code).join(', ')+')에 해당하지 않는 값입니다.');
   return false;
 }
 
