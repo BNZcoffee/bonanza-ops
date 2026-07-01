@@ -6771,10 +6771,46 @@ async function renderScheduleEdit(area) {
     curScheduleEntries[key] = e;
   });
 
-  // 추가된 지원인력(extra_name이 있는 entries)에서 직원 목록 보강
+  // 직원 정렬: 매니저 → 매니저B(manager로 시작하는 파생) → 바리스타/파티쉐(입사일순) → 나머지
+  const ROLE_ORDER = {'manager':0, 'barista':2, 'pastry':2, 'admin':3, 'hr':3, 'purchase':3};
+  staffList.sort((a,b) => {
+    const roleA = a.role||'';
+    const roleB = b.role||'';
+    // 매니저 계열은 모두 0~1
+    const orderA = roleA === 'manager' ? 0 : roleA.startsWith('manager') ? 1 : (ROLE_ORDER[roleA]??3);
+    const orderB = roleB === 'manager' ? 0 : roleB.startsWith('manager') ? 1 : (ROLE_ORDER[roleB]??3);
+    if (orderA !== orderB) return orderA - orderB;
+    // 같은 직급 내 입사일 오름차순
+    return (a.hire_date||'9999').localeCompare(b.hire_date||'9999');
+  });
+
+  // 지원인력: user_id가 있는 지원 entries에서 user 정보 보강
+  const extraEntries = entries.filter(e => e.is_extra && e.user_id);
+  const extraUserIds = [...new Set(extraEntries.map(e=>e.user_id))];
+  let extraStaffData = [];
+  if (extraUserIds.length) {
+    const { data: extraUsers } = await sb.from('users')
+      .select('id,name,store,role,hire_date,employment_type')
+      .in('id', extraUserIds);
+    extraStaffData = (extraUsers||[]).map(u => {
+      const firstEntry = extraEntries.find(e=>e.user_id===u.id);
+      return {
+        id: u.id,
+        name: `${u.name}(${u.store})`,
+        isExtra: true,
+        extraType: firstEntry?.extra_type || '지원',
+        _supportStore: u.store,
+        hire_date: u.hire_date,
+        employment_type: u.employment_type
+      };
+    });
+  }
+  // extra_name만 있는 경우 (하위 호환)
   const extraNames = [...new Set(entries.filter(e=>e.extra_name && !e.user_id).map(e=>e.extra_name))];
+
   curScheduleStaff = [
     ...staffList.map(u=>({id:u.id, name:u.name, isExtra:false, hire_date:u.hire_date, retire_date:u.retire_date, employment_type:u.employment_type})),
+    ...extraStaffData,
     ...extraNames.map(n=>({id:null, extra_name:n, name:n, isExtra:true}))
   ];
 
@@ -6845,7 +6881,7 @@ async function renderScheduleEdit(area) {
         ${canEdit && curSchedule?.status!=='confirmed' ? `<button class="btn-submit" onclick="requestScheduleConfirm()" style="padding:8px 14px;font-size:13px"><i class="ti ti-send"></i> 컨펌 요청</button>` : ''}
         ${curSchedule ? `<button class="btn-cancel-sm" onclick="openSchedulePreview()" style="font-size:12px;color:var(--bl)"><i class="ti ti-photo"></i> 이미지 저장</button>` : ''}
         ${curSchedule ? `<button class="btn-cancel-sm" onclick="openScheduleHistoryModal(${curSchedule?.id})" style="font-size:12px"><i class="ti ti-history"></i> 히스토리</button>` : ''}
-        <button class="btn-cancel-sm" onclick="showLeaveBalance(${curSchedule?.id||'null'})" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-calculator"></i> 휴무·근무 집계</button>
+        <button class="btn-cancel-sm" onclick="initBalancePanel()" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-calculator"></i> 집계 새로고침</button>
         ${curSchedule && curSchedule.status==='requested' && isScheduleAdmin() ? `
           <button class="btn-cancel-sm" onclick="confirmScheduleApprove()" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-check"></i> 컨펌 완료</button>
           <button class="btn-cancel-sm" onclick="confirmScheduleReject()" style="font-size:12px;color:var(--rd);border-color:var(--rd)"><i class="ti ti-x"></i> 반려</button>
@@ -6923,13 +6959,36 @@ async function renderScheduleEdit(area) {
             ${dateHeaderHtml}
           </tr></thead>
           <tbody id="schTbody">${rowsHtml}</tbody>
+          <!-- 날짜별 근무인원 합계 행 -->
+          <tfoot id="schTfoot">
+            <tr id="dailyCountRow">
+              <td style="position:sticky;left:0;background:var(--crm);z-index:2;padding:5px 8px;font-size:11px;font-weight:700;border:0.5px solid var(--crd);color:var(--brm)">일별 근무 인원</td>
+            </tr>
+          </tfoot>
         </table>
+      </div>
+      <!-- 고정 집계 패널 -->
+      <div id="leaveBalancePanel" style="margin-top:10px;border:0.5px solid var(--crd);border-radius:10px;overflow:hidden;font-size:11px">
+        <div style="background:var(--crm);padding:6px 12px;font-size:12px;font-weight:600;color:var(--brm);display:flex;align-items:center;justify-content:space-between">
+          <span><i class="ti ti-calculator"></i> 휴무·근무 집계 (실시간)</span>
+          <span style="font-size:10px;color:var(--th);font-weight:400">임시저장 시 자동 갱신 · 드래그로 확인</span>
+        </div>
+        <div id="leaveBalanceTable" style="overflow-x:auto">
+          <div style="padding:14px;color:var(--th);font-size:12px;text-align:center">
+            임시저장 후 집계가 표시됩니다
+          </div>
+        </div>
       </div>
     </div>`;
 
   if (canEdit) loadExtraStoreOptions();
-  // 메모·드래그 이벤트 등록
-  setTimeout(() => { registerCellMemoEvents(); registerDragSort(); }, 200);
+  // 메모·드래그 이벤트 등록 + 집계 패널 초기화
+  setTimeout(() => {
+    registerCellMemoEvents();
+    registerDragSort();
+    if (curSchedule?.id) initBalancePanel();
+    else updateDailyCountRow();
+  }, 300);
 }
 
 // 셀 변경 시 메모리에 즉시 반영 (저장은 별도 버튼)
@@ -6958,13 +7017,15 @@ function onCellChange(sel) {
       openSupportModal(sel);
     }
     // 셀 배경색 즉시 반영
-    sb.from('leave_types').select('code,color').then(({data})=>{
-      const map = {}; (data||[]).forEach(l=>map[l.code]=l.color);
-      if (!sel.dataset.supportStore) {
-        sel.parentElement.style.background = map[val] ? map[val]+'33' : '#fff';
-      }
-    });
+    const ltMap = window.__cachedLeaveTypes
+      ? Object.fromEntries(window.__cachedLeaveTypes.map(l=>[l.code,l.color]))
+      : {};
+    if (!sel.dataset.supportStore) {
+      sel.parentElement.style.background = ltMap[val] ? ltMap[val]+'33' : '#fff';
+    }
   }
+  // 실시간 집계 갱신
+  updateRealtimeBalance();
 }
 
 // 지원인력 추가 — 매장 선택 후 인원 필터링
@@ -7272,6 +7333,7 @@ async function saveScheduleDraft() {
   await saveScheduleHistory(scheduleId, '임시저장');
   alert('임시저장 완료!');
   openScheduleById(scheduleId);
+  setTimeout(() => initBalancePanel(), 600);
 }
 
 // entries DB 반영 (전체 삭제 후 재삽입 — 단순하고 안전)
@@ -7536,6 +7598,162 @@ function openShiftSettings() {
 }
 
 
+
+
+// ── 실시간 집계 업데이트 ────────────────────────────────────
+function updateRealtimeBalance() {
+  updateDailyCountRow();
+  // 집계 패널이 이미 로드된 경우에만 갱신
+  const panel = document.getElementById('leaveBalanceTable');
+  if (!panel || panel.dataset.loaded !== 'true') return;
+  renderBalancePanel();
+}
+
+// 날짜별 근무 인원 합계 행 갱신
+function updateDailyCountRow() {
+  const tbody   = document.getElementById('schTbody');
+  const footRow = document.getElementById('dailyCountRow');
+  if (!tbody || !footRow) return;
+
+  const year  = window.__schYear;
+  const month = window.__schMonth;
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  // 기존 날짜 셀 제거 (첫 td 이름 셀 제외)
+  while (footRow.cells.length > 1) footRow.deleteCell(1);
+
+  // 비출근 코드 (날짜별 합산 제외)
+  const NON_WORK = new Set(['휴무','대휴','결근','공가','경조','연차','오전반차','오후반차','반차']);
+  const HALF = new Set(['오전반차','오후반차','반차']);
+
+  const leaveColorMap = window.__cachedLeaveTypes
+    ? Object.fromEntries(window.__cachedLeaveTypes.map(l=>[l.code,l.color]))
+    : {};
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    let count = 0;
+    let details = []; // 근무자 목록 (툴팁용)
+
+    // tbody 모든 행의 해당 날짜 select 확인
+    Array.from(tbody.rows).forEach(tr => {
+      // 해당 날짜 셀 찾기
+      const sel = tr.querySelector(`select[data-date="${dateStr}"]`);
+      // 읽기전용(크로스매장) 셀 찾기
+      const readonlyDiv = tr.querySelector(`td div[title*="지원근무"]`);
+      const nameText = tr.querySelector('td span')?.textContent?.trim() || '';
+
+      if (sel) {
+        const val = sel.value || '';
+        if (!val) return; // 빈칸 = 미입력
+        if (NON_WORK.has(val)) return; // 비출근
+        const cnt = HALF.has(val) ? 0.5 : 1;
+        count += cnt;
+        details.push(nameText + (cnt < 1 ? '(0.5)' : ''));
+      } else if (readonlyDiv) {
+        // 크로스 매장 지원인원 포함
+        count += 1;
+        details.push(nameText + '(지원)');
+      }
+    });
+
+    const td = document.createElement('td');
+    const colorBg = count === 0 ? '#fff' : count <= 2 ? '#FAF0EE' : count <= 4 ? '#FFF8E6' : '#EAF4EE';
+    const colorTxt = count === 0 ? 'var(--th)' : count <= 2 ? 'var(--rd)' : count <= 4 ? '#7A5C00' : 'var(--gn)';
+    td.style.cssText = `border:0.5px solid var(--crd);padding:4px 2px;text-align:center;background:${colorBg};font-weight:700;color:${colorTxt}`;
+    td.title = details.length ? details.join(', ') : '근무자 없음';
+    td.textContent = count > 0 ? count : '-';
+    footRow.appendChild(td);
+  }
+}
+
+// 집계 패널 렌더링 (소속 매장 기준, 인원별 annual_leave_balance)
+async function renderBalancePanel() {
+  const panel = document.getElementById('leaveBalanceTable');
+  if (!panel) return;
+  panel.dataset.loaded = 'true';
+
+  const store  = window.__schStore;
+  const year   = window.__schYear;
+  const month  = window.__schMonth;
+  if (!store || !year || !month) return;
+
+  const tbody = document.getElementById('schTbody');
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  // 소속 직원 user_id 수집 (isExtra 아닌 직원만)
+  const staffIds = curScheduleStaff
+    .filter(s => s.id && !s.isExtra)
+    .map(s => s.id);
+  if (!staffIds.length) { panel.innerHTML = '<div style="padding:12px;color:var(--th)">직원이 없습니다.</div>'; return; }
+
+  // 인원별 연차 잔여 (annual_leave_balance)
+  const { data: albData } = await sb.from('annual_leave_balance')
+    .select('user_id, init_total, init_used, schedule_used')
+    .in('user_id', staffIds);
+  const albMap = Object.fromEntries((albData||[]).map(b=>[b.user_id, b]));
+
+  const NON_WORK = new Set(['휴무','대휴','결근','공가','경조','연차','오전반차','오후반차','반차']);
+  const LEAVE_TYPES = new Set(['휴무','대휴']);
+  const ANNUAL = new Set(['연차','오전반차','오후반차','반차']);
+
+  // DOM에서 현재 입력값 읽기 (실시간)
+  const rows = curScheduleStaff.filter(s=>s.id&&!s.isExtra).map(staff => {
+    let workDays=0, leaveDays=0, annualUsed=0, totalFilled=0;
+
+    for (let d=1; d<=daysInMonth; d++) {
+      const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const sel = tbody?.querySelector(`select[data-staff="${staff.id}"][data-date="${dateStr}"]`);
+      const val = sel?.value || '';
+      if (!val) continue;
+      totalFilled++;
+      const half = val==='오전반차'||val==='오후반차'||val==='반차';
+      if (LEAVE_TYPES.has(val)) leaveDays += half ? 0.5 : 1;
+      if (ANNUAL.has(val)) annualUsed += half ? 0.5 : 1;
+      if (!NON_WORK.has(val)) workDays += half ? 0.5 : 1;
+    }
+
+    const alb = albMap[staff.id];
+    const initTotal = alb?.init_total || 0;
+    const initUsed  = alb?.init_used  || 0;
+    const schUsed   = alb?.schedule_used || 0;
+    // 이번 달 연차 사용분은 실시간 DOM 기반
+    const annualRemain = initTotal - initUsed - (schUsed - annualUsed) - annualUsed;
+
+    return {name:staff.name, workDays, leaveDays, annualUsed, annualRemain, totalFilled};
+  });
+
+  const thead = `<tr style="background:var(--cr);font-size:11px;color:var(--th)">
+    <th style="padding:5px 10px;text-align:left;border-bottom:0.5px solid var(--crd)">이름</th>
+    <th style="padding:5px 8px;text-align:center;border-bottom:0.5px solid var(--crd)">근무일</th>
+    <th style="padding:5px 8px;text-align:center;border-bottom:0.5px solid var(--crd)">휴무·대휴</th>
+    <th style="padding:5px 8px;text-align:center;border-bottom:0.5px solid var(--crd)">연차사용</th>
+    <th style="padding:5px 8px;text-align:center;border-bottom:0.5px solid var(--crd)">연차잔여</th>
+    <th style="padding:5px 8px;text-align:center;border-bottom:0.5px solid var(--crd)">입력일수</th>
+  </tr>`;
+
+  const tbodyHtml = rows.map(r => `
+    <tr style="border-bottom:0.5px solid var(--crd)">
+      <td style="padding:5px 10px;font-size:11px;font-weight:600">${r.name}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:11px">${r.workDays}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:11px">${r.leaveDays}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:11px">${r.annualUsed}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:11px;color:${r.annualRemain<0?'var(--rd)':r.annualRemain===0?'var(--th)':'var(--gn)'};font-weight:${r.annualRemain<0?700:400}">${r.annualRemain}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:11px;color:${r.totalFilled===daysInMonth?'var(--gn)':'var(--th)'}">${r.totalFilled}/${daysInMonth}</td>
+    </tr>`).join('');
+
+  panel.innerHTML = `<table style="width:100%;border-collapse:collapse">
+    <thead>${thead}</thead><tbody>${tbodyHtml}</tbody></table>`;
+}
+
+// 집계 패널 최초 로드 (임시저장 후 또는 스케줄 열 때)
+async function initBalancePanel() {
+  const panel = document.getElementById('leaveBalanceTable');
+  if (!panel) return;
+  panel.dataset.loaded = 'true';
+  await renderBalancePanel();
+  updateDailyCountRow();
+}
 
 // ── 인원 순서 드래그 정렬 ──────────────────────────────────
 function registerDragSort() {
