@@ -6810,35 +6810,12 @@ async function renderScheduleEdit(area) {
     </th>`;
   }
 
-  // 직원별 행
-  let rowsHtml = '';
-  curScheduleStaff.forEach((staff, si) => {
-    const bal = balances.find(b => staff.id && b.user_id === staff.id);
-    rowsHtml += `<tr data-staff-idx="${si}">
-      <td style="position:sticky;left:0;background:#fff;z-index:2;padding:6px 8px;font-size:12px;font-weight:600;border:0.5px solid var(--crd);white-space:nowrap;min-width:90px">
-        ${staff.name}${staff.isExtra?' <span style="font-size:9px;color:var(--th)">(지원)</span>':''}
-        ${!staff.isExtra?`<button onclick="removeStaffFromSchedule(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px;margin-left:4px" title="목록에서 제외">✕</button>`:''}
-      </td>`;
-    for (let d=1; d<=daysInMonth; d++) {
-      const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-      const key = (staff.id||staff.extra_name) + '_' + dateStr;
-      const e = curScheduleEntries[key];
-      let displayVal = '', bgColor = '#fff';
-      if (e) {
-        if (e.entry_type === 'shift') { displayVal = e.shift_code; }
-        else { displayVal = e.entry_type; bgColor = (leaveColorMap[e.entry_type]||'#eee') + '33'; }
-      }
-      rowsHtml += `<td style="border:0.5px solid var(--crd);padding:0;background:${bgColor}">
-        <select ${canEdit?'':'disabled'} data-staff="${staff.id||''}" data-extra="${staff.isExtra?staff.extra_name:''}" data-date="${dateStr}"
-          onchange="onCellChange(this)"
-          style="width:100%;border:none;background:transparent;font-size:11px;text-align:center;padding:6px 1px;cursor:${canEdit?'pointer':'default'};appearance:none;-webkit-appearance:none">
-          <option value="">-</option>
-          ${allCodeOptions.map(o=>`<option value="${o.value}"${displayVal===o.value?' selected':''}>${o.value}</option>`).join('')}
-        </select>
-      </td>`;
-    }
-    rowsHtml += `</tr>`;
-  });
+  // 직원별 행 — 크로스 매장 연동 포함 (비동기)
+  const rowPromises = curScheduleStaff.map((staff, si) =>
+    buildStaffRowWithCross(staff, si, daysInMonth, year, month, allCodeOptions, leaveColorMap, canEdit)
+  );
+  const rowsArray = await Promise.all(rowPromises);
+  let rowsHtml = rowsArray.join('');
 
   // 근무조 시간 안내 테이블
   const shiftLegend = shiftCodes.map(s=>`
@@ -6895,8 +6872,13 @@ async function renderScheduleEdit(area) {
       </div>
 
       <div style="margin-bottom:10px">
-        <div style="font-size:11px;color:var(--th);margin-bottom:5px;font-weight:600">근무조 (시간은 매장별 설정 — 휴무 기준 설정에서 수정)</div>
-        ${shiftLegend || '<span style="font-size:12px;color:var(--th)">등록된 근무조가 없습니다. 휴무 기준 설정에서 추가하세요.</span>'}
+        <div style="font-size:11px;color:var(--th);margin-bottom:5px;font-weight:600;display:flex;align-items:center;gap:8px">
+          근무조 설정
+          ${canEdit ? `<button onclick="openInlineShiftEditor()" style="background:none;border:0.5px solid var(--crd);border-radius:6px;padding:2px 8px;font-size:10px;color:var(--ts);cursor:pointer"><i class="ti ti-edit"></i> 편집</button>` : ''}
+        </div>
+        <div id="shiftLegendArea">
+          ${shiftLegend || '<span style="font-size:12px;color:var(--th)">등록된 근무조 없음 — [편집] 버튼으로 추가하세요.</span>'}
+        </div>
       </div>
       <div style="margin-bottom:14px">
         <div style="font-size:11px;color:var(--th);margin-bottom:5px;font-weight:600">휴무 종류</div>
@@ -6999,28 +6981,199 @@ function loadExtraStaffByStore(store) {
     filtered.map(u=>`<option value="${u.id}|${u.name}|${u.store}">${u.name}</option>`).join('');
 }
 
+// 현재 DOM의 모든 셀 값을 메모리에 저장
+function syncCellsToMemory() {
+  const selects = document.querySelectorAll('#schTbody select');
+  selects.forEach(sel => {
+    const uid   = sel.dataset.staff  || null;
+    const extra = sel.dataset.extra  || null;
+    const date  = sel.dataset.date;
+    const val   = sel.value;
+    const key   = (uid||extra) + '_' + date;
+    if (!val) {
+      delete curScheduleEntries[key];
+    } else {
+      if (!curScheduleEntries[key]) curScheduleEntries[key] = {};
+      curScheduleEntries[key].user_id    = uid;
+      curScheduleEntries[key].extra_name = extra;
+      curScheduleEntries[key].date       = date;
+      curScheduleEntries[key]._rawCode   = val;
+      // 지원 메타 보존
+      if (sel.dataset.supportStore) curScheduleEntries[key]._supportStore = sel.dataset.supportStore;
+      if (sel.dataset.supportTime)  curScheduleEntries[key]._supportTime  = sel.dataset.supportTime;
+    }
+  });
+}
+
 function addExtraStaff() {
   const sel = document.getElementById('extraStaffSelect');
   const val = sel?.value;
   if (!val) { alert('매장과 직원을 선택해주세요.'); return; }
   const [id, name, store] = val.split('|');
-  if (curScheduleStaff.some(s=>s.id===id)) { alert('이미 추가된 직원입니다.'); return; }
-  curScheduleStaff.push({id, name: `${name}(${store})`, isExtra:true, _supportStore:store});
-  // 선택 초기화
+  if (curScheduleStaff.some(s => s.id === id)) { alert('이미 추가된 직원입니다.'); return; }
+
+  // ① 현재 DOM 셀 값 메모리에 저장 (리렌더 전)
+  syncCellsToMemory();
+
+  // ② 직원 목록에 추가
+  const newStaff = {id, name: `${name}(${store})`, isExtra:true, _supportStore:store};
+  curScheduleStaff.push(newStaff);
+  const si = curScheduleStaff.length - 1;
+
+  // ③ DOM에 행만 추가 (전체 리렌더 없음)
+  appendStaffRow(newStaff, si);
+
+  // ④ 선택 초기화
   document.getElementById('extraStoreSelect').value = '';
   document.getElementById('extraStaffSelect').innerHTML = '<option value="">직원 선택</option>';
-  renderScheduleEditTableOnly();
 }
 
 function removeStaffFromSchedule(idx) {
   if (!confirm('이 직원을 이번 달 스케줄 목록에서 제외할까요?')) return;
+  // 현재 셀 값 저장
+  syncCellsToMemory();
   curScheduleStaff.splice(idx, 1);
-  renderScheduleEditTableOnly();
+  // 해당 행만 DOM에서 제거
+  const row = document.querySelector(`#schTbody tr[data-staff-idx="${idx}"]`);
+  if (row) row.remove();
+  // 나머지 행의 idx 업데이트 (삭제 버튼 클로저 갱신)
+  document.querySelectorAll('#schTbody tr').forEach((tr, i) => {
+    tr.dataset.staffIdx = i;
+    const btn = tr.querySelector('button[title="목록에서 제외"]');
+    if (btn) btn.setAttribute('onclick', `removeStaffFromSchedule(${i})`);
+  });
 }
 
-// 테이블만 다시 그리기 (직원 추가/제거 시)
-function renderScheduleEditTableOnly() {
-  renderScheduleEdit(document.getElementById('contentArea'));
+// 테이블에 직원 행 하나만 DOM으로 추가
+function appendStaffRow(staff, si) {
+  const tbody = document.getElementById('schTbody');
+  if (!tbody) return;
+
+  const year  = window.__schYear;
+  const month = window.__schMonth;
+  const store = window.__schStore;
+  if (!year || !month) return;
+
+  const daysInMonth = new Date(year, month, 0).getDate();
+  // 근무조 옵션은 기존 행에서 복사
+  const existSelect = tbody.querySelector('select');
+  const optionsHtml = existSelect
+    ? existSelect.innerHTML
+    : '<option value="">-</option>';
+
+  const tr = document.createElement('tr');
+  tr.dataset.staffIdx = si;
+
+  // 이름 셀
+  const nameTd = document.createElement('td');
+  nameTd.style.cssText = 'position:sticky;left:0;background:#fff;z-index:2;padding:6px 8px;font-size:12px;font-weight:600;border:0.5px solid var(--crd);white-space:nowrap;min-width:90px';
+  nameTd.innerHTML = `${staff.name} <span style="font-size:9px;color:var(--th)">(지원)</span>`;
+  tr.appendChild(nameTd);
+
+  // 날짜별 셀
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const key = (staff.id||staff.extra_name) + '_' + dateStr;
+    const existing = curScheduleEntries[key];
+    const displayVal = existing ? (existing._rawCode || existing.entry_type || existing.shift_code || '') : '';
+
+    const td = document.createElement('td');
+    td.style.cssText = 'border:0.5px solid var(--crd);padding:0;background:#fff';
+
+    const sel = document.createElement('select');
+    sel.dataset.staff = staff.id || '';
+    sel.dataset.extra = staff.isExtra ? (staff.extra_name || '') : '';
+    sel.dataset.date  = dateStr;
+    sel.setAttribute('onchange', 'onCellChange(this)');
+    sel.style.cssText = 'width:100%;border:none;background:transparent;font-size:11px;text-align:center;padding:6px 1px;cursor:pointer;appearance:none;-webkit-appearance:none';
+    sel.innerHTML = optionsHtml;
+    sel.value = displayVal;
+
+    td.appendChild(sel);
+    tr.appendChild(td);
+  }
+
+  tbody.appendChild(tr);
+}
+
+
+// ── 크로스 매장 연동 ────────────────────────────────────
+// 다른 매장 스케줄에 등록된 지원근무 entries를 본인 매장 편성 시 표시
+async function loadCrossStoreEntries(userId, year, month) {
+  if (!userId) return {};
+  const monthStart = `${year}-${String(month).padStart(2,'0')}-01`;
+  const monthEnd   = `${year}-${String(month).padStart(2,'0')}-${String(new Date(year,month,0).getDate()).padStart(2,'0')}`;
+
+  // 다른 매장 스케줄에서 이 직원이 지원근무로 등록된 entries 조회
+  const { data: crossEntries } = await sb.from('schedule_entries')
+    .select('date, entry_type, shift_code, support_store, support_time, schedule:schedules(store,year,month)')
+    .eq('user_id', userId)
+    .eq('is_extra', true)
+    .gte('date', monthStart)
+    .lte('date', monthEnd);
+
+  const map = {};
+  (crossEntries||[]).forEach(e => {
+    const day = e.date;
+    // 이 직원이 다른 매장에 지원 나간 날짜 기록
+    map[day] = {
+      _isCross: true,
+      _crossStore: e.schedule?.store || '',
+      _supportTime: e.support_time || '',
+      displayVal: e.support_time ? e.support_time.split('~')[0]||'지원' : '지원',  // 출근시간만 표시
+    };
+  });
+  return map;
+}
+
+// 스케줄 편성 행 생성 시 크로스 매장 데이터 반영
+async function buildStaffRowWithCross(staff, si, daysInMonth, year, month, allCodeOptions, leaveColorMap, canEdit) {
+  const crossMap = staff.id ? await loadCrossStoreEntries(staff.id, year, month) : {};
+  const store = window.__schStore;
+
+  let rowHtml = `<tr data-staff-idx="${si}">
+    <td style="position:sticky;left:0;background:#fff;z-index:2;padding:6px 8px;font-size:12px;font-weight:600;border:0.5px solid var(--crd);white-space:nowrap;min-width:90px">
+      ${staff.name}${staff.isExtra?' <span style="font-size:9px;color:var(--th)">(지원)</span>':''}
+      ${!staff.isExtra?`<button onclick="removeStaffFromSchedule(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px;margin-left:4px" title="목록에서 제외">✕</button>`:''}
+    </td>`;
+
+  for (let d=1; d<=daysInMonth; d++) {
+    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const key = (staff.id||staff.extra_name) + '_' + dateStr;
+    const e = curScheduleEntries[key];
+    const cross = crossMap[dateStr];
+
+    let displayVal = '', bgColor = '#fff', readonly = false, tooltip = '';
+
+    if (cross && !e) {
+      // 다른 매장에 지원 나간 날 — 읽기 전용으로 표시
+      displayVal = cross.displayVal;
+      bgColor = '#FFF8E6';
+      readonly = true;
+      tooltip = `${cross._crossStore} 지원근무${cross._supportTime ? ' '+cross._supportTime : ''}`;
+    } else if (e) {
+      if (e.entry_type === 'shift') displayVal = e.shift_code;
+      else { displayVal = e.entry_type; bgColor = (leaveColorMap[e.entry_type]||'#eee') + '33'; }
+    }
+
+    if (readonly) {
+      // 읽기 전용 셀 (타 매장 지원근무)
+      rowHtml += `<td style="border:0.5px solid var(--crd);padding:0;background:${bgColor}" title="${tooltip}">
+        <div style="font-size:10px;text-align:center;padding:6px 1px;color:#7A5C00;font-weight:600;cursor:default" title="${tooltip}">${displayVal}</div>
+      </td>`;
+    } else {
+      rowHtml += `<td style="border:0.5px solid var(--crd);padding:0;background:${bgColor}">
+        <select ${canEdit?'':'disabled'} data-staff="${staff.id||''}" data-extra="${staff.isExtra?staff.extra_name:''}" data-date="${dateStr}"
+          onchange="onCellChange(this)"
+          style="width:100%;border:none;background:transparent;font-size:11px;text-align:center;padding:6px 1px;cursor:${canEdit?'pointer':'default'};appearance:none;-webkit-appearance:none">
+          <option value="">-</option>
+          ${allCodeOptions.map(o=>`<option value="${o.value}"${displayVal===o.value?' selected':''}>${o.value}</option>`).join('')}
+        </select>
+      </td>`;
+    }
+  }
+  rowHtml += '</tr>';
+  return rowHtml;
 }
 
 // ── 저장 (임시저장) ───────────────────────────────────────
@@ -7079,7 +7232,9 @@ async function persistScheduleEntries(scheduleId) {
       date,
       entry_type: isShift ? 'shift' : val,
       shift_code: isShift ? val : null,
-      is_extra: !!extraName
+      is_extra: !!extraName,
+      support_store: sel.dataset.supportStore || null,
+      support_time:  sel.dataset.supportTime  || null
     });
   });
 
@@ -7199,15 +7354,107 @@ async function requestScheduleConfirm() {
 
 
 
-// 스케줄 편성 화면에서 근무조 설정으로 이동
+// 스케줄 편성 화면 근무조 [편집] — 인라인 모달로 오픈
+async function openInlineShiftEditor() {
+  const store = window.__schStore || currentUser.store;
+  if (!store) return;
+  document.getElementById('inlineShiftModal')?.remove();
+
+  const { data: codes } = await sb.from('store_shift_codes')
+    .select('*').eq('store', store).order('sort_order');
+
+  const m = document.createElement('div');
+  m.id = 'inlineShiftModal';
+  m.className = 'modal-bg open';
+  m.innerHTML = `
+    <div class="modal-inner" style="width:min(96vw,480px);max-height:90vh;overflow-y:auto">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <span style="font-size:15px;font-weight:600;color:var(--tm)">
+          <i class="ti ti-clock" style="color:var(--brm)"></i> ${store} 근무조 설정
+        </span>
+        <button onclick="closeInlineShiftModal()" style="background:none;border:none;cursor:pointer;color:var(--th);font-size:18px"><i class="ti ti-x"></i></button>
+      </div>
+      <div id="inlineShiftList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
+        ${(codes||[]).map(s=>`
+          <div id="iss-row-${s.id}" style="display:grid;grid-template-columns:50px 1fr 80px 80px 34px;gap:5px;align-items:center;background:var(--cr);border-radius:7px;padding:7px 9px">
+            <input class="form-input" value="${s.code}" placeholder="A" id="iss-code-${s.id}"
+              style="padding:5px 7px;font-size:12px;text-align:center;font-weight:700" />
+            <input class="form-input" value="${s.label||''}" placeholder="라벨(오픈/마감 등)" id="iss-label-${s.id}"
+              style="padding:5px 7px;font-size:12px" />
+            <input class="form-input" value="${s.start_time||''}" placeholder="09:00" id="iss-start-${s.id}"
+              style="padding:5px 7px;font-size:12px;text-align:center" />
+            <input class="form-input" value="${s.end_time||''}" placeholder="18:00" id="iss-end-${s.id}"
+              style="padding:5px 7px;font-size:12px;text-align:center" />
+            <button onclick="deleteInlineShift(${s.id},'${store}')" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:15px;padding:0">✕</button>
+          </div>`).join('')}
+        ${!(codes||[]).length ? '<div style="font-size:13px;color:var(--th);padding:4px 0">등록된 근무조가 없습니다.</div>' : ''}
+      </div>
+      <div style="display:grid;grid-template-columns:50px 1fr 80px 80px auto;gap:5px;align-items:center;margin-bottom:14px">
+        <input class="form-input" id="iss-new-code" placeholder="A" style="padding:6px 7px;font-size:12px;text-align:center;font-weight:700" />
+        <input class="form-input" id="iss-new-label" placeholder="라벨 (오픈·마감 등)" style="padding:6px 7px;font-size:12px" />
+        <input class="form-input" id="iss-new-start" placeholder="09:00" style="padding:6px 7px;font-size:12px;text-align:center" />
+        <input class="form-input" id="iss-new-end" placeholder="18:00" style="padding:6px 7px;font-size:12px;text-align:center" />
+        <button class="btn-submit" onclick="addInlineShift('${store}')" style="padding:6px 10px;font-size:12px;white-space:nowrap">+ 추가</button>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn-cancel-sm" onclick="closeInlineShiftModal()">취소</button>
+        <button class="btn-submit" onclick="saveInlineShifts('${store}')"><i class="ti ti-device-floppy"></i> 저장</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+}
+
+function closeInlineShiftModal() {
+  document.getElementById('inlineShiftModal')?.remove();
+}
+
+async function addInlineShift(store) {
+  const code  = document.getElementById('iss-new-code')?.value.trim().toUpperCase();
+  const label = document.getElementById('iss-new-label')?.value.trim();
+  const start = document.getElementById('iss-new-start')?.value.trim();
+  const end   = document.getElementById('iss-new-end')?.value.trim();
+  if (!code) { alert('근무조 코드를 입력해주세요.'); return; }
+  const { data: max } = await sb.from('store_shift_codes').select('sort_order')
+    .eq('store',store).order('sort_order',{ascending:false}).limit(1).maybeSingle();
+  const { error } = await sb.from('store_shift_codes')
+    .insert({store, code, label:label||null, start_time:start||null, end_time:end||null, sort_order:(max?.sort_order||0)+1, active:true});
+  if (error) { alert('오류(코드 중복일 수 있음): '+error.message); return; }
+  // 모달만 새로고침
+  document.getElementById('inlineShiftModal')?.remove();
+  await openInlineShiftEditor();
+}
+
+async function deleteInlineShift(id, store) {
+  if (!confirm('이 근무조를 삭제할까요?')) return;
+  await sb.from('store_shift_codes').delete().eq('id',id);
+  document.getElementById('iss-row-'+id)?.remove();
+}
+
+async function saveInlineShifts(store) {
+  const rows = document.querySelectorAll('[id^="iss-code-"]');
+  for (const inp of rows) {
+    const id    = inp.id.replace('iss-code-','');
+    const code  = inp.value.trim().toUpperCase();
+    const label = document.getElementById('iss-label-'+id)?.value.trim()||null;
+    const start = document.getElementById('iss-start-'+id)?.value.trim()||null;
+    const end   = document.getElementById('iss-end-'+id)?.value.trim()||null;
+    if (code) await sb.from('store_shift_codes').update({code,label,start_time:start,end_time:end}).eq('id',parseInt(id));
+  }
+  closeInlineShiftModal();
+  // 범례 새로고침
+  const { data: newCodes } = await sb.from('store_shift_codes').select('*').eq('store',store).eq('active',true).order('sort_order');
+  const legendArea = document.getElementById('shiftLegendArea');
+  if (legendArea && newCodes) {
+    legendArea.innerHTML = newCodes.map(s=>`
+      <span style="display:inline-flex;align-items:center;gap:4px;background:var(--cr);border-radius:8px;padding:3px 9px;font-size:11px;margin:2px">
+        <strong>${s.code}</strong>${s.label?'('+s.label+')':''} ${s.start_time||''}~${s.end_time||''}
+      </span>`).join('') || '<span style="font-size:12px;color:var(--th)">근무조 없음</span>';
+  }
+}
+
+// 기존 openShiftSettings 유지 (사이드바 메뉴에서 접근 시)
 function openShiftSettings() {
-  window.__schSettingsFromEdit = true;
-  // scheduleSettings 페이지를 본인 매장으로 자동 진입
-  const area = document.getElementById('contentArea');
-  const nb = document.getElementById('nav-scheduleSettings');
-  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
-  if (nb) nb.classList.add('active');
-  renderScheduleSettings(area, window.__schStore || currentUser.store);
+  openInlineShiftEditor();
 }
 
 // ── 붙여넣기 핸들러 ──────────────────────────────────────
