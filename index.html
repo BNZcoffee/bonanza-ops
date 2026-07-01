@@ -7313,6 +7313,8 @@ async function renderScheduleEdit(area) {
           </div>
           <div id="schNotesView" style="background:var(--cr);border:0.5px solid var(--crd);border-radius:8px;padding:9px 12px;font-size:13px;min-height:72px;white-space:pre-wrap;line-height:1.7;color:var(--tm)">${curSchedule?.special_notes||'<span style="color:var(--th)">입퇴사, 휴점, 행사, 지각인원 등 특이사항</span>'}</div>
           <textarea class="form-input" id="schNotes" rows="4" style="display:none;margin-top:4px" placeholder="입퇴사, 휴점, 행사, 지각인원 등 특이사항" oninput="cacheMemo('notes',this.value)">${curSchedule?.special_notes||''}</textarea>
+          <!-- 퇴사 예정자 패널 -->
+          <div id="retirePanel" style="margin-top:8px;display:none"></div>
         </div>
       </div>
 
@@ -7333,17 +7335,28 @@ async function renderScheduleEdit(area) {
       ${canEdit ? `<div style="background:var(--cr);border-radius:8px;padding:10px 12px;margin-bottom:10px">
         <div style="font-size:11px;color:var(--th);margin-bottom:7px;font-weight:600">지원/교육 인력 추가</div>
         <div style="display:grid;grid-template-columns:100px 1fr 1fr auto;gap:6px;align-items:center">
-          <select class="form-input" id="extraTypeSelect" style="padding:7px 8px;font-size:12px">
+          <select class="form-input" id="extraTypeSelect" onchange="onExtraTypeChange(this.value)" style="padding:7px 8px;font-size:12px">
             <option value="지원">지원</option>
             <option value="교육">교육</option>
+            <option value="퇴사예정">퇴사 예정</option>
           </select>
-          <select class="form-input" id="extraStoreSelect" onchange="loadExtraStaffByStore(this.value)"
-            style="padding:7px 8px;font-size:12px">
-            <option value="">매장 선택</option>
-          </select>
-          <select class="form-input" id="extraStaffSelect" style="padding:7px 8px;font-size:12px">
-            <option value="">직원 선택</option>
-          </select>
+          <!-- 지원/교육: 타 매장 선택 -->
+          <span id="extraStoreWrap" style="display:contents">
+            <select class="form-input" id="extraStoreSelect" onchange="loadExtraStaffByStore(this.value)"
+              style="padding:7px 8px;font-size:12px">
+              <option value="">매장 선택</option>
+            </select>
+            <select class="form-input" id="extraStaffSelect" style="padding:7px 8px;font-size:12px">
+              <option value="">직원 선택</option>
+            </select>
+          </span>
+          <!-- 퇴사 예정: 본 매장 직원 + 퇴사일 선택 -->
+          <span id="extraRetireWrap" style="display:none;gap:6px;align-items:center">
+            <select class="form-input" id="retireStaffSelect" style="padding:7px 8px;font-size:12px;min-width:120px">
+              <option value="">직원 선택</option>
+            </select>
+            <input type="date" class="form-input" id="retireDateInput" style="padding:7px 8px;font-size:12px;width:140px" placeholder="퇴사일"/>
+          </span>
           <button class="btn-submit" onclick="addExtraStaff()" style="padding:7px 14px;font-size:12px;white-space:nowrap">
             <i class="ti ti-plus"></i> 추가
           </button>
@@ -7527,15 +7540,70 @@ function syncCellsToMemory() {
   });
 }
 
+// 지원/교육/퇴사예정 타입 변경 시 UI 전환
+function onExtraTypeChange(val) {
+  const storeWrap  = document.getElementById('extraStoreWrap');
+  const retireWrap = document.getElementById('extraRetireWrap');
+  if (val === '퇴사예정') {
+    storeWrap.style.display  = 'none';
+    retireWrap.style.display = 'flex';
+    loadRetireStaffOptions();
+  } else {
+    storeWrap.style.display  = 'contents';
+    retireWrap.style.display = 'none';
+  }
+}
+
+// 퇴사예정: 본 매장 직원 목록 로드
+async function loadRetireStaffOptions() {
+  const sel   = document.getElementById('retireStaffSelect');
+  if (!sel) return;
+  const store = window.__schStore;
+  if (!__allActiveUsers.length) {
+    const { data } = await sb.from('users').select('id,name,store,role,hire_date,active')
+      .eq('active',true).order('name');
+    __allActiveUsers = data || [];
+  }
+  const myStaff = __allActiveUsers.filter(u => u.store === store);
+  sel.innerHTML = '<option value="">직원 선택</option>' +
+    myStaff.map(u => `<option value="${u.id}|${u.name}|${u.store}">${u.name}</option>`).join('');
+}
+
 function addExtraStaff() {
   // 지원/교육 추가는 총괄·부총괄·인사팀만
   const canAddExtra = currentUser.is_master || currentUser.is_vice_master ||
                       currentUser.role === 'hr' || currentUser.role === 'admin';
   if (!canAddExtra) { alert('지원/교육 인력 추가는 총괄·부총괄·인사팀만 가능합니다.'); return; }
 
-  const typeSel  = document.getElementById('extraTypeSelect');
-  const staffSel = document.getElementById('extraStaffSelect');
+  const typeSel   = document.getElementById('extraTypeSelect');
   const extraType = typeSel?.value || '지원';
+
+  // ── 퇴사 예정 처리 ──
+  if (extraType === '퇴사예정') {
+    const staffSel  = document.getElementById('retireStaffSelect');
+    const dateInput = document.getElementById('retireDateInput');
+    const val       = staffSel?.value;
+    const retireDate= dateInput?.value;
+    if (!val) { alert('직원을 선택해주세요.'); return; }
+    if (!retireDate) { alert('퇴사일을 선택해주세요.'); return; }
+    const [id, name, store] = val.split('|');
+    if (curScheduleStaff.some(s => s.id === id && s._retireDate)) {
+      alert('이미 퇴사 예정으로 등록된 직원입니다.'); return;
+    }
+    syncCellsToMemory();
+    // 퇴사예정은 별도 목록에 저장 (스케줄 행에 추가하지 않음)
+    if (!window.__retireList) window.__retireList = [];
+    const existing = window.__retireList.find(r => r.id === id);
+    if (existing) { existing.retireDate = retireDate; }
+    else { window.__retireList.push({ id, name, store, retireDate }); }
+    renderRetirePanel();
+    staffSel.value = '';
+    dateInput.value = '';
+    return;
+  }
+
+  // ── 지원/교육 처리 (기존) ──
+  const staffSel = document.getElementById('extraStaffSelect');
   const val = staffSel?.value;
   if (!val) { alert('매장과 직원을 선택해주세요.'); return; }
   const [id, name, store] = val.split('|');
@@ -7552,6 +7620,119 @@ function addExtraStaff() {
 
   document.getElementById('extraStoreSelect').value = '';
   document.getElementById('extraStaffSelect').innerHTML = '<option value="">직원 선택</option>';
+}
+
+
+// ═══════════════════════════════════════════
+// 퇴사 예정자 관리
+// ═══════════════════════════════════════════
+
+// 퇴사 예정 패널 렌더 (특이사항 아래)
+async function renderRetirePanel() {
+  const panel = document.getElementById('retirePanel');
+  if (!panel) return;
+  const list  = window.__retireList || [];
+  if (!list.length) { panel.style.display = 'none'; return; }
+
+  const year  = window.__schYear;
+  const month = window.__schMonth;
+
+  // 공휴일 로드
+  const monthStart = `${year}-${String(month).padStart(2,'0')}-01`;
+  const daysInM    = new Date(year, month, 0).getDate();
+  const monthEnd   = `${year}-${String(month).padStart(2,'0')}-${String(daysInM).padStart(2,'0')}`;
+  const { data: hols } = await sb.from('holidays').select('date,name').gte('date',monthStart).lte('date',monthEnd);
+  const holSet = new Set((hols||[]).map(h=>h.date));
+
+  const items = list.map((r,i) => {
+    const retireD = r.retireDate; // YYYY-MM-DD
+    const retireInMonth = retireD >= monthStart && retireD <= monthEnd;
+
+    // 퇴사일이 이번 달에 포함된 경우 휴무 계산
+    let leaveInfo = '';
+    if (retireInMonth) {
+      const result = calcRetireLeave(r, year, month, retireD, holSet, daysInM);
+      leaveInfo = `
+        <div style="font-size:11px;color:var(--ts);margin-top:5px;line-height:1.8">
+          퇴사일: <strong>${retireD}</strong> &nbsp;|&nbsp;
+          실근무 기간 내 주말/공휴일: <strong>${result.offDays}일</strong>
+          (= 당월 휴무 발생 기준)
+          ${result.note ? `<br><span style="color:var(--th)">${result.note}</span>` : ''}
+        </div>`;
+    } else {
+      leaveInfo = `<div style="font-size:11px;color:var(--th);margin-top:4px">퇴사일: <strong>${retireD}</strong> (이번 달 외)</div>`;
+    }
+
+    return `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:8px 10px;background:#fff;border-radius:7px;margin-bottom:5px">
+      <div>
+        <span style="font-size:12px;font-weight:600;color:var(--tm)">${r.name}</span>
+        <span style="font-size:10px;color:var(--th);margin-left:6px">${r.store}</span>
+        ${leaveInfo}
+      </div>
+      <button onclick="removeRetireEntry(${i})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:13px;flex-shrink:0;padding:2px 4px" title="삭제"><i class="ti ti-x"></i></button>
+    </div>`;
+  }).join('');
+
+  panel.style.display = 'block';
+  panel.innerHTML = `
+    <div style="background:var(--rdb);border:0.5px solid #E8B0A8;border-radius:8px;padding:10px 12px">
+      <div style="font-size:11px;font-weight:700;color:var(--rd);margin-bottom:7px">
+        <i class="ti ti-calendar-off"></i> 퇴사 예정 인원
+      </div>
+      ${items}
+    </div>`;
+}
+
+function removeRetireEntry(idx) {
+  if (!window.__retireList) return;
+  window.__retireList.splice(idx, 1);
+  renderRetirePanel();
+}
+
+/**
+ * 퇴사자 실근무 기간 내 주말/공휴일 계산
+ * 규칙:
+ *  - 입사~퇴사일 중 "실근무(근무조 or 유급휴가)" 기간만 대상
+ *  - 기존 발생휴무 소진(휴무/대휴) 기간의 주말/공휴일은 제외
+ *  - 당월에 한정 (이전 달은 별도)
+ */
+function calcRetireLeave(retiree, year, month, retireDate, holSet, daysInMonth) {
+  const tbody = document.getElementById('schTbody');
+  if (!tbody) return { offDays: 0, note: '' };
+
+  // 이 직원의 당월 entries (메모리 기반)
+  const NON_WORK_TYPES = new Set(['휴무','대휴','결근','공가','경조','연차','오전반차','오후반차','반차','무급휴가']);
+  const LEAVE_CONSUME  = new Set(['휴무','대휴']); // 휴무 소진 (off days 제외 대상)
+  const PAID_LEAVE     = new Set(['연차','오전반차','오후반차','반차','공가','경조']); // 유급 → off 포함
+
+  let offDays  = 0;
+  const notes  = [];
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    if (dateStr > retireDate) break; // 퇴사일 이후 제외
+
+    const dow = new Date(year, month-1, d).getDay();
+    const isOff = dow === 0 || dow === 6 || holSet.has(dateStr); // 주말/공휴일
+    if (!isOff) continue;
+
+    // 해당 날짜의 입력값 확인
+    const sel = tbody.querySelector(`select[data-staff="${retiree.id}"][data-date="${dateStr}"]`);
+    const val = sel?.value || '';
+
+    if (LEAVE_CONSUME.has(val)) {
+      // 기존 발생휴무 소진일의 주말/공휴일 → 휴무 산정 제외
+      notes.push(`${d}일(${val}): 휴무소진기간 제외`);
+      continue;
+    }
+    // 근무조 or 유급휴가 or 미입력(근무 예정) → 휴무 발생
+    offDays++;
+  }
+
+  return {
+    offDays,
+    note: notes.length ? `제외: ${notes.slice(0,3).join(', ')}${notes.length>3?` 외 ${notes.length-3}건`:''}` : ''
+  };
 }
 
 function removeStaffFromSchedule(idx) {
@@ -8464,6 +8645,7 @@ async function renderBalancePanel() {
     ⚠ 당월계가 <strong>${daysInMonth}</strong>일과 다른 경우 누락 확인 &nbsp;|&nbsp;
     잔여 <span style="color:var(--rd)">빨강</span>: 초과 사용 &nbsp;|&nbsp;
     임시저장 시 자동 갱신
+    ${rows.some(r=>r.carryIn>0) ? '<br>📌 <strong>전월 이월 휴무</strong>가 있는 인원은 당월 <strong>대휴 선소진</strong> 후 휴무를 사용하세요 (이월→대휴 표기)' : ''}
   </div>`;
 }
 
@@ -10539,10 +10721,16 @@ async function loadMyLeaveInfo() {
     }).eq('user_id', currentUser.id);
   }
 
-  // 입사일 기반 자동 계산
+  // 입사일 기반 자동 계산 (무급휴가/결근 제외일수 반영)
   const { data: userInfo } = await sb.from('users').select('hire_date').eq('id', currentUser.id).single();
   const hireDate   = userInfo?.data?.hire_date || currentUser.hire_date || '';
-  const { days: autoDays, desc: autoDesc } = calcAnnualLeave(hireDate);
+  // 무급휴가/결근 누적일수
+  const { data: unpaidEnt } = await sb.from('schedule_entries')
+    .select('date, entry_type, note').eq('user_id', currentUser.id)
+    .in('entry_type', ['무급휴가','결근']).order('date');
+  const excludeDays2   = (unpaidEnt||[]).length;
+  const excludeMonths2 = Math.floor(excludeDays2 / 30);
+  const { days: autoDays, desc: autoDesc } = calcAnnualLeave(hireDate, null, excludeDays2);
   const initAdjust  = bal?.adjust    || 0;
   const initUsed    = bal?.init_used || 0;
   const expireUsed  = bal?.expire_used || 0;
@@ -10553,6 +10741,15 @@ async function loadMyLeaveInfo() {
   const isAdmin     = currentUser.role === 'admin' || currentUser.is_master || currentUser.is_vice_master;
 
   // 초기값 읽기 전용 표시 (수정은 인원현황 > 연차 설정에서 운영팀이 진행)
+  const unpaidHtml = excludeDays2 > 0 ? `
+    <div style="background:#FFF9F0;border:0.5px solid #E8C07A;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px">
+      <div style="font-weight:700;color:#7A5C00;margin-bottom:5px"><i class="ti ti-alert-triangle"></i> 무급휴가/결근 제외 내역</div>
+      <div style="color:var(--ts)">누적 <strong>${excludeDays2}일</strong> → 연차 발생 <strong>${excludeMonths2}개월</strong> 차감 적용</div>
+      <div style="margin-top:6px;max-height:150px;overflow-y:auto">
+        ${(unpaidEnt||[]).map(e=>`<div style="font-size:11px;color:var(--th);padding:2px 0">${e.date} <strong>${e.entry_type}</strong>${e.note?' — '+e.note:''}</div>`).join('')}
+      </div>
+    </div>` : '';
+
   const initEditHtml = initTotal > 0 ? `
     <div style="background:var(--cr);border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
       <div style="font-size:11px;color:var(--th);font-weight:700">초기값 (시스템 도입 전)</div>
@@ -10594,7 +10791,7 @@ async function loadMyLeaveInfo() {
         </div>`).join('')}
     </div>` : `<div style="text-align:center;padding:20px;color:var(--th);font-size:13px">스케줄에 등록된 연차/반차가 없습니다.</div>`;
 
-  cont.innerHTML = initEditHtml + summaryHtml + historyHtml;
+  cont.innerHTML = (unpaidHtml||'')+initEditHtml + summaryHtml + historyHtml;
 }
 
 // saveMyLeaveInit 제거됨 — 연차 초기값은 운영팀이 인원현황에서 설정
@@ -10610,30 +10807,43 @@ async function loadMyLeaveInfo() {
  * - 1년 미만: 매월 만근 1일 (최대 11일)
  * - 1년 이상: 15일 + (근속년수-1)÷2, 최대 25일
  */
-function calcAnnualLeave(hireDateStr, baseDateStr) {
+/**
+ * 연차 발생일 계산
+ * @param {string} hireDateStr  입사일
+ * @param {string} baseDateStr  기준일
+ * @param {number} excludeDays  무급휴가+결근 누적일수 (연속 30일 이상 시 비례 감산)
+ */
+function calcAnnualLeave(hireDateStr, baseDateStr, excludeDays = 0) {
   if (!hireDateStr) return { days: 0, desc: '입사일 없음' };
   const hire = new Date(hireDateStr);
   const base = baseDateStr ? new Date(baseDateStr) : new Date();
   if (isNaN(hire) || hire > base) return { days: 0, desc: '입사 전' };
 
-  // 년/월 차이 계산
+  // 근로기준법: 무급휴가/결근이 30일 이상 연속되면 비례 감산
+  // 여기서는 단순하게 총 제외일수를 월수로 환산해 차감
+  const excludeMonths = Math.floor((excludeDays || 0) / 30);
+
   let months = (base.getFullYear() - hire.getFullYear()) * 12
              + (base.getMonth() - hire.getMonth());
-  // 일수 보정 (기준일이 입사일보다 앞이면 -1개월)
   if (base.getDate() < hire.getDate()) months -= 1;
+  months = Math.max(0, months - excludeMonths); // 제외 기간 반영
+
   const years = Math.floor(months / 12);
 
-  if (months < 1) return { days: 0, desc: '입사 1개월 미만' };
+  if (months < 1) return { days: 0, desc: '입사 1개월 미만' + (excludeDays ? ` (무급/결근 ${excludeDays}일 제외)` : '') };
 
+  let days, desc;
   if (years < 1) {
-    const days = Math.min(months, 11);
-    return { days, desc: `입사 ${months}개월 → ${days}일` };
+    days = Math.min(months, 11);
+    desc = `입사 ${months}개월 → ${days}일`;
   } else {
     const extra = Math.floor((years - 1) / 2);
-    const days  = Math.min(15 + extra, 25);
-    const rem   = months % 12;
-    return { days, desc: `입사 ${years}년 ${rem}개월 → ${days}일` };
+    days  = Math.min(15 + extra, 25);
+    const rem = months % 12;
+    desc  = `입사 ${years}년 ${rem}개월 → ${days}일`;
   }
+  if (excludeDays) desc += ` (무급/결근 ${excludeDays}일 제외)`;
+  return { days, desc };
 }
 
 /**
