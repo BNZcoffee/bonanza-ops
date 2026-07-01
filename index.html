@@ -6912,8 +6912,9 @@ async function renderScheduleEdit(area) {
           <button class="btn-cancel-sm" onclick="confirmScheduleApprove()" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-check"></i> 컨펌 완료</button>
           <button class="btn-cancel-sm" onclick="confirmScheduleReject()" style="font-size:12px;color:var(--rd);border-color:var(--rd)"><i class="ti ti-x"></i> 반려</button>
         ` : ''}
-        ${curSchedule && curSchedule.status==='confirmed' ? `<button class="btn-cancel-sm" onclick="openCloseModal()" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-checklist"></i> 근태 마감 관리</button>` : ''}
-        ${curSchedule && curSchedule.closed_at && (isScheduleHr()||isScheduleAdmin()) && !curSchedule.hr_checked_at ? `<button class="btn-cancel-sm" onclick="hrCheckSchedule()" style="font-size:12px;color:var(--pu);border-color:var(--pu)"><i class="ti ti-user-check"></i> 인사팀 점검완료</button>` : ''}
+        ${curSchedule && curSchedule.status==='confirmed' && !curSchedule.hr_checked_at ? `<button class="btn-cancel-sm" onclick="openCloseModal()" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-checklist"></i> 근태 마감 관리</button>` : ''}
+        ${curSchedule && curSchedule.closed_at && (isScheduleHr()||isScheduleAdmin()) && !curSchedule.hr_checked_at ? `<button class="btn-cancel-sm" onclick="hrCheckScheduleGuard()" style="font-size:12px;color:var(--pu);border-color:var(--pu)"><i class="ti ti-user-check"></i> 인사팀 점검완료</button>` : ''}
+        ${curSchedule?.hr_checked_at && isScheduleAdmin() ? `<button class="btn-cancel-sm" onclick="cancelHrCheck()" style="font-size:12px;color:var(--th);border-color:var(--crd)"><i class="ti ti-rotate-left"></i> 인사점검 취소</button>` : ''}
       </div>
     </div>
 
@@ -7048,7 +7049,14 @@ function onCellChange(sel) {
   const val       = sel.value;
   const key       = (userId||extraName) + '_' + date;
 
-  // 마감된 날짜 수정 차단
+  // 인사팀 마감 후 — 전체 수정 차단
+  if (curSchedule?.hr_checked_at) {
+    const prev = curScheduleEntries[key];
+    sel.value = prev?._rawCode || prev?.entry_type || prev?.shift_code || '';
+    alert('인사팀 점검이 완료된 스케줄은 수정할 수 없습니다.');
+    return;
+  }
+  // 마감된 날짜 수정 차단 (매니저/운영팀)
   if (curSchedule?.close_days && date) {
     const closedDays = Array.isArray(curSchedule.close_days)
       ? curSchedule.close_days
@@ -8561,7 +8569,11 @@ async function openCloseModal() {
     if (dow === 0 || d === daysInMonth) { weeks.push([...week]); week = []; }
   }
 
-  const canManage = canEditSchedule(curSchedule) || isScheduleHr() || isScheduleAdmin();
+  // 근태 마감 권한
+  // - 인사팀 마감 완료(hr_checked_at) 후: 운영팀만 인사점검 취소 가능, 나머지 불가
+  // - 그 외: 매니저(작성자) / 운영팀 / 인사팀 모두 가능
+  const hrDone    = !!curSchedule.hr_checked_at;
+  const canManage = !hrDone && (canEditSchedule(curSchedule) || isScheduleHr() || isScheduleAdmin());
 
   const dayNames = ['일','월','화','수','목','금','토'];
   const weekRows = weeks.map((wDays, wi) => {
@@ -8621,9 +8633,11 @@ async function openCloseModal() {
       </div>
 
       <div style="font-size:12px;color:var(--ts);background:var(--crm);border-radius:8px;padding:10px 13px;margin-bottom:14px;line-height:1.7">
-        <strong>마감 기준:</strong> 일 또는 주 단위로 체크 → 마감 확정 버튼<br>
-        마감된 날짜는 셀 수정이 <strong>불가</strong>합니다. 취소는 체크 해제 후 저장하세요.
-        ${!canManage?'<br><span style="color:var(--th)">※ 권한 없음: 조회만 가능</span>':''}
+        <strong>근태 마감 순서:</strong> 매니저 마감 → 운영팀 컨펌 → 인사팀 점검완료<br>
+        마감된 날짜는 셀 수정이 <strong>불가</strong>합니다. 체크 해제 후 저장으로 취소 가능.<br>
+        <span style="color:var(--rd)">인사팀 점검완료 후에는 운영팀만 점검 취소 가능합니다.</span>
+        ${!canManage && !hrDone?'<br><span style="color:var(--th)">※ 권한 없음: 조회만 가능</span>':''}
+        ${hrDone?'<br><span style="color:var(--pu);font-weight:600">⚠ 인사팀 점검이 완료된 스케줄입니다. 수정 불가.</span>':''}
       </div>
 
       <!-- 전체 선택/해제 -->
@@ -8722,12 +8736,15 @@ ${uniqueApprovalDays.join(', ')}
   }
 
   const now = new Date().toISOString();
-  await sb.from('schedules').update({
-    close_days:  closedDays,
-    closed_at:   allClosed ? now : (closedDays.length > 0 ? now : null),
-    closed_by:   currentUser.id,
-    updated_at:  now
-  }).eq('id', curSchedule.id);
+  // 마감 저장 시 스케줄 상태도 업데이트
+  // 매니저가 마감 후 수정했다면 → status를 draft로 내려서 재컨펌 요청 필요
+  const updatePayload = {
+    close_days: closedDays,
+    closed_at:  allClosed ? now : (closedDays.length > 0 ? now : null),
+    closed_by:  currentUser.id,
+    updated_at: now
+  };
+  await sb.from('schedules').update(updatePayload).eq('id', curSchedule.id);
 
   document.getElementById('closeModal')?.remove();
   alert('마감이 저장되었습니다.');
@@ -8756,6 +8773,31 @@ async function renderScheduleCloseList(area) {
   area.innerHTML = `
     <div class="page-header"><div class="page-title">근태 마감 현황</div><div class="page-sub">확정된 스케줄의 마감 처리 현황</div></div>
     <div class="post-list">${cards || '<div style="text-align:center;padding:40px;color:var(--th)">확정된 스케줄이 없습니다.</div>'}</div>`;
+}
+
+// 인사팀 점검완료 — 운영팀 미컨펌 시 경고
+async function hrCheckScheduleGuard() {
+  if (!curSchedule) return;
+  // 운영팀 컨펌 확인 (status가 confirmed가 아니면 경고)
+  if (curSchedule.status !== 'confirmed') {
+  if (!confirm('운영팀 컨펌이 완료되지 않은 스케줄입니다. 그래도 인사팀 점검완료 처리하시겠습니까?')) return;
+  }
+  await hrCheckSchedule();
+}
+
+// 인사팀 점검 취소 (운영팀만)
+async function cancelHrCheck() {
+  if (!curSchedule || !isScheduleAdmin()) return;
+  if (!confirm('인사팀 점검 완료를 취소할까요?취소 후 수정이 가능해집니다.')) return;
+  const now = new Date().toISOString();
+  await sb.from('schedules').update({
+    hr_checked_at: null,
+    hr_checked_by: null,
+    updated_at: now
+  }).eq('id', curSchedule.id);
+  await saveScheduleHistory(curSchedule.id, '인사점검 취소');
+  alert('인사팀 점검이 취소되었습니다.');
+  openScheduleById(curSchedule.id);
 }
 
 async function hrCheckSchedule() {
@@ -8953,84 +8995,119 @@ function openSchedulePreview() {
 }
 
 async function captureScheduleImage() {
-  // 캡처 대상: 실제 화면의 schMemoSection + 근무조 + 테이블 + 집계 패널
-  const memo    = document.getElementById('schMemoSection');
-  const shiftEl = document.querySelector('#shiftLegendArea')?.closest('div[style*="margin-bottom:10px"]') || null;
   const table   = document.getElementById('schTable');
   const balance = document.getElementById('leaveBalancePanel');
   if (!table) { alert('스케줄 표를 찾을 수 없습니다.'); return; }
 
-  // ── 캡처 전용 임시 컨테이너 생성 (body 최하단 외부, 화면 밖) ──
-  // 스케줄 테이블 전체 너비 측정
-  const tableRealWidth = (document.getElementById('schTable')?.scrollWidth || 0) + 100;
-  const captureWidth   = Math.max(tableRealWidth, 900);
+  // 운영계획/특이사항
+  const opText    = document.getElementById('schOpPlan')?.value || curSchedule?.operation_plan || '';
+  const notesText = document.getElementById('schNotes')?.value  || curSchedule?.special_notes  || '';
 
+  // ── 캡처 전용 테이블 HTML 재구성 (sticky 없이) ──
+  const originalRows = table.querySelectorAll('tr');
+  const CELL_W   = 48;    // 날짜 셀 고정 너비(px)
+  const NAME_W   = 100;   // 이름 셀 너비
+  const CELL_H   = 28;    // 셀 높이
+  const HDR_H    = 36;    // 날짜 헤더 높이
+
+  // 테이블 HTML을 새로 구성 — sticky 제거, 고정 너비 적용
+  let newTbodyHtml = '';
+  originalRows.forEach((tr, ri) => {
+    const cells = tr.querySelectorAll('th, td');
+    let rowHtml  = '<tr>';
+    cells.forEach((cell, ci) => {
+      const tag     = ri === 0 ? 'th' : 'td';
+      const isName  = ci === 0;
+      const w       = isName ? NAME_W : CELL_W;
+      // 배경색, 글자색 추출
+      const cs      = window.getComputedStyle(cell);
+      const bg      = cell.style.background || cell.style.backgroundColor || '';
+      const fc      = cell.style.color || '';
+      const fw      = cell.style.fontWeight || '';
+      const fs      = cell.style.fontSize || '11px';
+      const align   = isName ? 'left' : 'center';
+      const h       = ri <= 1 ? HDR_H : CELL_H;
+      // 셀 내용: select → 값으로, 핸들(⠿)·X버튼 제거
+      let inner = '';
+      if (ci === 0 && ri > 1) {
+        // 이름 셀: 드래그핸들·버튼 제거하고 이름만
+        const nameSpan = cell.querySelector('span:not(.sch-drag-handle)');
+        inner = nameSpan ? nameSpan.textContent.trim() : cell.textContent.trim();
+      } else {
+        const sel = cell.querySelector('select');
+        if (sel) {
+          // 배경색 (휴무 컬러)
+          const selBg = cell.style.background || '';
+          const val   = sel.value || '';
+          inner = `<span style="display:block;text-align:center;background:${selBg}">${val}</span>`;
+        } else {
+          // 메모 dot 같은 불필요한 이벤트 요소 제거 후 텍스트
+          const clone2 = cell.cloneNode(true);
+          clone2.querySelectorAll('button,.sch-drag-handle').forEach(el=>el.remove());
+          inner = clone2.innerHTML;
+        }
+      }
+      // sticky 제거, 너비 고정
+      rowHtml += `<${tag} style="width:${w}px;min-width:${w}px;max-width:${w}px;height:${h}px;padding:2px 3px;border:0.5px solid #D9C9B3;text-align:${align};font-size:${fs};background:${bg};color:${fc};font-weight:${fw};overflow:hidden;white-space:nowrap;vertical-align:middle">${inner}</${tag}>`;
+    });
+    rowHtml += '</tr>';
+    newTbodyHtml += rowHtml;
+  });
+
+  // 총 너비 계산
+  const colCount    = (originalRows[0]?.querySelectorAll('th,td').length || 1);
+  const tableWidth  = NAME_W + (colCount - 1) * CELL_W + 2;
+  const captureWidth = tableWidth + 40; // padding
+
+  // 컨테이너
   const wrap = document.createElement('div');
-  wrap.style.cssText = `position:fixed;left:-9999px;top:0;background:#fff;padding:16px;width:${captureWidth}px;box-sizing:border-box;z-index:-1`;
   wrap.setAttribute('data-capture-root','1');
+  wrap.style.cssText = `position:fixed;left:-9999px;top:0;background:#fff;padding:16px;width:${captureWidth}px;box-sizing:border-box`;
 
   // 제목
   const titleEl = document.createElement('div');
-  titleEl.style.cssText = 'font-size:16px;font-weight:700;color:#2A1A0E;margin-bottom:12px';
+  titleEl.style.cssText = 'font-size:15px;font-weight:700;color:#2A1A0E;margin-bottom:10px';
   titleEl.textContent   = `${window.__schStore||''} ${window.__schYear}년 ${window.__schMonth}월 스케줄`;
   wrap.appendChild(titleEl);
 
-  // 운영계획 + 특이사항 (뷰 내용 복사)
-  const opText    = document.getElementById('schOpPlan')?.value || curSchedule?.operation_plan || '';
-  const notesText = document.getElementById('schNotes')?.value  || curSchedule?.special_notes  || '';
-  const memoGrid  = document.createElement('div');
-  memoGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px';
+  // 운영계획 + 특이사항
+  const memoGrid = document.createElement('div');
+  memoGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px';
   ['운영 계획', '매장 특이사항'].forEach((label, i) => {
     const val = i === 0 ? opText : notesText;
+    if (!val) return;
     const box = document.createElement('div');
-    box.innerHTML = `
-      <div style="font-size:10px;font-weight:700;color:#B09070;letter-spacing:.5px;margin-bottom:4px">${label}</div>
-      <div style="font-size:12px;line-height:1.7;color:#2A1A0E;white-space:pre-wrap;background:#F9F4EE;border-radius:6px;padding:8px 10px;min-height:40px">${val||'(없음)'}</div>`;
+    box.innerHTML = `<div style="font-size:9px;font-weight:700;color:#B09070;margin-bottom:3px">${label}</div>
+      <div style="font-size:11px;line-height:1.6;color:#2A1A0E;white-space:pre-wrap;background:#F9F4EE;border-radius:6px;padding:6px 8px">${val}</div>`;
     memoGrid.appendChild(box);
   });
-  wrap.appendChild(memoGrid);
+  if (memoGrid.children.length) wrap.appendChild(memoGrid);
 
-  // 근무조 범례 복사
-  const shiftLegendEl = document.getElementById('shiftLegendArea');
-  if (shiftLegendEl) {
+  // 근무조 범례
+  const shiftEl = document.getElementById('shiftLegendArea');
+  if (shiftEl && shiftEl.children.length) {
     const shiftBox = document.createElement('div');
-    shiftBox.style.cssText = 'margin-bottom:10px';
-    const shiftLabel = document.createElement('div');
-    shiftLabel.style.cssText = 'font-size:10px;font-weight:700;color:#B09070;letter-spacing:.5px;margin-bottom:4px';
-    shiftLabel.textContent = '근무조';
-    shiftBox.appendChild(shiftLabel);
-    shiftBox.appendChild(shiftLegendEl.cloneNode(true));
+    shiftBox.style.cssText = 'margin-bottom:8px';
+    const lbl = document.createElement('div');
+    lbl.style.cssText = 'font-size:9px;font-weight:700;color:#B09070;margin-bottom:3px';
+    lbl.textContent = '근무조';
+    shiftBox.appendChild(lbl);
+    shiftBox.appendChild(shiftEl.cloneNode(true));
     wrap.appendChild(shiftBox);
   }
 
-  // 스케줄 테이블 — select를 span으로 치환한 클론
-  const tableClone = table.cloneNode(true);
-  tableClone.querySelectorAll('select').forEach(sel => {
-    const span = document.createElement('span');
-    span.style.cssText = 'font-size:11px;display:block;text-align:center;padding:4px 2px';
-    // 배경색 복원 (휴무 색)
-    const bg = sel.parentElement.style.background;
-    span.style.background = bg || 'transparent';
-    span.textContent = sel.value || '';
-    sel.replaceWith(span);
-  });
-  // 메모 dot 유지
-  const tableWrap = document.createElement('div');
-  tableWrap.style.cssText = 'overflow:visible;margin-bottom:10px;border:0.5px solid #D9C9B3;border-radius:8px;width:100%';
-  tableClone.style.cssText = 'border-collapse:collapse;font-size:11px;width:100%';
-  tableWrap.appendChild(tableClone);
-  wrap.appendChild(tableWrap);
+  // 스케줄 테이블 (재구성)
+  const newTable = document.createElement('table');
+  newTable.style.cssText = `border-collapse:collapse;table-layout:fixed;width:${tableWidth}px;margin-bottom:10px`;
+  newTable.innerHTML = newTbodyHtml;
+  wrap.appendChild(newTable);
 
-  // 집계 패널 복사 (전월/당월 휴무·근무 집계 포함)
+  // 집계 패널
   if (balance) {
     const balClone = balance.cloneNode(true);
-    balClone.style.overflow  = 'visible';
-    balClone.style.width     = '100%';
-    balClone.style.boxSizing = 'border-box';
-    // 집계 패널 내부 테이블도 전체 너비
+    balClone.style.cssText = 'overflow:visible;width:100%;box-sizing:border-box;margin-top:6px';
     balClone.querySelectorAll('table').forEach(t => {
-      t.style.minWidth = 'unset';
-      t.style.width = '100%';
+      t.style.width = '100%'; t.style.minWidth = 'unset';
     });
     wrap.appendChild(balClone);
   }
@@ -9043,15 +9120,11 @@ async function captureScheduleImage() {
       backgroundColor: '#ffffff',
       useCORS: true,
       scrollX: 0, scrollY: 0,
-      windowWidth: captureWidth + 32,
       width:  wrap.scrollWidth,
       height: wrap.scrollHeight,
       onclone: (cloneDoc) => {
-        const cloneWrap = cloneDoc.querySelector('[data-capture-root]');
-        if (cloneWrap) {
-          cloneWrap.style.width = captureWidth + 'px';
-          cloneWrap.style.overflow = 'visible';
-        }
+        const cw = cloneDoc.querySelector('[data-capture-root]');
+        if (cw) { cw.style.overflow = 'visible'; }
       }
     });
     const link = document.createElement('a');
