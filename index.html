@@ -9333,7 +9333,8 @@ async function openStaffLeaveEdit(userId, userName) {
       </div>
       <div class="form-row">
         <label class="form-label">기준일</label>
-        <input type="date" class="form-input" id="sl-date" value="${bal?.init_date||''}" />
+        <input type="date" class="form-input" id="sl-date" value="${bal?.init_date||new Date().toISOString().slice(0,10)}" />
+        <div style="font-size:11px;color:var(--th);margin-top:3px">※ 이 초기값의 기준 시점 (보통 시스템 도입일 또는 연차 정산일)</div>
       </div>
       <div class="modal-footer">
         <button class="btn-sm ghost" onclick="document.getElementById('staffLeaveModal').remove()">취소</button>
