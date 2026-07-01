@@ -6987,8 +6987,8 @@ async function renderScheduleEdit(area) {
         &nbsp;·&nbsp; <i class="ti ti-notes" style="color:var(--bl)"></i>
         <strong style="color:var(--bl)">셀 우클릭(PC) / 길게 누르기(모바일)</strong>으로 비고 메모 추가 가능
       </div>
-      <!-- ===== 이미지 저장 캡처 영역 시작 ===== -->
-      <div id="schCaptureWrap" style="background:#fff;padding:12px;border-radius:8px">
+      <!-- ===== 이미지 저장 캡처 영역 (평소 숨김, 이미지 저장 시에만 렌더) ===== -->
+      <div id="schCaptureWrap" style="display:none;background:#fff;padding:12px;border-radius:8px">
         <!-- 캡처용 헤더 -->
         <div id="schCaptureHeader" style="margin-bottom:10px">
           <div style="font-size:16px;font-weight:700;color:var(--tm);margin-bottom:8px">${store} ${year}년 ${month}월 스케줄</div>
@@ -8689,11 +8689,21 @@ function openSchedulePreview() {
 }
 
 async function captureScheduleImage() {
-  // ① 캡처 전 prepareCaptureView로 캡처용 div 생성
   const captureDiv = document.getElementById('schCaptureWrap');
   if (!captureDiv) { alert('캡처 영역을 찾을 수 없습니다.'); return; }
 
-  // ② select → div로 일시 치환 (html2canvas가 select를 못 그림)
+  // 캡처 전 운영계획·특이사항 최신값 동기화
+  const capOp    = document.getElementById('schCapOp');
+  const capNotes = document.getElementById('schCapNotes');
+  const opVal    = document.getElementById('schOpPlan')?.value || curSchedule?.operation_plan || '';
+  const notesVal = document.getElementById('schNotes')?.value  || curSchedule?.special_notes || '';
+  if (capOp)    capOp.textContent    = opVal    || '(없음)';
+  if (capNotes) capNotes.textContent = notesVal || '(없음)';
+
+  // 캡처 시에만 일시 표시
+  captureDiv.style.display = '';
+
+  // select → div로 일시 치환 (html2canvas가 select를 못 그림)
   const selects = captureDiv.querySelectorAll('select');
   const originals = [];
   selects.forEach(sel => {
@@ -8733,6 +8743,8 @@ async function captureScheduleImage() {
       if (div) parent.removeChild(div);
       sel.style.display = '';
     });
+    // 캡처 영역 다시 숨김
+    captureDiv.style.display = 'none';
   }
 }
 
