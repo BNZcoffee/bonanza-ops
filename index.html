@@ -574,9 +574,13 @@ async function loadRoleOptions() {
 
 // 직위 select 옵션 HTML 생성 (현재 선택값 표시)
 function roleSelectOptions(selectedRole) {
-  return roleOptions.map(r =>
-    `<option value="${r.role_key}"${selectedRole===r.role_key?' selected':''}>${r.label}</option>`
-  ).join('');
+  // parttime/PT는 고용형태이므로 직위 목록에서 제외
+  const EXCLUDE_FROM_ROLE = new Set(['parttime','pt','PT','시간제','교육','지원']);
+  return roleOptions
+    .filter(r => !EXCLUDE_FROM_ROLE.has(r.role_key))
+    .map(r =>
+      `<option value="${r.role_key}"${selectedRole===r.role_key?' selected':''}>${r.label}</option>`
+    ).join('');
 }
 
 // ── 직위 관리 ──────────────────────────────────
@@ -2807,7 +2811,14 @@ async function openEditUser(userId){
     if(sel) sel.onchange = ()=>{
       document.getElementById('eu_custom_wrap').style.display = sel.value==='__custom'?'block':'none';
     };
-  },50);
+    // PT 고용형태 초기화 — DOM이 그려진 후 onchange 이벤트 연결
+    const empSel = document.getElementById('eu_employment');
+    if (empSel) {
+      empSel.onchange = () => togglePtFields(empSel.value);
+      // 현재 값이 parttime이면 패널 표시
+      togglePtFields(empSel.value);
+    }
+  },80);
   document.getElementById('catModal').classList.add('open');
 }
 
@@ -2821,7 +2832,17 @@ function initPwFromCode(code){
 async function submitEditUser(){
   if(!canEditStaff()){alert('인원현황 수정 권한이 없습니다. (운영총괄·인사팀만 가능)');return;}
   const name = document.getElementById('eu_name')?.value.trim();
-  const role = document.getElementById('eu_role')?.value;
+  let role = document.getElementById('eu_role')?.value;
+  // PT/parttime이 직위에 선택된 경우 — 고용형태와 혼동하지 않도록 barista로 대체
+  if (role === 'parttime' || role === 'PT' || role === 'pt') {
+    const realRole = prompt(
+      '직위에 "PT"가 선택되어 있습니다.\n' +
+      'PT는 고용 형태이며, 직위(역할)를 별도로 선택해주세요.\n\n' +
+      '직위를 입력하세요 (예: barista / pastry / manager): '
+    );
+    if (!realRole) return;
+    role = realRole.trim();
+  }
   const storeSel = document.getElementById('eu_store')?.value;
   const store = storeSel==='__custom' ? document.getElementById('eu_store_custom')?.value.trim() : storeSel;
   const phone = document.getElementById('eu_phone')?.value.trim();
@@ -7712,22 +7733,36 @@ async function buildStaffRowWithCross(staff, si, daysInMonth, year, month, allCo
     }
 
     if (readonly) {
-      // 읽기 전용 셀 (타 매장 지원근무) — "매장명\n시간" 형식 두 줄 표시
+      // 읽기 전용 셀 (타 매장 지원근무) — 매장명 + 출근시간 두 줄 표시
       const [crossStore, crossTime] = displayVal.split('\n');
       rowHtml += `<td style="border:0.5px solid var(--crd);padding:0;background:${bgColor}" title="${tooltip}">
-        <div style="font-size:9px;text-align:center;padding:3px 1px;color:#7A5C00;font-weight:600;cursor:default;line-height:1.3">
-          <div>${crossStore||''}</div>
-          ${crossTime?`<div style="font-size:8px;color:#A07030">${crossTime}</div>`:''}
+        <div style="text-align:center;padding:2px 1px;color:#7A5C00;cursor:default;line-height:1.4">
+          <div style="font-size:10px;font-weight:700">${crossStore||''}</div>
+          ${crossTime
+            ? `<div style="font-size:9px;color:#A07030;font-weight:600">${crossTime}</div>`
+            : `<div style="font-size:8px;color:#B09070">시간미입력</div>`
+          }
         </div>
       </td>`;
     } else {
-      rowHtml += `<td style="border:0.5px solid var(--crd);padding:0;background:${bgColor}">
+      // 지원 근무 정보 복원 (DB 로드 시 dataset 초기화 방지)
+      const hasSupportStore = e?._supportStore || '';
+      const hasSupportTime  = e?._supportTime  || '';
+      const cellBgStyle = hasSupportStore ? 'background:#FFFBEB' : `background:${bgColor}`;
+      const supportDataAttrs = hasSupportStore
+        ? `data-support-store="${hasSupportStore}" data-support-time="${hasSupportTime}"`
+        : '';
+      rowHtml += `<td style="border:0.5px solid var(--crd);padding:0;${cellBgStyle}">
         <select ${canEdit?'':'disabled'} data-staff="${staff.id||''}" data-extra="${staff.isExtra?staff.extra_name:''}" data-date="${dateStr}"
+          ${supportDataAttrs}
           onchange="onCellChange(this)"
-          style="width:100%;border:none;background:transparent;font-size:11px;text-align:center;padding:6px 1px;cursor:${canEdit?'pointer':'default'};appearance:none;-webkit-appearance:none">
+          title="${hasSupportStore ? hasSupportStore+(hasSupportTime?' '+hasSupportTime:'') : ''}"
+          style="width:100%;border:none;background:transparent;font-size:11px;text-align:center;padding:6px 1px;cursor:${canEdit?'pointer':'default'};appearance:none;-webkit-appearance:none;color:${hasSupportStore?'#7A5C00':'inherit'}">
           <option value="">-</option>
           ${allCodeOptions.map(o=>`<option value="${o.value}"${displayVal===o.value?' selected':''}>${o.value}</option>`).join('')}
         </select>
+        ${hasSupportStore ? `<div style="font-size:8px;text-align:center;color:#A07030;line-height:1.2;padding:0 1px;margin-top:-3px;pointer-events:none">
+          ${hasSupportStore.slice(0,4)}${hasSupportTime?'<br>'+hasSupportTime.split('~')[0]:''}</div>` : ''}
       </td>`;
     }
   }
