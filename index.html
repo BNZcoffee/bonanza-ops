@@ -9028,7 +9028,7 @@ async function saveScheduleHistory(scheduleId, note) {
   }
 }
 
-// ── 히스토리 열람 UI ──────────────────────────────────────
+// ── 히스토리 열람 UI — 변경 셀 diff 표시 ──────────────────
 async function openScheduleHistoryModal(scheduleId) {
   const { data: history } = await sb.from('schedule_history')
     .select('*, saver:users!schedule_history_saved_by_fkey(name)')
@@ -9038,25 +9038,139 @@ async function openScheduleHistoryModal(scheduleId) {
   const old = document.getElementById('schHistoryModal');
   if (old) old.remove();
 
-  const items = (history || []).map(h => {
-    const entries = Array.isArray(h.snapshot_entries) ? h.snapshot_entries : [];
-    const countByType = {};
-    entries.forEach(e => {
-      const t = e.shift_code || e.entry_type || '-';
-      countByType[t] = (countByType[t]||0)+1;
+  // 직원 이름 맵 로드 (id → name)
+  const { data: usersData } = await sb.from('users').select('id,name');
+  const userNameMap = Object.fromEntries((usersData||[]).map(u=>[u.id, u.name]));
+
+  const dayNames = ['일','월','화','수','목','금','토'];
+
+  // entries 배열 → {key: value} 맵 변환
+  function entriesToMap(entries) {
+    const map = {};
+    (entries||[]).forEach(e => {
+      const key = (e.user_id || e.extra_name) + '_' + e.date;
+      map[key] = e.shift_code || e.entry_type || '';
     });
-    const summary = Object.entries(countByType).map(([k,v])=>`${k}:${v}`).join(', ');
+    return map;
+  }
+
+  // 두 스냅샷 사이의 변경사항 계산
+  function calcDiff(prevEntries, currEntries) {
+    const prev = entriesToMap(prevEntries);
+    const curr = entriesToMap(currEntries);
+    const allKeys = new Set([...Object.keys(prev), ...Object.keys(curr)]);
+    const changes = [];
+
+    allKeys.forEach(key => {
+      const pVal = prev[key] || '';
+      const cVal = curr[key] || '';
+      if (pVal === cVal) return;
+
+      // key = "userId_2026-07-03" 형식
+      const sep    = key.lastIndexOf('_2');
+      const uid    = sep > 0 ? key.slice(0, sep) : key;
+      const date   = sep > 0 ? key.slice(sep + 1) : '';
+      const name   = userNameMap[uid] || uid;
+      const day    = date ? parseInt(date.slice(8,10)) : 0;
+      const dow    = date ? new Date(date).getDay() : -1;
+      const dayLbl = date ? `${day}일(${dayNames[dow]||''})` : '';
+      changes.push({ name, dayLbl, date, from: pVal||'(없음)', to: cVal||'(삭제)' });
+    });
+
+    // 날짜 오름차순 정렬
+    changes.sort((a,b) => a.date.localeCompare(b.date));
+    return changes;
+  }
+
+  // 텍스트 diff (운영계획/특이사항 변경 여부만 체크)
+  function textChanged(a, b) { return (a||'') !== (b||''); }
+
+  const items = (history || []).map((h, idx) => {
+    const prevH = history[idx + 1]; // 바로 이전 버전 (배열은 최신순)
+
+    // ── 셀 변경 diff ──
+    const currEntries = Array.isArray(h.snapshot_entries) ? h.snapshot_entries : [];
+    const prevEntries = prevH && Array.isArray(prevH.snapshot_entries) ? prevH.snapshot_entries : [];
+    const diffs = prevH ? calcDiff(prevEntries, currEntries) : [];
+
+    // ── 텍스트 변경 ──
+    const opChanged    = prevH && textChanged(prevH.operation_plan, h.operation_plan);
+    const notesChanged = prevH && textChanged(prevH.special_notes,  h.special_notes);
+
+    // 변경 내용 렌더
+    let changeHtml = '';
+
+    // 셀 변경사항
+    if (diffs.length > 0) {
+      const rows = diffs.map(d =>
+        `<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:0.5px solid var(--crd);font-size:12px">
+          <span style="font-weight:600;min-width:70px;color:var(--tm)">${d.name}</span>
+          <span style="color:var(--th);min-width:70px">${d.dayLbl}</span>
+          <span style="color:var(--rd);text-decoration:line-through;min-width:40px">${d.from}</span>
+          <span style="color:var(--th);font-size:11px">→</span>
+          <span style="color:var(--gn);font-weight:600">${d.to}</span>
+        </div>`
+      ).join('');
+      changeHtml += `<div style="margin-bottom:10px">
+        <div style="font-size:11px;font-weight:700;color:var(--ts);margin-bottom:5px">
+          셀 변경 ${diffs.length}건
+        </div>
+        ${rows}
+      </div>`;
+    }
+
+    // 운영계획 변경
+    if (opChanged) {
+      changeHtml += `<div style="margin-bottom:8px;padding:8px 10px;background:var(--blb);border-radius:6px;font-size:12px">
+        <strong style="color:var(--bl)">운영 계획 수정</strong>
+        <div style="color:var(--rd);text-decoration:line-through;margin-top:3px;font-size:11px;white-space:pre-wrap">${prevH.operation_plan||'(없음)'}</div>
+        <div style="color:var(--gn);margin-top:3px;font-size:11px;white-space:pre-wrap">${h.operation_plan||'(없음)'}</div>
+      </div>`;
+    }
+
+    // 특이사항 변경
+    if (notesChanged) {
+      changeHtml += `<div style="margin-bottom:8px;padding:8px 10px;background:var(--blb);border-radius:6px;font-size:12px">
+        <strong style="color:var(--bl)">특이사항 수정</strong>
+        <div style="color:var(--rd);text-decoration:line-through;margin-top:3px;font-size:11px;white-space:pre-wrap">${prevH.special_notes||'(없음)'}</div>
+        <div style="color:var(--gn);margin-top:3px;font-size:11px;white-space:pre-wrap">${h.special_notes||'(없음)'}</div>
+      </div>`;
+    }
+
+    // 변경 없음 or 최초 버전
+    if (!changeHtml) {
+      if (!prevH) {
+        // 전체 셀 수 요약만
+        const countByType = {};
+        currEntries.forEach(e => {
+          const t = e.shift_code || e.entry_type || '-';
+          countByType[t] = (countByType[t]||0)+1;
+        });
+        const summary = Object.entries(countByType).map(([k,v])=>`${k}:${v}`).join(', ');
+        changeHtml = `<div style="font-size:12px;color:var(--th)">최초 저장 · ${summary||'(없음)'}</div>`;
+      } else {
+        changeHtml = `<div style="font-size:12px;color:var(--th)">변경 사항 없음</div>`;
+      }
+    }
+
+    // 변경 건수 배지
+    const changeCnt = diffs.length + (opChanged?1:0) + (notesChanged?1:0);
+    const badge = changeCnt > 0
+      ? `<span style="font-size:10px;background:var(--blb);color:var(--bl);border-radius:8px;padding:2px 7px;margin-left:6px">${changeCnt}건 변경</span>`
+      : prevH ? `<span style="font-size:10px;color:var(--th);margin-left:6px">변경 없음</span>` : '';
+
     return `
-      <details class="toggle-block" style="margin-bottom:8px">
-        <summary style="cursor:pointer;padding:10px 14px;font-weight:600;background:var(--cr);display:flex;align-items:center;justify-content:space-between;list-style:none">
-          <span>v${h.version} · ${h.note||''} <span style="font-size:11px;color:var(--th);font-weight:400">— ${h.saved_at?.slice(0,16).replace('T',' ')||''} · ${h.saver?.name||''}</span></span>
-          <i class="ti ti-chevron-down" style="font-size:13px;color:var(--th)"></i>
+      <details class="toggle-block" style="margin-bottom:6px">
+        <summary style="cursor:pointer;padding:9px 14px;font-size:13px;font-weight:600;background:var(--cr);display:flex;align-items:center;justify-content:space-between;list-style:none;border-radius:8px">
+          <span>
+            v${h.version} · <span style="color:var(--ts)">${h.note||''}</span>
+            ${badge}
+            <span style="font-size:11px;color:var(--th);font-weight:400;margin-left:8px">${h.saved_at?.slice(0,16).replace('T',' ')||''} · ${h.saver?.name||''}</span>
+          </span>
+          <i class="ti ti-chevron-down" style="font-size:12px;color:var(--th)"></i>
         </summary>
-        <div style="padding:12px 14px;border-top:0.5px solid var(--crd)">
-          ${h.operation_plan ? `<div style="margin-bottom:8px"><strong style="font-size:12px">운영 계획:</strong><div style="font-size:13px;white-space:pre-wrap;color:var(--ts);margin-top:4px">${h.operation_plan}</div></div>` : ''}
-          ${h.special_notes ? `<div style="margin-bottom:8px"><strong style="font-size:12px">특이사항:</strong><div style="font-size:13px;white-space:pre-wrap;color:var(--ts);margin-top:4px">${h.special_notes}</div></div>` : ''}
-          <div style="font-size:12px;color:var(--th)">배치 요약: ${summary || '(없음)'}</div>
-          <div style="font-size:11px;color:var(--th);margin-top:4px">총 ${entries.length}개 셀 배치</div>
+        <div style="padding:12px 14px;border:0.5px solid var(--crd);border-top:none;border-radius:0 0 8px 8px;background:#fff">
+          ${changeHtml}
         </div>
       </details>`;
   }).join('');
@@ -9065,10 +9179,15 @@ async function openScheduleHistoryModal(scheduleId) {
   m.id = 'schHistoryModal';
   m.className = 'modal-bg open';
   m.innerHTML = `
-    <div class="modal-inner" style="width:min(96vw,560px);max-height:90vh;overflow-y:auto">
+    <div class="modal-inner" style="width:min(96vw,620px);max-height:90vh;overflow-y:auto">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-        <span style="font-size:15px;font-weight:600;color:var(--tm)"><i class="ti ti-history"></i> 스케줄 수정 히스토리</span>
+        <span style="font-size:15px;font-weight:600;color:var(--tm)">
+          <i class="ti ti-history"></i> 스케줄 수정 히스토리
+        </span>
         <button onclick="document.getElementById('schHistoryModal').remove()" style="background:none;border:none;cursor:pointer;color:var(--th);font-size:18px"><i class="ti ti-x"></i></button>
+      </div>
+      <div style="font-size:11px;color:var(--th);margin-bottom:12px">
+        각 버전에서 <strong>변경된 항목만</strong> 표시됩니다.
       </div>
       ${items || '<div style="text-align:center;padding:20px;color:var(--th)">히스토리가 없습니다.</div>'}
     </div>`;
