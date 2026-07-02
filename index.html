@@ -737,6 +737,12 @@ async function doLogin() {
     if (!data) { err.textContent = '직원 코드가 일치하지 않습니다.'; return; }
   }
 
+  // 퇴사일 지난 경우 로그인 즉시 차단
+  const loginToday = new Date().toISOString().slice(0,10);
+  if (data.retire_date && data.retire_date < loginToday) {
+    if (data.active) await sb.from('users').update({active:false}).eq('id', data.id);
+    err.textContent = '퇴사 처리된 계정입니다. 운영팀에 문의해주세요.'; return;
+  }
   if (!data.active) { err.textContent = '비활성화된 계정입니다. 운영팀에 문의해 주세요.'; return; }
 
   const today = new Date().toISOString().slice(0,10);
@@ -2709,11 +2715,13 @@ function togglePtFields(val) {
   calcPtNet();
 }
 function calcPtNet() {
-  const work  = parseFloat(document.getElementById('eu_pt_work')?.value || 0);
+  const work  = parseFloat(document.getElementById('eu_pt_work')?.value  || 0);
   const brk   = parseFloat(document.getElementById('eu_pt_break')?.value || 0);
-  const net   = work - brk / 60;
-  const netEl = document.getElementById('eu_pt_net');
-  if (netEl) netEl.textContent = (net > 0 ? net.toFixed(1) + 'h' : '-');
+  // 총 체류시간 = 계약근로 + 휴게 (출근~퇴근 전체 — 근무조 매칭 기준)
+  const total = work + brk / 60;
+  const totalEl = document.getElementById('eu_pt_total');
+  if (totalEl) totalEl.textContent = total > 0 ? total.toFixed(1) + 'h' : '-';
+  // eu_pt_net 제거: 계약 근로시간(work)이 곧 실 근로시간
 }
 
 function toggleOfficeCode(checked){
@@ -2771,26 +2779,34 @@ async function openEditUser(userId){
           <option value="parttime"${u?.employment_type==='parttime'?' selected':''}>PT (시간제)</option>
         </select>
       </div>
-      <div id="eu_pt_wrap" style="grid-column:1/-1;display:${u?.employment_type==='parttime'?'grid':'none'};grid-template-columns:1fr 1fr 1fr;gap:10px;background:var(--blb);border-radius:8px;padding:10px 12px">
+      <div id="eu_pt_wrap" style="grid-column:1/-1;display:${u?.employment_type==='parttime'?'grid':'none'};grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;background:var(--blb);border-radius:8px;padding:10px 12px">
         <div><label class="form-label">계약 근로시간 <span style="color:var(--rd)">*</span></label>
           <div style="display:flex;align-items:center;gap:6px">
-            <input class="form-input" type="number" id="eu_pt_work" value="${u?.pt_work_hours||''}" placeholder="예: 6" min="1" max="12" step="0.5" style="width:80px" oninput="calcPtNet()"/>
+            <input class="form-input" type="number" id="eu_pt_work" value="${u?.pt_work_hours||''}" placeholder="예: 6" min="1" max="12" step="0.5" style="width:70px" oninput="calcPtNet()"/>
             <span style="font-size:12px;color:var(--ts)">시간</span>
           </div>
+          <div style="font-size:10px;color:var(--th);margin-top:3px">= 실 근로시간 (시급 계산 기준)</div>
         </div>
         <div><label class="form-label">휴게시간</label>
           <div style="display:flex;align-items:center;gap:6px">
-            <input class="form-input" type="number" id="eu_pt_break" value="${u?.pt_break_minutes||30}" placeholder="30" min="0" max="120" step="15" style="width:80px" oninput="calcPtNet()"/>
+            <input class="form-input" type="number" id="eu_pt_break" value="${u?.pt_break_minutes||30}" placeholder="30" min="0" max="120" step="15" style="width:70px" oninput="calcPtNet()"/>
             <span style="font-size:12px;color:var(--ts)">분</span>
           </div>
         </div>
-        <div><label class="form-label">실 근로시간 (자동)</label>
-          <div style="background:var(--cr);border-radius:8px;padding:9px 12px;font-size:13px;font-weight:600;color:var(--bl)" id="eu_pt_net">
-            ${u?.employment_type==='parttime' ? ((u?.pt_work_hours||0) - (u?.pt_break_minutes||0)/60).toFixed(1)+'h' : '-'}
+        <div><label class="form-label">총 체류시간 <span style="font-size:9px;color:var(--th)">(자동)</span></label>
+          <div style="background:var(--cr);border-radius:8px;padding:9px 12px;font-size:13px;font-weight:600;color:var(--bl)" id="eu_pt_total">
+            ${u?.employment_type==='parttime' ? ((u?.pt_work_hours||0) + (u?.pt_break_minutes||0)/60).toFixed(1)+'h' : '-'}
+          </div>
+          <div style="font-size:10px;color:var(--th);margin-top:3px">= 근로+휴게 (근무조 매칭 기준)</div>
+        </div>
+        <div><label class="form-label">시급 <span style="font-size:9px;color:var(--th)">(원/h, 참고용)</span></label>
+          <div style="display:flex;align-items:center;gap:4px">
+            <input class="form-input" type="number" id="eu_pt_wage" value="${u?.pt_hourly_wage||''}" placeholder="예: 10030" min="0" step="10" style="width:100px"/>
+            <span style="font-size:12px;color:var(--ts)">원</span>
           </div>
         </div>
         <div style="grid-column:1/-1;font-size:11px;color:var(--th)">
-          ※ 실 근로시간과 일치하는 근무조만 PT 직원에게 배정됩니다.
+          📌 총 체류시간(계약근로+휴게) = 근무조 배정 기준 &nbsp;|&nbsp; 시급 계산 = 계약 근로시간 × 시급 &nbsp;|&nbsp; 시급은 Sheets 동기화되나 스케줄 화면에는 미표시
         </div>
       </div>
       <div><label class="form-label">소속 매장 *</label>
@@ -2914,8 +2930,9 @@ async function submitEditUser(){
     ? parseFloat(document.getElementById('eu_pt_work')?.value || 0) : null;
   const ptBreakMin     = employmentType === 'parttime'
     ? parseInt(document.getElementById('eu_pt_break')?.value || 30) : null;
+  // 총 체류시간 = 계약근로 + 휴게 (근무조 매칭 기준 — pt_hours_per_day에 저장)
   const ptNetHours     = (ptWorkHours && ptBreakMin != null)
-    ? Math.round((ptWorkHours - ptBreakMin / 60) * 100) / 100 : null;
+    ? Math.round((ptWorkHours + ptBreakMin / 60) * 100) / 100 : null;
 
   if (employmentType === 'parttime' && (!ptWorkHours || ptWorkHours <= 0)) {
     alert('PT 직원은 계약 근로시간을 입력해주세요.'); return;
@@ -2928,7 +2945,9 @@ async function submitEditUser(){
     employment_type: employmentType,
     pt_work_hours: ptWorkHours,
     pt_break_minutes: ptBreakMin,
-    pt_hours_per_day: ptNetHours   // 실 근로시간 → 스케줄 차단 기준값
+    pt_hours_per_day: ptNetHours,  // 총 체류시간 → 근무조 매칭 기준
+    pt_hourly_wage: employmentType === 'parttime'
+      ? (parseFloat(document.getElementById('eu_pt_wage')?.value||0)||null) : null
   };
   if(pw) payload.password_hash = pw;
   let error, newCode;
@@ -3175,7 +3194,8 @@ async function submitBulkAdd() {
     const part  = document.getElementById('b_part_'  + rowId)?.value || null;
     const ptWrk = emp === 'parttime' ? parseFloat(document.getElementById('b_pth_' + rowId)?.value || 0) : null;
     const ptBrk = emp === 'parttime' ? parseInt(document.getElementById('b_brk_' + rowId)?.value || 30) : null;
-    const ptNet = (ptWrk && ptBrk != null) ? Math.round((ptWrk - ptBrk/60)*100)/100 : null;
+    // 총 체류시간 = 계약근로 + 휴게
+  const ptNet = (ptWrk && ptBrk != null) ? Math.round((ptWrk + ptBrk/60)*100)/100 : null;
 
     if (!name) { skipped++; continue; }
     if (!store) { errors.push(`${name}: 매장 미선택`); failed++; continue; }
@@ -7927,10 +7947,29 @@ function addExtraStaff() {
     }
     syncCellsToMemory();
     // 퇴사예정은 별도 목록에 저장 (스케줄 행에 추가하지 않음)
+    // 잔여 휴무 확인
+    const balTable = document.getElementById('leaveBalanceTable');
+    let remainLeave = 0;
+    if (balTable) {
+      const staffIdx = curScheduleStaff.findIndex(s => s.id === id);
+      const rows = balTable.querySelectorAll('tbody tr');
+      if (staffIdx >= 0 && rows[staffIdx]) {
+        const cells = rows[staffIdx].querySelectorAll('td');
+        remainLeave = (parseFloat(cells[2]?.textContent||'0')||0) + (parseFloat(cells[6]?.textContent||'0')||0);
+      }
+    }
+    if (remainLeave > 0) {
+      if (!confirm(`⚠ ${name} 직원의 잔여 휴무 ${remainLeave}일이 남아있습니다.\n퇴사일 전에 휴무를 모두 소진 후 등록해주세요.\n\n[확인] 무시하고 등록  [취소] 닫기`)) return;
+    }
+
     if (!window.__retireList) window.__retireList = [];
     const existing = window.__retireList.find(r => r.id === id);
     if (existing) { existing.retireDate = retireDate; }
     else { window.__retireList.push({ id, name, store, retireDate }); }
+    // users 테이블 retire_date 자동 연동
+    sb.from('users').update({retire_date: retireDate}).eq('id', id).then(() => {});
+    // 편집 모드에서 즉시 셀 비활성화
+    if (window.__schEditMode) applyRetireToSchedule(id, retireDate);
     renderRetirePanel();
     staffSel.value = '';
     dateInput.value = '';
