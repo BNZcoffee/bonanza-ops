@@ -2420,7 +2420,7 @@ async function renderStaff(area) {
       <td>${u.hire_date||'-'}</td>
       <td>${u.retire_date||'-'}</td>
       <td id="alb-cell-${u.id}" style="font-size:12px;text-align:center;color:var(--gn)">-</td>
-      ${currentUser.is_master ? `<td style="font-size:10px;max-width:120px">
+      ${currentUser.is_master ? `<td class="pw-col-cell" style="font-size:10px;max-width:120px;display:none">
         <div style="display:flex;align-items:center;gap:4px;flex-wrap:nowrap">
           <span style="background:${u.pw_set?'var(--gnb)':'var(--crm)'};color:${u.pw_set?'var(--gn)':'var(--ts)'};border-radius:4px;padding:1px 5px;font-size:9px;white-space:nowrap;flex-shrink:0">${u.pw_set?'변경':'초기'}</span>
           <span style="font-family:monospace;color:var(--th);font-size:10px;user-select:all;overflow:hidden;text-overflow:ellipsis">${u.password_hash||''}</span>
@@ -2520,7 +2520,12 @@ async function renderStaff(area) {
           <th onclick="sortStaff('hire_date')" style="cursor:pointer">입사일 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
           <th>퇴사일</th>
           <th style="color:var(--gn)">연차잔여</th>
-          ${currentUser.is_master ? '<th style="color:var(--gd);font-size:10px">🔒 PW</th>' : ''}
+          ${currentUser.is_master ? `
+            <th style="color:var(--gd);font-size:10px;cursor:pointer;user-select:none;white-space:nowrap"
+                onclick="togglePwCol()" title="비밀번호 열 표시/숨김">
+              <span id="pwColIcon">🔒</span>
+              <span id="pwColLabel" style="display:none;font-size:9px"> PW 숨김</span>
+            </th>` : ''}
           <th>관리</th>
         </tr></thead>
         <tbody id="staffTbody">${renderTab(active)}</tbody>
@@ -2797,7 +2802,14 @@ async function openEditUser(userId){
     ${userId?`<div style="margin-top:12px;padding-top:12px;border-top:0.5px solid var(--crd)">
       <label class="form-label">비밀번호 초기화 (변경 시만 입력)</label>
       <input class="form-input" id="eu_pw" placeholder="새 비밀번호"/>
-      ${currentUser.is_master ? `<p style="font-size:11px;color:var(--th);margin-top:4px">현재 비밀번호: <strong>${u?.password_hash||''}</strong></p>` : ''}
+      ${currentUser.is_master ? `<div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+        <p style="font-size:11px;color:var(--th);margin:0">현재 비밀번호:
+          <strong id="modalPwVal" style="filter:blur(4px);transition:filter .2s;cursor:pointer;user-select:none"
+            onclick="this.style.filter=this.style.filter?'':'blur(4px)'"
+            title="클릭하여 표시/숨김">${u?.password_hash||''}</strong>
+        </p>
+        <span style="font-size:10px;color:var(--th)">(클릭 시 표시)</span>
+      </div>` : ''}
     </div>
     <div style="margin-top:12px;padding-top:12px;border-top:0.5px solid var(--crd)">
       <div style="display:flex;align-items:center;justify-content:space-between">
@@ -5261,6 +5273,24 @@ async function saveUserPerms() {
 
 
 // 인원현황 수정 권한: 총괄 마스터(운영총괄) 또는 인사팀만
+
+// PW 열 접기/펼치기 (총괄 전용)
+window.__pwColVisible = false;
+function togglePwCol() {
+  window.__pwColVisible = !window.__pwColVisible;
+  const cells = document.querySelectorAll('.pw-col-cell');
+  const icon  = document.getElementById('pwColIcon');
+  const label = document.getElementById('pwColLabel');
+  cells.forEach(td => td.style.display = window.__pwColVisible ? '' : 'none');
+  if (icon)  icon.textContent  = window.__pwColVisible ? '🔓' : '🔒';
+  if (label) {
+    label.style.display = 'inline';
+    label.textContent   = window.__pwColVisible ? ' PW 표시중' : ' PW 숨김';
+    // 2초 후 라벨 숨김
+    setTimeout(() => { if(label) label.style.display = 'none'; }, 2000);
+  }
+}
+
 function canEditStaff() {
   if (!currentUser) return false;
   return hasPerm('staff_edit');
