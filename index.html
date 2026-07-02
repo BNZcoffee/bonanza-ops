@@ -1517,6 +1517,13 @@ async function renderPostDetail(area) {
   }
 
   let cmtHtml = '';
+  // 알림 발송 매장 드롭다운 비동기 로드
+  setTimeout(() => {
+    if (document.getElementById(`notifyStore_${p.id}`)) {
+      loadNotifyStoreOptions(p.id);
+    }
+  }, 300);
+
   if (p.comments_on) {
     const cmtItems = comments.map(c => {
       const isMine = c.author_id === currentUser.id;
@@ -1544,6 +1551,31 @@ async function renderPostDetail(area) {
         <textarea id="cmtInput" placeholder="의견이나 질문을 남겨주세요..."></textarea>
         <button class="btn-comment-submit" onclick="submitComment(${p.id})">등록</button>
       </div>
+      ${(currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master) ? `
+      <div style="margin-top:10px;padding:10px 12px;background:var(--crm);border-radius:8px;border:0.5px solid var(--crd)">
+        <div style="font-size:11px;font-weight:700;color:var(--ts);margin-bottom:8px">
+          <i class="ti ti-bell-ringing"></i> 특정 인원에게 알림 보내기
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="notifyStore_${p.id}" class="form-input" style="padding:5px 9px;font-size:12px;width:140px"
+            onchange="loadNotifyUsers(${p.id}, this.value)">
+            <option value="">매장 선택</option>
+          </select>
+          <select id="notifyUser_${p.id}" class="form-input" style="padding:5px 9px;font-size:12px;width:140px">
+            <option value="">직원 선택 (전체=매장전체)</option>
+          </select>
+          <button class="btn-cancel-sm" onclick="addNotifyTarget(${p.id})"
+            style="font-size:12px;color:var(--bl);border-color:var(--bl)">
+            <i class="ti ti-plus"></i> 추가
+          </button>
+          <button class="btn-cancel-sm" onclick="sendPostNotify(${p.id})"
+            style="font-size:12px;background:var(--br);color:#fff;border:none;font-weight:600">
+            <i class="ti ti-send"></i> 알림 발송
+          </button>
+        </div>
+        <div id="notifyTargets_${p.id}" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
+        <div id="notifyResult_${p.id}" style="font-size:11px;color:var(--gn);margin-top:6px"></div>
+      </div>` : ''}
     </div>`;
   }
 
@@ -3996,6 +4028,102 @@ async function markAllNotifsRead() {
 }
 
 // 알림 생성 헬퍼
+
+// ═══════════════════════════════════════════
+// 게시판 공지 — 특정 인원 알림 발송
+// ═══════════════════════════════════════════
+window.__notifyTargets = {};  // postId → [{id, name, store}]
+
+async function loadNotifyUsers(postId, store) {
+  const sel = document.getElementById(`notifyUser_${postId}`);
+  if (!sel) return;
+  if (!store) { sel.innerHTML = '<option value="">직원 선택</option>'; return; }
+  const { data } = await sb.from('users')
+    .select('id,name,store').eq('store', store).eq('active', true).order('name');
+  sel.innerHTML = '<option value="">전체 (매장 전체에 발송)</option>'
+    + (data||[]).map(u => `<option value="${u.id}|${u.name}|${u.store}">${u.name}</option>`).join('');
+}
+
+async function addNotifyTarget(postId) {
+  const storeSel = document.getElementById(`notifyStore_${postId}`);
+  const userSel  = document.getElementById(`notifyUser_${postId}`);
+  const store    = storeSel?.value;
+  const userVal  = userSel?.value;
+  if (!store) { alert('매장을 선택해주세요.'); return; }
+
+  if (!window.__notifyTargets[postId]) window.__notifyTargets[postId] = [];
+  const targets = window.__notifyTargets[postId];
+
+  if (!userVal) {
+    // 매장 전체 추가
+    const { data } = await sb.from('users').select('id,name,store')
+      .eq('store', store).eq('active', true);
+    (data||[]).forEach(u => {
+      if (!targets.find(t => t.id === u.id)) targets.push(u);
+    });
+  } else {
+    const [id, name, st] = userVal.split('|');
+    if (!targets.find(t => t.id === id)) targets.push({id, name, store: st});
+  }
+  renderNotifyTargets(postId);
+}
+
+function removeNotifyTarget(postId, userId) {
+  if (!window.__notifyTargets[postId]) return;
+  window.__notifyTargets[postId] = window.__notifyTargets[postId].filter(t => t.id !== userId);
+  renderNotifyTargets(postId);
+}
+
+function renderNotifyTargets(postId) {
+  const el = document.getElementById(`notifyTargets_${postId}`);
+  if (!el) return;
+  const targets = window.__notifyTargets[postId] || [];
+  el.innerHTML = targets.length
+    ? targets.map(t => `
+        <span style="background:var(--blb);color:var(--bl);border-radius:12px;padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:5px">
+          ${t.store} ${t.name}
+          <button onclick="removeNotifyTarget(${postId},'${t.id}')"
+            style="background:none;border:none;color:var(--bl);cursor:pointer;font-size:11px;padding:0">✕</button>
+        </span>`).join('')
+    : '<span style="font-size:11px;color:var(--th)">추가된 대상 없음</span>';
+}
+
+async function sendPostNotify(postId) {
+  const targets = window.__notifyTargets[postId] || [];
+  if (!targets.length) { alert('알림 받을 인원을 먼저 추가해주세요.'); return; }
+
+  const { data: post } = await sb.from('posts').select('title').eq('id', postId).single();
+  const title = post?.title || '공지';
+  const msg   = `[태그 알림] "${title}" 공지에 회원님이 태그되었습니다. 확인해주세요.`;
+
+  let sent = 0;
+  for (const t of targets) {
+    await createNotification(t.id, 'post_tag', postId, 'post', msg);
+    sent++;
+  }
+  updateNotifDot();
+
+  const resultEl = document.getElementById(`notifyResult_${postId}`);
+  if (resultEl) resultEl.textContent = `✓ ${sent}명에게 알림을 발송했습니다.`;
+  window.__notifyTargets[postId] = [];  // 발송 후 초기화
+  renderNotifyTargets(postId);
+
+  // 알림 스토어 로드 (매장 드롭다운)
+  setTimeout(() => loadNotifyStoreOptions(postId), 100);
+}
+
+async function loadNotifyStoreOptions(postId) {
+  const sel = document.getElementById(`notifyStore_${postId}`);
+  if (!sel || sel.children.length > 1) return;  // 이미 로드됨
+  const { data } = await sb.from('users').select('store').eq('active',true).order('store');
+  const stores = [...new Set((data||[]).map(u => u.store))].sort();
+  stores.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s; opt.textContent = s;
+    sel.appendChild(opt);
+  });
+}
+
 async function createNotification(userId, type, refId, refType, message) {
   if (!userId) return;
   const { error } = await sb.from('notifications').insert({
@@ -7239,6 +7367,7 @@ async function goToScheduleEdit() {
   const month = parseInt(document.getElementById('schSelMonth')?.value);
   if (!store) { alert('매장을 선택해주세요.'); return; }
   window.__schStore = store; window.__schYear = year; window.__schMonth = month;
+  window.__retireList = [];  // 신규 스케줄 시작 시 초기화
   curSchedule = null;
   goPage('scheduleEdit');
 }
@@ -7246,6 +7375,10 @@ async function goToScheduleEdit() {
 async function openScheduleById(id) {
   const { data } = await sb.from('schedules').select('*').eq('id', id).single();
   if (!data) return;
+  // 매장이 바뀌면 퇴사 목록 초기화 (다른 매장 퇴사 목록이 남지 않도록)
+  if (data.store !== window.__schStore || data.year !== window.__schYear || data.month !== window.__schMonth) {
+    window.__retireList = [];
+  }
   window.__schStore = data.store; window.__schYear = data.year; window.__schMonth = data.month;
   curSchedule = data;
   goPage('scheduleEdit');
@@ -7253,9 +7386,10 @@ async function openScheduleById(id) {
 
 // ── 캘린더 편성 ───────────────────────────────────────────
 async function renderScheduleEdit(area) {
-  // 페이지 재로드 시 편집 모드 초기화
+  // 페이지 재로드 시 편집 모드 + 퇴사 목록 초기화
   window.__schEditMode = false;
   window.__schHasPendingChanges = false;
+  window.__retireList = [];  // 매장/월 전환 시 반드시 초기화
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
   const store = window.__schStore, year = window.__schYear, month = window.__schMonth;
   if (!store || !year || !month) { goPage('schedules'); return; }
@@ -7793,30 +7927,10 @@ function addExtraStaff() {
     }
     syncCellsToMemory();
     // 퇴사예정은 별도 목록에 저장 (스케줄 행에 추가하지 않음)
-    // 잔여 휴무 확인
-    const balTable = document.getElementById('leaveBalanceTable');
-    let remainLeave = 0;
-    if (balTable) {
-      const staffIdx = curScheduleStaff.findIndex(s => s.id === id);
-      const rows = balTable.querySelectorAll('tbody tr');
-      if (staffIdx >= 0 && rows[staffIdx]) {
-        const cells = rows[staffIdx].querySelectorAll('td');
-        const prevRemain  = parseFloat(cells[2]?.textContent||'0') || 0;
-        const monthRemain = parseFloat(cells[6]?.textContent||'0') || 0;
-        remainLeave = prevRemain + monthRemain;
-      }
-    }
-    if (remainLeave > 0) {
-      const confirmed = confirm(`⚠ ${name} 직원의 잔여 휴무가 ${remainLeave}일 남아있습니다.\n\n퇴사일 전에 잔여 휴무를 스케줄에 모두 입력한 후 등록해주세요.\n\n[확인] 잔여 휴무 무시하고 그대로 등록\n[취소] 닫고 휴무 먼저 입력`);
-      if (!confirmed) return;
-    }
-
     if (!window.__retireList) window.__retireList = [];
     const existing = window.__retireList.find(r => r.id === id);
     if (existing) { existing.retireDate = retireDate; }
     else { window.__retireList.push({ id, name, store, retireDate }); }
-    // 편집 모드에서만 즉시 셀 비활성화
-    if (window.__schEditMode) applyRetireToSchedule(id, retireDate);
     renderRetirePanel();
     staffSel.value = '';
     dateInput.value = '';
@@ -7926,7 +8040,10 @@ async function renderNewHirePanel() {
 async function renderRetirePanel() {
   const panel = document.getElementById('retirePanel');
   if (!panel) return;
-  const list  = window.__retireList || [];
+  const list  = (window.__retireList || []).filter(r =>
+    // 현재 스케줄에 포함된 직원만 표시 (다른 매장 퇴사자 방어)
+    curScheduleStaff.some(s => s.id === r.id)
+  );
   if (!list.length) { panel.style.display = 'none'; return; }
 
   const year  = window.__schYear;
@@ -7986,7 +8103,8 @@ async function renderRetirePanel() {
         ${leaveInfo}
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0;align-items:flex-start;padding-top:2px">
-        <button onclick="editRetireEntry(${i})" style="background:none;border:0.5px solid var(--crd);border-radius:5px;color:var(--ts);cursor:pointer;font-size:12px;padding:2px 6px" title="퇴사일 수정"><i class="ti ti-pencil"></i> 날짜 수정</button>
+        <button onclick="editRetireEntry(${i})" style="background:none;border:0.5px solid var(--crd);border-radius:5px;color:var(--ts);cursor:pointer;font-size:12px;padding:2px 6px" title="퇴사일 수정"><i class="ti ti-pencil"></i></button>
+        <button onclick="removeRetireEntry(${i})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:13px;padding:2px 4px" title="삭제"><i class="ti ti-x"></i></button>
       </div>
     </div>`;
   }).join('');
@@ -8032,6 +8150,9 @@ function applyRetireToSchedule(userId, retireDate) {
   const year  = window.__schYear;
   const month = window.__schMonth;
   if (!year || !month) return;
+  // 현재 스케줄에 없는 직원이면 처리 안 함 (다른 매장 퇴사자 방어)
+  const isInThisSchedule = curScheduleStaff.some(s => s.id === userId);
+  if (!isInThisSchedule) return;
   const daysInMonth = new Date(year, month, 0).getDate();
   const tbody = document.getElementById('schTbody');
   if (!tbody) return;
@@ -8040,11 +8161,11 @@ function applyRetireToSchedule(userId, retireDate) {
     const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     if (dateStr <= retireDate) continue;
 
-    // 메모리에서 해당 직원의 해당 날짜 entry만 삭제
+    // 메모리에서 해당 날짜 entry 삭제
     const key = userId + '_' + dateStr;
     delete curScheduleEntries[key];
 
-    // 편집모드: 해당 직원의 select만 처리 (querySelector는 이미 userId로 특정)
+    // 편집모드: select 처리
     const sel = tbody.querySelector(`select[data-staff="${userId}"][data-date="${dateStr}"]`);
     if (sel) {
       sel.value = '';
@@ -8053,10 +8174,30 @@ function applyRetireToSchedule(userId, retireDate) {
       sel.style.cursor = 'not-allowed';
       const td = sel.closest('td');
       if (td) { td.style.background = '#F0F0F0'; td.title = '퇴사 이후 날짜'; }
+    } else {
+      // 뷰모드: td 직접 회색 처리
+      // tr에서 해당 날짜의 td 찾기 (data-date 속성이 td에 없으므로 인덱스 기반)
+      const allRows = Array.from(tbody.rows);
+      allRows.forEach(tr => {
+        const staffSel = tr.querySelector(`select[data-staff="${userId}"]`);
+        const isThisRow = staffSel || (tr.dataset && tr.dataset.userId === userId);
+        // name cell로 판단: 첫 td의 텍스트에 직원명 포함
+        const tds = tr.querySelectorAll('td');
+        if (tds.length < 2) return;
+        // 날짜 열 인덱스: d번째 날짜는 d번째 데이터 td (첫 td는 이름)
+        const dateTd = tds[d]; // 이름 td가 0번, 날짜 td는 1~daysInMonth
+        // 해당 row가 이 직원인지 확인: 첫 td에 staff id data
+        const firstSel = tr.querySelector('select');
+        if (firstSel && firstSel.dataset.staff !== userId) return;
+        if (dateTd) {
+          dateTd.style.background = '#F0F0F0';
+          dateTd.title = '퇴사 이후 날짜';
+          const div = dateTd.querySelector('div');
+          if (div) div.innerHTML = '<span style="color:#CCCCCC;font-size:10px">-</span>';
+        }
+      });
     }
-    // 뷰모드에서는 DOM 직접 조작 안 함 — 메모리 삭제 후 renderBalancePanel에서 반영
   }
-
   updateDailyCountRow();
   if (document.getElementById('leaveBalanceTable')?.dataset.loaded) renderBalancePanel();
 }
@@ -8123,33 +8264,6 @@ function calcRetireLeave(retiree, year, month, retireDate, holSet, daysInMonth) 
   };
 }
 
-
-// 인원 순서 ↑↓ 이동
-function moveStaffRow(si, dir) {
-  const newIdx = si + dir;
-  if (newIdx < 0 || newIdx >= curScheduleStaff.length) return;
-  syncCellsToMemory();
-
-  // 배열 교체
-  const tmp = curScheduleStaff[si];
-  curScheduleStaff[si] = curScheduleStaff[newIdx];
-  curScheduleStaff[newIdx] = tmp;
-
-  // DOM 행 교체
-  const tbody = document.getElementById('schTbody');
-  if (!tbody) return;
-  const rows = Array.from(tbody.rows);
-  if (!rows[si] || !rows[newIdx]) return;
-  if (dir === -1) {
-    tbody.insertBefore(rows[si], rows[newIdx]);
-  } else {
-    tbody.insertBefore(rows[newIdx], rows[si]);
-  }
-  // si 갱신
-  Array.from(tbody.rows).forEach((row, i) => row.dataset.staffIdx = i);
-  updateDailyCountRow();
-}
-
 function removeStaffFromSchedule(idx) {
   if (!confirm('이 직원을 이번 달 스케줄 목록에서 제외할까요?')) return;
   // 현재 셀 값 저장
@@ -8201,14 +8315,11 @@ function appendStaffRow(staff, si) {
   const nameTd = document.createElement('td');
   nameTd.style.cssText = 'position:sticky;left:0;background:#fff;z-index:2;padding:4px 6px;font-size:12px;font-weight:600;border:0.5px solid var(--crd);white-space:nowrap;min-width:100px';
   nameTd.innerHTML = `
-    <div style="display:flex;align-items:center;gap:2px">
-      <div style="display:flex;flex-direction:column;gap:0;flex-shrink:0">
-        <button onclick="moveStaffRow(${si},-1)" title="위로" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:9px;padding:0 1px;line-height:1.1">▲</button>
-        <button onclick="moveStaffRow(${si},1)" title="아래로" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:9px;padding:0 1px;line-height:1.1">▼</button>
-      </div>
-      <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${staff.name} <span style="font-size:9px;color:${tagColor}">(${tag})</span></span>
+    <div style="display:flex;align-items:center;gap:4px">
+      <span class="sch-drag-handle" style="cursor:grab;color:var(--th);font-size:15px;padding:2px 3px;flex-shrink:0;user-select:none" title="드래그하여 순서 변경">⠿</span>
+      <span style="flex:1">${staff.name} <span style="font-size:9px;color:${tagColor}">(${tag})</span></span>
       <button onclick="removeExtraStaff(${si})" title="목록에서 제외"
-        style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:12px;flex-shrink:0">✕</button>
+        style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:12px">✕</button>
     </div>`;
   tr.appendChild(nameTd);
 
@@ -8313,15 +8424,12 @@ async function buildStaffRowWithCross(staff, si, daysInMonth, year, month, allCo
 
   let rowHtml = `<tr data-staff-idx="${si}" data-staff-id="${staff.id||''}" draggable="false">
     <td style="position:sticky;left:0;background:#fff;z-index:2;padding:4px 6px;font-size:12px;font-weight:600;border:0.5px solid var(--crd);white-space:nowrap;min-width:100px">
-      <div style="display:flex;align-items:center;gap:2px">
-        <div style="display:flex;flex-direction:column;gap:0;flex-shrink:0">
-          <button onclick="moveStaffRow(${si},-1)" title="위로" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:9px;padding:0 1px;line-height:1.1">▲</button>
-          <button onclick="moveStaffRow(${si},1)" title="아래로" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:9px;padding:0 1px;line-height:1.1">▼</button>
-        </div>
-        <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${staff.name}${staff.isExtra?' <span style="font-size:9px;color:var(--th)">(지원)</span>':''}</span>
+      <div style="display:flex;align-items:center;gap:4px">
+        <span class="sch-drag-handle" style="cursor:grab;color:var(--th);font-size:15px;padding:2px 3px;flex-shrink:0;user-select:none" title="드래그하여 순서 변경">⠿</span>
+        <span style="flex:1">${staff.name}${staff.isExtra?' <span style="font-size:9px;color:var(--th)">(지원)</span>':''}</span>
         ${!staff.isExtra
-          ? `<button onclick="removeStaffFromSchedule(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px;flex-shrink:0" title="목록에서 제외">✕</button>`
-          : `<button onclick="removeExtraStaff(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px;flex-shrink:0" title="지원인력 제외">✕</button>`}
+          ? `<button onclick="removeStaffFromSchedule(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px" title="목록에서 제외">✕</button>`
+          : `<button onclick="removeExtraStaff(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px" title="지원인력 제외">✕</button>`}
       </div>
     </td>`;
 
@@ -9337,9 +9445,7 @@ async function enterSchEditMode() {
   setTimeout(() => {
     registerCellMemoEvents();
     registerDragSort();
-    // 퇴사 예정자 셀 비활성화 재적용 (rebuildScheduleCells 후 DOM 새로 생성됨)
-    (window.__retireList||[]).forEach(r => applyRetireToSchedule(r.id, r.retireDate));
-  }, 200);
+  }, 150);
 }
 
 async function exitSchEditMode(skipConfirm = false) {
