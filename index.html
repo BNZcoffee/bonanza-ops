@@ -7059,8 +7059,11 @@ function isScheduleHr() {
   return currentUser.role === 'hr';
 }
 function canEditSchedule(sch) {
-  // 작성자 매니저 본인 매장 + 운영팀/총괄/부총괄/인사팀
+  // 관리팀 계열은 항상 편집 가능
   if (isScheduleAdmin() || isScheduleHr()) return true;
+  // 생성자(created_by) 본인이면 직위 무관 편집 가능
+  if (sch && sch.created_by === currentUser.id) return true;
+  // 매니저 이상 + 본인 매장이면 편집 가능
   if (isManagerRole(currentUser.role) && sch && sch.store === currentUser.store) return true;
   return false;
 }
@@ -7098,12 +7101,7 @@ async function renderSchedules(area) {
   const monthOpts = Array.from({length:12},(_,i)=>i+1)
     .map(m=>`<option value="${m}"${m===defMonth?' selected':''}>${m}월</option>`).join('');
 
-  // draft 상태는 작성자 본인 또는 관리자/코치만 표시
-  const filteredSchList = schList.filter(s => {
-    if (s.status !== 'draft') return true;
-    return s.created_by === currentUser.id || isScheduleAdmin() || currentUser.is_master || currentUser.is_vice_master;
-  });
-  const cards = filteredSchList.map(s => {
+  const cards = schList.map(s => {
     // ── 삭제 권한 ──
     const isMaster    = currentUser.is_master;
     const isVice      = currentUser.is_vice_master;
@@ -7116,13 +7114,14 @@ async function renderSchedules(area) {
 
     let canDelete = false;
     if (isMaster || isHrUser) {
-      canDelete = true;                              // 총괄·인사팀: 항상
+      // 총괄·인사팀: 항상 삭제 가능
+      canDelete = true;
     } else if ((isVice || isAdminUser) && !hrDone) {
-      canDelete = true;                              // 부총괄·운영팀: 인사팀 점검 전까지
-    } else if (isAuthor && s.status === 'draft') {
-      canDelete = true;                              // 작성자: 임시저장 상태만 삭제 가능
+      // 부총괄·운영팀: 인사팀 점검완료 전까지
+      canDelete = true;
     } else if ((isMgrUser || isAuthor) && !confirmed) {
-      canDelete = true;                              // 매니저·작성자: 컨펌완료·마감 전까지
+      // 매니저·작성자: 컨펌완료·마감 전까지
+      canDelete = true;
     }
 
     const deleteBtn = canDelete
@@ -7136,10 +7135,8 @@ async function renderSchedules(area) {
         <div class="post-card-top">
           <span class="post-title-txt"><i class="ti ti-calendar-event" style="color:var(--brm);margin-right:5px"></i>${s.store} ${s.year}년 ${s.month}월</span>
           <span class="badge-access" style="${STATUS_COLOR[s.status]||''}">${STATUS_LABEL[s.status]||s.status}</span>
-          ${s.hr_checked_at ? '<span class="badge-access" style="background:var(--pub);color:var(--pu)"><i class="ti ti-user-check" style="font-size:10px"></i> 근태 마감</span>'
-            : s.closed_at ? '<span class="badge-access all"><i class="ti ti-checklist" style="font-size:10px"></i> 마감완료</span>' : ''}
-          ${s.feedback_status==='pending' ? '<span class="badge-access" style="background:#FFF3E0;color:#E65100"><i class="ti ti-alert-triangle" style="font-size:10px"></i> 정정요청</span>' : ''}
-          ${s.feedback_status==='done' ? '<span class="badge-access" style="background:var(--gnb);color:var(--gn);font-size:9px">정정완료</span>' : ''}
+          ${s.closed_at?'<span class="badge-access all">마감완료</span>':''}
+          ${s.hr_checked_at?'<span class="badge-access" style="background:var(--pub);color:var(--pu)">인사팀 점검완료</span>':''}
         </div>
         <div class="post-meta">
           <span>작성: ${s.creator?.name||''}</span>
@@ -7393,9 +7390,9 @@ async function renderScheduleEdit(area) {
     </span>`).join('');
 
   const statusBadge = curSchedule ? {
-    draft:'<span class="badge-access" style="background:#F5F0E8;color:var(--ts)"><i class="ti ti-pencil" style="font-size:10px"></i> 임시저장</span>',
-    requested:'<span class="badge-access" style="background:var(--blb);color:var(--bl)"><i class="ti ti-clock" style="font-size:10px"></i> 컨펌 대기</span>',
-    confirmed:'<span class="badge-access all"><i class="ti ti-circle-check" style="font-size:10px"></i> 컨펌 완료</span>',
+    draft:'<span class="badge-access">작성중</span>',
+    requested:'<span class="badge-access" style="background:var(--blb);color:var(--bl)">컨펌 요청중</span>',
+    confirmed:'<span class="badge-access all">컨펌 완료</span>',
     rejected:'<span class="badge-access" style="background:var(--rdb);color:var(--rd)">반려됨</span>'
   }[curSchedule.status] : '<span class="badge-access">신규 작성</span>';
 
@@ -7404,35 +7401,34 @@ async function renderScheduleEdit(area) {
       <button class="btn-cancel-sm" onclick="goPage('schedules')"><i class="ti ti-arrow-left"></i> 목록</button>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${canEdit && !curSchedule?.hr_checked_at ? `
-          <!-- 뷰 모드: [스케줄 수정] -->
+          <!-- 뷰 모드: [스케줄 수정] 버튼 -->
           <button id="btnSchEdit" onclick="enterSchEditMode()"
             style="background:var(--brm);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer">
             <i class="ti ti-edit"></i> 스케줄 수정
           </button>
-          <!-- 편집 모드: [임시저장] [컨펌요청/재요청] [수정취소] -->
+          <!-- 편집 모드: [임시저장] [작성 완료] [수정취소] -->
           <button id="btnSchSave" onclick="saveScheduleDraft()"
             style="display:none;background:none;border:0.5px solid var(--crd);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--ts);cursor:pointer">
             <i class="ti ti-device-floppy"></i> 임시저장
           </button>
-          <button id="btnSchConfirmInEdit" onclick="saveAndRequestConfirm()"
-            style="display:none;background:var(--gn);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer">
-            <i class="ti ti-send"></i> ${!curSchedule || curSchedule.status==='draft' ? '컨펌 요청' : '컨펌 재요청'}
+          <button id="btnSchDone" onclick="finishScheduleEdit()"
+            style="display:none;background:var(--br);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer">
+            <i class="ti ti-circle-check"></i> 작성 완료
           </button>
           <button id="btnSchEditCancel" onclick="exitSchEditMode()"
             style="display:none;background:none;border:0.5px solid var(--rd);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--rd);cursor:pointer">
             <i class="ti ti-x"></i> 수정 취소
           </button>` : ''}
-        <!-- 운영팀 피드백 버튼 (confirmed 상태에서 운영팀/총괄만) -->
-        ${curSchedule?.status==='confirmed' && (isScheduleAdmin()||currentUser.is_master||currentUser.is_vice_master) ? `
-          <button class="btn-cancel-sm" onclick="openScheduleFeedback(${curSchedule.id})"
-            style="font-size:12px;color:var(--gd);border-color:var(--gd)">
-            <i class="ti ti-message-report"></i> 정정 요청
+        <!-- 컨펌 요청: 작성 완료 후 draft/rejected 상태에서 표시 -->
+        ${(canEdit || isScheduleAdmin()) && (curSchedule?.status==='draft' || curSchedule?.status==='rejected' || !curSchedule) ? `
+          <button id="btnSchConfirm" onclick="requestScheduleConfirm()"
+            style="background:var(--gn);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer">
+            <i class="ti ti-send"></i> ${curSchedule?.status==='rejected'?'재':''}컨펌 요청
           </button>` : ''}
-        <!-- 매장: 정정 요청 처리완료 버튼 -->
-        ${curSchedule?.feedback_status==='pending' && canEdit ? `
-          <button class="btn-cancel-sm" onclick="completeFeedback(${curSchedule.id})"
-            style="font-size:12px;color:var(--gn);border-color:var(--gn)">
-            <i class="ti ti-check"></i> 정정 처리완료
+        ${curSchedule?.status==='requested' && (canEdit||isScheduleAdmin()) ? `
+          <button class="btn-cancel-sm" onclick="cancelScheduleConfirm()"
+            style="font-size:12px;color:var(--rd);border-color:var(--rd)">
+            <i class="ti ti-arrow-back-up"></i> 요청 취소
           </button>` : ''}
         ${curSchedule ? `<button class="btn-cancel-sm" onclick="openSchedulePreview()" style="font-size:12px;color:var(--bl)"><i class="ti ti-photo"></i> 이미지 저장</button>` : ''}
         ${curSchedule ? `<button class="btn-cancel-sm" onclick="openScheduleHistoryModal(${curSchedule?.id})" style="font-size:12px"><i class="ti ti-history"></i> 히스토리</button>` : ''}
@@ -7462,16 +7458,6 @@ async function renderScheduleEdit(area) {
         })()}
       </div>
       ${curSchedule?.reject_reason ? `<div style="background:var(--rdb);border-radius:8px;padding:10px 13px;font-size:13px;color:var(--rd);margin-bottom:12px"><strong>반려 사유:</strong> ${curSchedule.reject_reason}</div>` : ''}
-      ${curSchedule?.feedback_status==='pending' ? `
-        <div style="background:#FFF3E0;border:0.5px solid #E65100;border-radius:8px;padding:10px 13px;margin-bottom:12px">
-          <div style="font-size:12px;font-weight:700;color:#E65100;margin-bottom:4px"><i class="ti ti-alert-triangle"></i> 정정 요청 (운영팀)</div>
-          <div style="font-size:13px;color:var(--tm);white-space:pre-wrap">${curSchedule.feedback_memo||''}</div>
-          <div style="font-size:11px;color:var(--th);margin-top:6px">요청일: ${curSchedule.feedback_at?.slice(0,16).replace('T',' ')||''}</div>
-        </div>` : ''}
-      ${curSchedule?.feedback_status==='done' ? `
-        <div style="background:var(--gnb);border:0.5px solid var(--gn);border-radius:8px;padding:8px 13px;margin-bottom:12px;font-size:12px;color:var(--gn)">
-          <i class="ti ti-circle-check"></i> 정정 처리 완료 · ${curSchedule.feedback_done_at?.slice(0,16).replace('T',' ')||''}
-        </div>` : ''}
 
       <!-- 운영계획/특이사항 — 저장 분리 방식 -->
       <div id="schMemoSection" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
@@ -9290,96 +9276,6 @@ async function initBalancePanel() {
 
 // [작성 완료] — 임시저장 + 편집 모드 종료
 // 이후 [컨펌 요청] 버튼으로 제출
-
-// [컨펌 요청/재요청] — 편집 모드에서 저장과 동시에 요청
-async function saveAndRequestConfirm() {
-  // 1. 임시저장 먼저
-  await saveScheduleDraft();
-  // 2. 컨펌 요청 (draft/confirmed 모두 가능)
-  await requestScheduleConfirm();
-}
-
-// 운영팀 정정 요청 모달
-async function openScheduleFeedback(scheduleId) {
-  const old = document.getElementById('feedbackModal');
-  if (old) old.remove();
-
-  // 기존 피드백 조회
-  const { data: sch } = await sb.from('schedules').select('feedback_memo,feedback_status,feedback_at').eq('id', scheduleId).single();
-
-  const m = document.createElement('div');
-  m.id = 'feedbackModal';
-  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:300;display:flex;align-items:center;justify-content:center';
-  m.innerHTML = `
-    <div style="background:#fff;border-radius:14px;padding:22px;width:min(95vw,460px)">
-      <div style="font-size:15px;font-weight:600;color:var(--tm);margin-bottom:8px">
-        <i class="ti ti-message-report" style="color:var(--gd)"></i> 정정 요청
-      </div>
-      <div style="font-size:12px;color:var(--th);margin-bottom:12px;line-height:1.6">
-        매장에 전달할 정정 요청 내용을 입력하세요.<br>
-        매장에서 수정 후 [정정 처리완료]를 누르면 운영팀·인사팀에 알림이 발송됩니다.
-      </div>
-      ${sch?.feedback_status === 'done'
-        ? `<div style="background:var(--gnb);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--gn);margin-bottom:10px">✓ 이전 정정 요청이 처리완료되었습니다</div>` : ''}
-      ${sch?.feedback_memo ? `<div style="background:var(--crm);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--ts);margin-bottom:10px">이전 메모: ${sch.feedback_memo}</div>` : ''}
-      <textarea id="feedbackMemo" class="form-input" rows="5"
-        placeholder="예: 8/12 홍길동 휴무 → 대휴로 수정 필요 / 지각 메모 누락"
-        style="width:100%;margin-bottom:12px">${sch?.feedback_memo||''}</textarea>
-      <div style="display:flex;justify-content:flex-end;gap:8px">
-        <button class="btn-cancel-sm" onclick="document.getElementById('feedbackModal').remove()">취소</button>
-        <button class="btn-submit" onclick="submitScheduleFeedback(${scheduleId})">
-          <i class="ti ti-send"></i> 정정 요청 전송
-        </button>
-      </div>
-    </div>`;
-  document.body.appendChild(m);
-}
-
-async function submitScheduleFeedback(scheduleId) {
-  const memo = document.getElementById('feedbackMemo')?.value.trim();
-  if (!memo) { alert('정정 요청 내용을 입력해주세요.'); return; }
-
-  await sb.from('schedules').update({
-    feedback_memo:   memo,
-    feedback_status: 'pending',
-    feedback_at:     new Date().toISOString(),
-    feedback_by:     currentUser.id
-  }).eq('id', scheduleId);
-
-  // 매장 담당자(작성자)에게 알림
-  const { data: sch } = await sb.from('schedules').select('created_by,store,year,month').eq('id', scheduleId).single();
-  if (sch?.created_by) {
-    await createNotification(sch.created_by, 'schedule_feedback', scheduleId, 'schedule',
-      `[정정 요청] ${sch.store} ${sch.year}년 ${sch.month}월 스케줄 정정 요청이 도착했습니다. 확인 후 수정해주세요.`);
-    updateNotifDot();
-  }
-
-  document.getElementById('feedbackModal')?.remove();
-  alert('정정 요청이 전송되었습니다.');
-  openScheduleById(scheduleId);
-}
-
-// 매장 — 정정 처리완료
-async function completeFeedback(scheduleId) {
-  if (!confirm('정정 사항을 모두 수정하고 처리 완료하시겠습니까?')) return;
-
-  await sb.from('schedules').update({
-    feedback_status: 'done',
-    feedback_done_at: new Date().toISOString()
-  }).eq('id', scheduleId);
-
-  // 운영팀·인사팀에 알림
-  const { data: sch } = await sb.from('schedules').select('store,year,month').eq('id', scheduleId).single();
-  const { data: admins } = await sb.from('users').select('id').in('role',['admin','hr']).eq('active',true);
-  for (const u of (admins||[])) {
-    await createNotification(u.id, 'schedule_feedback_done', scheduleId, 'schedule',
-      `[정정 완료] ${sch?.store} ${sch?.year}년 ${sch?.month}월 스케줄 정정이 처리되었습니다.`);
-  }
-  updateNotifDot();
-  alert('처리완료 처리됐습니다. 운영팀·인사팀에 알림이 발송되었습니다.');
-  openScheduleById(scheduleId);
-}
-
 async function finishScheduleEdit() {
   await saveScheduleDraft();
   // saveScheduleDraft 내부에서 exitSchEditMode 호출됨
@@ -9395,12 +9291,12 @@ async function enterSchEditMode() {
   const btnCancel  = document.getElementById('btnSchEditCancel');
   const btnSave    = document.getElementById('btnSchSave');
   const btnConfirm = document.getElementById('btnSchConfirm');
-  const btnConfirmInEdit = document.getElementById('btnSchConfirmInEdit');
-  if (btnEdit)          btnEdit.style.display          = 'none';
-  if (btnSave)          btnSave.style.display          = '';
-  if (btnConfirmInEdit) btnConfirmInEdit.style.display  = '';
-  if (btnCancel)        btnCancel.style.display        = '';
-  if (btnConfirm)       btnConfirm.style.display       = 'none';
+  const btnDone = document.getElementById('btnSchDone');
+  if (btnEdit)    btnEdit.style.display    = 'none';
+  if (btnSave)    btnSave.style.display    = '';
+  if (btnDone)    btnDone.style.display    = '';
+  if (btnCancel)  btnCancel.style.display  = '';
+  if (btnConfirm) btnConfirm.style.display = 'none';
 
   // 셀 전체를 select로 다시 그리기
   await rebuildScheduleCells(true);
@@ -9424,12 +9320,12 @@ async function exitSchEditMode(skipConfirm = false) {
   const btnCancel  = document.getElementById('btnSchEditCancel');
   const btnSave    = document.getElementById('btnSchSave');
   const btnConfirm = document.getElementById('btnSchConfirm');
-  const btnCIE = document.getElementById('btnSchConfirmInEdit');
-  if (btnEdit)  btnEdit.style.display  = '';
-  if (btnSave)  btnSave.style.display  = 'none';
-  if (btnCIE)   btnCIE.style.display   = 'none';
-  if (btnCancel) btnCancel.style.display = 'none';
-  if (btnConfirm) btnConfirm.style.display = 'none';
+  const btnDoneX = document.getElementById('btnSchDone');
+  if (btnEdit)    btnEdit.style.display    = '';
+  if (btnSave)    btnSave.style.display    = 'none';
+  if (btnDoneX)   btnDoneX.style.display   = 'none';
+  if (btnCancel)  btnCancel.style.display  = 'none';
+  if (btnConfirm) btnConfirm.style.display = '';
 
   // 셀 전체를 뷰 모드 div로 다시 그리기
   await rebuildScheduleCells(false);
