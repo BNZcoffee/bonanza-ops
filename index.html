@@ -5329,7 +5329,7 @@ async function renderReqStats(area) {
   const ensure = (uid) => { if(!byUser[uid]) byUser[uid] = {done:0, rejected:0, inprog:0, submitted:0}; return byUser[uid]; };
   all.forEach(r => {
     // 이번 달 완료
-    if (r.status === 'done' && inMonth(r.completed_at || r.updated_at) && r.assignee_id) ensure(r.assignee_id).done++;
+    if (r.status === 'done' && inMonth(r.completed_at || r.done_date || r.updated_at) && r.assignee_id) ensure(r.assignee_id).done++;
     // 이번 달 반려 (반려시각 근사: updated_at)
     if (r.status === 'rejected' && inMonth(r.updated_at) && r.assignee_id) ensure(r.assignee_id).rejected++;
     // 현재 진행 중 (담당자)
@@ -5413,7 +5413,7 @@ async function renderReqArchive(area) {
   }
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
   const [{ data: reqs }, { data: types }, { data: stores }] = await Promise.all([
-    sb.from('requests').select('*, request_types(name, icon), parts(name)').eq('status','done').order('completed_at', {ascending:false}).order('created_at', {ascending:false}),
+    sb.from('requests').select('*, request_types(name, icon), parts(name)').eq('status','done').order('done_date', {ascending:false}).order('created_at', {ascending:false}),
     sb.from('request_types').select('*').order('sort_order'),
     sb.from('store_options').select('*').order('sort_order')
   ]);
@@ -5437,7 +5437,7 @@ async function renderReqArchive(area) {
   const cards = list.length ? list.map(r => {
     const tname = r.request_types ? r.request_types.name : '기타';
     const tico = r.request_types && r.request_types.icon ? r.request_types.icon : 'ti-clipboard-check';
-    const cdate = (r.completed_at || r.created_at || '').slice(0,10);
+    const cdate = (r.completed_at || r.done_date || r.updated_at || r.created_at || '').slice(0,10);
     return `<div class="post-card" onclick="openReqById(${r.id})" style="cursor:pointer">
       <div class="post-card-top">
         <span class="post-title-txt"><i class="ti ${tico}" style="color:var(--bl);margin-right:5px"></i>${r.title||tname}</span>
@@ -5499,7 +5499,7 @@ async function renderRequests(area) {
   } else if (currentUser.part || currentUser.role === 'admin' || currentUser.is_master) {
     // 담당자/관리자: 내가 처리(담당)한 신청 (이번 달 완료 기준)
     const handled = allReqs.filter(r => r.assignee_id === currentUser.id);
-    const doneThis = handled.filter(r => r.status === 'done' && inThisMonth(r.completed_at || r.updated_at)).length;
+    const doneThis = handled.filter(r => r.status === 'done' && inThisMonth(r.completed_at || r.done_date || r.updated_at)).length;
     const progNow = handled.filter(r => r.status === 'in_progress').length;
     myStatCard = '<div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">' +
       '<div class="stat-card" style="background:var(--blb)"><div class="stat-num" style="color:var(--bl)">' + progNow + '</div><div class="stat-lbl">내 담당 진행 중</div></div>' +
@@ -5940,9 +5940,12 @@ async function completeReq(id) {
   const done = document.getElementById('rqDone').value || null;
   if (!assignee) { alert('처리 완료 전에 담당자를 지정해주세요.'); return; }
   if (!done) { alert('처리 완료일을 선택해주세요.'); return; }
+  const completedAt = done ? new Date(done).toISOString() : new Date().toISOString();
   await sb.from('requests').update({
     assignee_id: assignee, due_date: due, done_date: done,
-    status: 'done', updated_at: new Date().toISOString()
+    status: 'done',
+    completed_at: completedAt,  // 완료 내역 + 보수내역 동기화에 사용
+    updated_at: new Date().toISOString()
   }).eq('id', id);
   // 신청자에게 완료 알림
   const { data: req } = await sb.from('requests').select('author_id,title').eq('id', id).single();
@@ -6524,7 +6527,10 @@ async function renderRepairs(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
   const isAdmin  = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
   const canManage = isAdmin;
-  const REPAIR_TYPE_ID = 2;
+  // 보수 요청 type_id를 동적으로 조회 (하드코딩 제거)
+  const { data: repairTypeDef } = await sb.from('request_types')
+    .select('id').ilike('name','%보수%').maybeSingle();
+  const REPAIR_TYPE_ID = repairTypeDef?.id || null;
 
   const [catRes, rpRes, reqRes, storeRes] = await Promise.all([
     sb.from('repair_categories').select('*').eq('active',true).order('sort_order'),
@@ -6538,8 +6544,9 @@ async function renderRepairs(area) {
     })(),
     // 업무 신청 완료된 보수 요청
     (async()=>{
+      if (!REPAIR_TYPE_ID) return { data: [] };
       let q = sb.from('requests')
-        .select('id,store,title,form_data,completed_at,created_at')
+        .select('id,store,title,form_data,completed_at,done_date,created_at,updated_at')
         .eq('type_id', REPAIR_TYPE_ID)
         .eq('status','done')
         .order('completed_at',{ascending:false});
@@ -6565,7 +6572,7 @@ async function renderRepairs(area) {
       _sourceType: 'request',       // 출처 표시용
       store:       r.store,
       title:       r.title,
-      repair_date: r.completed_at ? r.completed_at.slice(0,10) : r.created_at.slice(0,10),
+      repair_date: (r.completed_at || r.done_date || r.updated_at || r.created_at || '').slice(0,10),
       category_id: cat?.id || null,
       cat:         cat ? {label: cat.label} : (catLabel ? {label: catLabel} : null),
       content:     [fd['보수 위치']?'위치: '+fd['보수 위치']:'', fd['증상/상세 내용']||''].filter(Boolean).join('\n'),
