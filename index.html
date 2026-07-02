@@ -5329,7 +5329,7 @@ async function renderReqStats(area) {
   const ensure = (uid) => { if(!byUser[uid]) byUser[uid] = {done:0, rejected:0, inprog:0, submitted:0}; return byUser[uid]; };
   all.forEach(r => {
     // 이번 달 완료
-    if (r.status === 'done' && inMonth(r.completed_at || r.done_date || r.updated_at) && r.assignee_id) ensure(r.assignee_id).done++;
+    if (r.status === 'done' && inMonth(r.completed_at || r.updated_at) && r.assignee_id) ensure(r.assignee_id).done++;
     // 이번 달 반려 (반려시각 근사: updated_at)
     if (r.status === 'rejected' && inMonth(r.updated_at) && r.assignee_id) ensure(r.assignee_id).rejected++;
     // 현재 진행 중 (담당자)
@@ -5413,7 +5413,7 @@ async function renderReqArchive(area) {
   }
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
   const [{ data: reqs }, { data: types }, { data: stores }] = await Promise.all([
-    sb.from('requests').select('*, request_types(name, icon), parts(name)').eq('status','done').order('done_date', {ascending:false}).order('created_at', {ascending:false}),
+    sb.from('requests').select('*, request_types(name, icon), parts(name)').eq('status','done').order('completed_at', {ascending:false}).order('created_at', {ascending:false}),
     sb.from('request_types').select('*').order('sort_order'),
     sb.from('store_options').select('*').order('sort_order')
   ]);
@@ -5437,7 +5437,7 @@ async function renderReqArchive(area) {
   const cards = list.length ? list.map(r => {
     const tname = r.request_types ? r.request_types.name : '기타';
     const tico = r.request_types && r.request_types.icon ? r.request_types.icon : 'ti-clipboard-check';
-    const cdate = (r.completed_at || r.done_date || r.updated_at || r.created_at || '').slice(0,10);
+    const cdate = (r.completed_at || r.created_at || '').slice(0,10);
     return `<div class="post-card" onclick="openReqById(${r.id})" style="cursor:pointer">
       <div class="post-card-top">
         <span class="post-title-txt"><i class="ti ${tico}" style="color:var(--bl);margin-right:5px"></i>${r.title||tname}</span>
@@ -5499,7 +5499,7 @@ async function renderRequests(area) {
   } else if (currentUser.part || currentUser.role === 'admin' || currentUser.is_master) {
     // 담당자/관리자: 내가 처리(담당)한 신청 (이번 달 완료 기준)
     const handled = allReqs.filter(r => r.assignee_id === currentUser.id);
-    const doneThis = handled.filter(r => r.status === 'done' && inThisMonth(r.completed_at || r.done_date || r.updated_at)).length;
+    const doneThis = handled.filter(r => r.status === 'done' && inThisMonth(r.completed_at || r.updated_at)).length;
     const progNow = handled.filter(r => r.status === 'in_progress').length;
     myStatCard = '<div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">' +
       '<div class="stat-card" style="background:var(--blb)"><div class="stat-num" style="color:var(--bl)">' + progNow + '</div><div class="stat-lbl">내 담당 진행 중</div></div>' +
@@ -5940,12 +5940,9 @@ async function completeReq(id) {
   const done = document.getElementById('rqDone').value || null;
   if (!assignee) { alert('처리 완료 전에 담당자를 지정해주세요.'); return; }
   if (!done) { alert('처리 완료일을 선택해주세요.'); return; }
-  const completedAt = done ? new Date(done).toISOString() : new Date().toISOString();
   await sb.from('requests').update({
     assignee_id: assignee, due_date: due, done_date: done,
-    status: 'done',
-    completed_at: completedAt,  // 완료 내역 + 보수내역 동기화에 사용
-    updated_at: new Date().toISOString()
+    status: 'done', updated_at: new Date().toISOString()
   }).eq('id', id);
   // 신청자에게 완료 알림
   const { data: req } = await sb.from('requests').select('author_id,title').eq('id', id).single();
@@ -6527,10 +6524,7 @@ async function renderRepairs(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
   const isAdmin  = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
   const canManage = isAdmin;
-  // 보수 요청 type_id를 동적으로 조회 (하드코딩 제거)
-  const { data: repairTypeDef } = await sb.from('request_types')
-    .select('id').ilike('name','%보수%').maybeSingle();
-  const REPAIR_TYPE_ID = repairTypeDef?.id || null;
+  const REPAIR_TYPE_ID = 2;
 
   const [catRes, rpRes, reqRes, storeRes] = await Promise.all([
     sb.from('repair_categories').select('*').eq('active',true).order('sort_order'),
@@ -6544,9 +6538,8 @@ async function renderRepairs(area) {
     })(),
     // 업무 신청 완료된 보수 요청
     (async()=>{
-      if (!REPAIR_TYPE_ID) return { data: [] };
       let q = sb.from('requests')
-        .select('id,store,title,form_data,completed_at,done_date,created_at,updated_at')
+        .select('id,store,title,form_data,completed_at,created_at')
         .eq('type_id', REPAIR_TYPE_ID)
         .eq('status','done')
         .order('completed_at',{ascending:false});
@@ -6572,7 +6565,7 @@ async function renderRepairs(area) {
       _sourceType: 'request',       // 출처 표시용
       store:       r.store,
       title:       r.title,
-      repair_date: (r.completed_at || r.done_date || r.updated_at || r.created_at || '').slice(0,10),
+      repair_date: r.completed_at ? r.completed_at.slice(0,10) : r.created_at.slice(0,10),
       category_id: cat?.id || null,
       cat:         cat ? {label: cat.label} : (catLabel ? {label: catLabel} : null),
       content:     [fd['보수 위치']?'위치: '+fd['보수 위치']:'', fd['증상/상세 내용']||''].filter(Boolean).join('\n'),
@@ -7164,22 +7157,18 @@ async function confirmDeleteSchedule(id, store, year, month) {
   // 2단계: 최종 확인
   if (!confirm(`"${label}"을 삭제합니까?\n삭제하면 모든 스케줄 내용이 사라지며 복구할 수 없습니다.`)) return;
 
-  // 연쇄 삭제: schedule_entries → schedule_leave_balance → schedule_history → schedules
-  const { error: e1 } = await sb.from('schedule_entries').delete().eq('schedule_id', id);
-  if (e1) { alert('삭제 오류(entries): ' + e1.message); return; }
+  // 연쇄 삭제 (오류 무시 후 최종 schedules 삭제)
+  await sb.from('schedule_entries').delete().eq('schedule_id', id);
+  await sb.from('schedule_leave_balance').delete().eq('schedule_id', id);
+  await sb.from('schedule_history').delete().eq('schedule_id', id);
 
-  const { error: e2 } = await sb.from('schedule_leave_balance').delete().eq('schedule_id', id);
-  // e2 무시 (테이블 없을 수도 있음)
-
-  const { error: e3 } = await sb.from('schedule_history').delete().eq('schedule_id', id);
-  // e3 무시
-
-  const { error: e4 } = await sb.from('schedules').delete().eq('id', id);
-  if (e4) { alert('삭제 오류: ' + e4.message); return; }
+  const { error: eFinal } = await sb.from('schedules').delete().eq('id', id);
+  if (eFinal) {
+    alert('삭제 오류: ' + eFinal.message + '\n\n관리자에게 문의하세요.');
+    return;
+  }
 
   alert(`"${label}" 삭제 완료`);
-
-  // 목록 강제 새로고침
   curSchedule = null;
   goPage('schedules');
 }
@@ -7352,21 +7341,31 @@ async function renderScheduleEdit(area) {
       <button class="btn-cancel-sm" onclick="goPage('schedules')"><i class="ti ti-arrow-left"></i> 목록</button>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${canEdit && !curSchedule?.hr_checked_at ? `
-          <button id="btnSchEdit" onclick="enterSchEditMode()" style="background:var(--br);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer">
+          <!-- 뷰 모드: [스케줄 수정] 버튼만 표시 -->
+          <button id="btnSchEdit" onclick="enterSchEditMode()"
+            style="background:var(--br);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer">
             <i class="ti ti-edit"></i> 스케줄 수정
           </button>
-          <button id="btnSchEditCancel" onclick="exitSchEditMode()" style="display:none;background:none;border:0.5px solid var(--rd);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--rd);cursor:pointer">
-            <i class="ti ti-x"></i> 수정 취소
-          </button>
-          <button id="btnSchSave" onclick="saveScheduleDraft()" style="display:none;background:none;border:0.5px solid var(--crd);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--ts);cursor:pointer">
+          <!-- 편집 모드: [임시저장] [수정취소] 표시 -->
+          <button id="btnSchSave" onclick="saveScheduleDraft()"
+            style="display:none;background:var(--br);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer">
             <i class="ti ti-device-floppy"></i> 임시저장
+          </button>
+          <button id="btnSchEditCancel" onclick="exitSchEditMode()"
+            style="display:none;background:none;border:0.5px solid var(--rd);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--rd);cursor:pointer">
+            <i class="ti ti-x"></i> 수정 취소
           </button>` : ''}
-        <button class="btn-cancel-sm" onclick="openShiftSettings()" style="font-size:12px"><i class="ti ti-clock"></i> 근무조 설정</button>
-        ${(canEdit || isScheduleAdmin()) && (curSchedule?.status==='draft' || curSchedule?.status==='rejected') ? `
-          <button id="btnSchConfirm" onclick="requestScheduleConfirm()" style="display:none;background:var(--gn);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer">
+        <!-- 컨펌 요청: 편집 모드와 무관하게 draft/rejected 상태일 때 항상 표시 -->
+        ${(canEdit || isScheduleAdmin()) && (curSchedule?.status==='draft' || curSchedule?.status==='rejected' || !curSchedule) ? `
+          <button id="btnSchConfirm" onclick="requestScheduleConfirm()"
+            style="background:var(--gn);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer">
             <i class="ti ti-send"></i> ${curSchedule?.status==='rejected'?'재':''}컨펌 요청
           </button>` : ''}
-        ${curSchedule?.status==='requested' && (canEdit||isScheduleAdmin()) ? `<button class="btn-cancel-sm" onclick="cancelScheduleConfirm()" style="font-size:12px;color:var(--rd);border-color:var(--rd)"><i class="ti ti-arrow-back-up"></i> 요청 취소</button>` : ''}
+        ${curSchedule?.status==='requested' && (canEdit||isScheduleAdmin()) ? `
+          <button class="btn-cancel-sm" onclick="cancelScheduleConfirm()"
+            style="font-size:12px;color:var(--rd);border-color:var(--rd)">
+            <i class="ti ti-arrow-back-up"></i> 요청 취소
+          </button>` : ''}
         ${curSchedule ? `<button class="btn-cancel-sm" onclick="openSchedulePreview()" style="font-size:12px;color:var(--bl)"><i class="ti ti-photo"></i> 이미지 저장</button>` : ''}
         ${curSchedule ? `<button class="btn-cancel-sm" onclick="openScheduleHistoryModal(${curSchedule?.id})" style="font-size:12px"><i class="ti ti-history"></i> 히스토리</button>` : ''}
         <button class="btn-cancel-sm" onclick="initBalancePanel()" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-calculator"></i> 집계 새로고침</button>
@@ -7581,6 +7580,21 @@ function onCellChange(sel) {
       sel.parentElement.style.background = ltMap[val] ? ltMap[val]+'33' : '#fff';
     }
   }
+  // isExtra(지원받는 매장) 행에서 shift 선택 시 support_time 자동 설정
+  if (val && userId) {
+    const staffInfoX = curScheduleStaff.find(s => s.id === userId);
+    if (staffInfoX?.isExtra) {
+      const shiftDef = (window.__cachedShiftCodes||[]).find(sc => sc.code === val);
+      if (shiftDef?.start_time) {
+        const timeStr = shiftDef.start_time + (shiftDef.end_time ? '~' + shiftDef.end_time : '');
+        sel.dataset.supportTime = timeStr;
+        if (!curScheduleEntries[key]) curScheduleEntries[key] = {};
+        curScheduleEntries[key].support_time = timeStr;
+        curScheduleEntries[key]._supportTime  = timeStr;
+      }
+    }
+  }
+
   // PT 직원 근무조 시간 체크
   if (val && userId) {
     const staffInfo = curScheduleStaff.find(s => s.id === userId);
@@ -8147,7 +8161,7 @@ async function loadCrossStoreEntries(userId, year, month) {
 
   // 다른 매장 스케줄에서 이 직원이 지원근무로 등록된 entries 조회
   const { data: crossEntries } = await sb.from('schedule_entries')
-    .select('date, entry_type, shift_code, support_store, support_time, schedule:schedules(store,year,month)')
+    .select('date, entry_type, shift_code, support_store, support_time, is_extra, schedule:schedules(store,year,month)')
     .eq('user_id', userId)
     .eq('is_extra', true)
     .gte('date', monthStart)
@@ -8162,7 +8176,16 @@ async function loadCrossStoreEntries(userId, year, month) {
       _crossStore: e.schedule?.store || '',
       _supportTime: e.support_time || '',
       // "목동점\n09:00" 형식으로 표시 (매장명+출근시간)
-      displayVal: (e.schedule?.store||'지원') + (e.support_time ? '\n'+e.support_time.split('~')[0] : ''),
+      // support_time 없으면 shift_code로 시간 자동 조회
+      displayVal: (() => {
+        const storeName = e.schedule?.store || '지원';
+        let timeStr = e.support_time ? e.support_time.split('~')[0] : '';
+        if (!timeStr && e.shift_code) {
+          const shiftDef = (window.__cachedShiftCodes||[]).find(s => s.code === e.shift_code);
+          if (shiftDef?.start_time) timeStr = shiftDef.start_time;
+        }
+        return storeName + (timeStr ? '\n' + timeStr : '');
+      })(),
     };
   });
   return map;
@@ -8209,13 +8232,15 @@ async function buildStaffRowWithCross(staff, si, daysInMonth, year, month, allCo
 
     if (readonly) {
       // 읽기 전용 셀 (타 매장 지원근무) — 매장명 + 출근시간 두 줄 표시
-      const [crossStore, crossTime] = displayVal.split('\n');
+      const crossParts = displayVal.split('\n');
+      const crossStoreName = crossParts[0] || '';
+      const crossTime = crossParts[1] || '';
       rowHtml += `<td style="border:0.5px solid var(--crd);padding:0;background:${bgColor}" title="${tooltip}">
         <div style="text-align:center;padding:2px 1px;color:#7A5C00;cursor:default;line-height:1.4">
-          <div style="font-size:10px;font-weight:700">${crossStore||''}</div>
+          <div style="font-size:10px;font-weight:700">${crossStoreName}</div>
           ${crossTime
             ? `<div style="font-size:9px;color:#A07030;font-weight:600">${crossTime}</div>`
-            : `<div style="font-size:8px;color:#B09070">시간미입력</div>`
+            : `<div style="font-size:8px;color:#C0A060">-</div>`
           }
         </div>
       </td>`;
@@ -9126,15 +9151,16 @@ async function initBalancePanel() {
 async function enterSchEditMode() {
   window.__schEditMode = true;
 
-  // 버튼 전환 — 없으면 show, 있으면 display 변경
+  // 편집 모드: [스케줄 수정] 숨기고 [임시저장][수정취소] 표시
+  // [컨펌 요청]은 숨김 (임시저장 후 편집 종료 뒤 사용 유도)
   const btnEdit    = document.getElementById('btnSchEdit');
   const btnCancel  = document.getElementById('btnSchEditCancel');
   const btnSave    = document.getElementById('btnSchSave');
   const btnConfirm = document.getElementById('btnSchConfirm');
-  if (btnEdit)    btnEdit.style.display = 'none';
-  if (btnCancel)  btnCancel.style.display = '';
-  if (btnSave)    btnSave.style.display = '';
-  if (btnConfirm) btnConfirm.style.display = '';
+  if (btnEdit)    btnEdit.style.display    = 'none';
+  if (btnSave)    btnSave.style.display    = '';
+  if (btnCancel)  btnCancel.style.display  = '';
+  if (btnConfirm) btnConfirm.style.display = 'none'; // 저장 후 뷰모드에서 사용
 
   // 셀 전체를 select로 다시 그리기
   await rebuildScheduleCells(true);
@@ -9158,10 +9184,10 @@ async function exitSchEditMode(skipConfirm = false) {
   const btnCancel  = document.getElementById('btnSchEditCancel');
   const btnSave    = document.getElementById('btnSchSave');
   const btnConfirm = document.getElementById('btnSchConfirm');
-  if (btnEdit)    btnEdit.style.display    = '';
-  if (btnCancel)  btnCancel.style.display  = 'none';
-  if (btnSave)    btnSave.style.display    = 'none';
-  if (btnConfirm) btnConfirm.style.display = 'none';
+  if (btnEdit)    btnEdit.style.display    = '';       // [스케줄 수정] 다시 표시
+  if (btnSave)    btnSave.style.display    = 'none';   // [임시저장] 숨김
+  if (btnCancel)  btnCancel.style.display  = 'none';   // [수정 취소] 숨김
+  if (btnConfirm) btnConfirm.style.display = '';        // [컨펌 요청] 다시 표시
 
   // 셀 전체를 뷰 모드 div로 다시 그리기
   await rebuildScheduleCells(false);
