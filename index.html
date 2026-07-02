@@ -436,7 +436,7 @@ textarea.form-input{min-height:120px;resize:vertical}
     </div>
   </nav>
   <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
-  <div class="content" id="contentArea" oncontextmenu="return false" ondragstart="return false"></div>
+  <div class="content" id="contentArea" oncontextmenu="return false"></div>
 </div>
 
 <!-- NOTIF PANEL -->
@@ -7398,21 +7398,25 @@ async function renderScheduleEdit(area) {
       <button class="btn-cancel-sm" onclick="goPage('schedules')"><i class="ti ti-arrow-left"></i> 목록</button>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${canEdit && !curSchedule?.hr_checked_at ? `
-          <!-- 뷰 모드: [스케줄 수정] 버튼만 표시 -->
+          <!-- 뷰 모드: [스케줄 수정] 버튼 -->
           <button id="btnSchEdit" onclick="enterSchEditMode()"
-            style="background:var(--br);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer">
+            style="background:var(--brm);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer">
             <i class="ti ti-edit"></i> 스케줄 수정
           </button>
-          <!-- 편집 모드: [임시저장] [수정취소] 표시 -->
+          <!-- 편집 모드: [임시저장] [작성 완료] [수정취소] -->
           <button id="btnSchSave" onclick="saveScheduleDraft()"
-            style="display:none;background:var(--br);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer">
+            style="display:none;background:none;border:0.5px solid var(--crd);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--ts);cursor:pointer">
             <i class="ti ti-device-floppy"></i> 임시저장
+          </button>
+          <button id="btnSchDone" onclick="finishScheduleEdit()"
+            style="display:none;background:var(--br);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer">
+            <i class="ti ti-circle-check"></i> 작성 완료
           </button>
           <button id="btnSchEditCancel" onclick="exitSchEditMode()"
             style="display:none;background:none;border:0.5px solid var(--rd);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--rd);cursor:pointer">
             <i class="ti ti-x"></i> 수정 취소
           </button>` : ''}
-        <!-- 컨펌 요청: 편집 모드와 무관하게 draft/rejected 상태일 때 항상 표시 -->
+        <!-- 컨펌 요청: 작성 완료 후 draft/rejected 상태에서 표시 -->
         ${(canEdit || isScheduleAdmin()) && (curSchedule?.status==='draft' || curSchedule?.status==='rejected' || !curSchedule) ? `
           <button id="btnSchConfirm" onclick="requestScheduleConfirm()"
             style="background:var(--gn);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer">
@@ -7656,18 +7660,19 @@ function onCellChange(sel) {
   if (val && userId) {
     const staffInfo = curScheduleStaff.find(s => s.id === userId);
     if (staffInfo && staffInfo.employment_type === 'parttime' && staffInfo.pt_hours_per_day) {
-      // 근무조 시간과 계약 시간 비교
+      // 근무조 총 체류시간(출근~퇴근)과 계약 총 체류시간 비교
       const shiftCode = window.__cachedShiftCodes?.find(s => s.code === val);
       if (shiftCode && shiftCode.start_time && shiftCode.end_time) {
         const [sh, sm] = shiftCode.start_time.split(':').map(Number);
         const [eh, em] = shiftCode.end_time.split(':').map(Number);
-        const shiftHours = ((eh*60+em) - (sh*60+sm)) / 60;
-        const contractHours = parseFloat(staffInfo.pt_hours_per_day);
-        if (Math.abs(shiftHours - contractHours) > 0.5) {
-          // 계약 시간과 30분 이상 차이나면 경고 후 차단
+        const shiftTotalH = ((eh*60+em) - (sh*60+sm)) / 60; // 총 체류시간
+        const contractTotalH = parseFloat(staffInfo.pt_hours_per_day); // 총 체류시간 기준
+        const contractWorkH  = parseFloat(staffInfo.pt_work_hours || 0); // 계약 근로시간
+        const breakH = contractTotalH - contractWorkH;
+        if (Math.abs(shiftTotalH - contractTotalH) > 0.5) {
           const prev = curScheduleEntries[key];
           sel.value = prev?._rawCode || prev?.entry_type || prev?.shift_code || '';
-          alert(`PT 직원 ${staffInfo.name}의 계약 근무시간은 ${contractHours}시간입니다.\n선택한 근무조 "${val}"의 근무시간(${shiftHours}시간)과 일치하지 않아 입력이 제한됩니다.\n\n계약 시간에 맞는 근무조를 선택하거나 인사팀에 문의하세요.`);
+          alert(`PT 직원 ${staffInfo.name}의 총 체류시간은 ${contractTotalH}시간입니다.\n(계약 근로 ${contractWorkH}h + 휴게 ${Math.round(breakH*60)}분)\n\n선택한 근무조 "${val}"의 총 시간(${shiftTotalH}h)과 일치하지 않아 입력이 제한됩니다.\n총 체류시간에 맞는 근무조를 선택하거나 인사팀에 문의하세요.`);
           return;
         }
       }
@@ -8591,6 +8596,8 @@ async function persistScheduleEntries(scheduleId) {
     const extraName = sel.dataset.extra || null;
     const date = sel.dataset.date;
     const isShift = shiftCodeSet.has(val);
+    const entryKey = (userId||extraName) + '_' + date;
+    const memEntry = curScheduleEntries[entryKey] || {};
     rows.push({
       schedule_id: scheduleId,
       user_id: userId || null,
@@ -8599,9 +8606,10 @@ async function persistScheduleEntries(scheduleId) {
       entry_type: isShift ? 'shift' : val,
       shift_code: isShift ? val : null,
       is_extra: !!extraName,
-      support_store: sel.dataset.supportStore || null,
-      support_time:  sel.dataset.supportTime  || null,
-      note: sel.dataset.note || null
+      support_store: sel.dataset.supportStore || memEntry.support_store || null,
+      support_time:  sel.dataset.supportTime  || memEntry.support_time  || null,
+      note: sel.dataset.note || memEntry.note || null,
+      adjusted_hours: memEntry.adjusted_hours || null  // PT 일별 근무시간 조정값
     });
   });
 
@@ -8906,7 +8914,7 @@ function openPtHoursAdjust(staffName, contractHours) {
     const val = sel?.value || entry?.shift_code || entry?.entry_type || '';
     // shift 코드면 근무일
     const isShift = val && !['휴무','대휴','연차','반차','오전반차','오후반차','공가','경조','결근','무급휴가',''].includes(val);
-    if (isShift) workDates.push({dateStr, val, adjustedH: entry?.adjusted_hours || null});
+    if (isShift) workDates.push({dateStr, val, adjustedH: entry?.adjusted_hours || null, note: entry?.note||''});
   }
 
   if (!workDates.length) { alert('이번 달 근무 입력된 날이 없습니다.'); return; }
@@ -8914,20 +8922,26 @@ function openPtHoursAdjust(staffName, contractHours) {
   const old = document.getElementById('ptAdjustModal');
   if (old) old.remove();
 
-  const rows = workDates.map(({dateStr, val, adjustedH}) => `
+  const rows = workDates.map(({dateStr, val, adjustedH, note}) => `
     <tr>
-      <td style="padding:5px 8px;font-size:12px">${dateStr.slice(5)}</td>
-      <td style="padding:5px 8px;font-size:12px;color:var(--ts)">${val}</td>
+      <td style="padding:5px 8px;font-size:12px;vertical-align:top;padding-top:10px">${dateStr.slice(5)}</td>
+      <td style="padding:5px 8px;font-size:12px;color:var(--ts);vertical-align:top;padding-top:10px">${val}</td>
       <td style="padding:5px 8px">
-        <div style="display:flex;align-items:center;gap:5px">
-          <input type="number" class="form-input" data-date="${dateStr}"
+        <div style="display:flex;align-items:center;gap:5px;margin-bottom:4px">
+          <input type="number" class="pt-adj-hours form-input" data-date="${dateStr}"
             value="${adjustedH !== null ? adjustedH : contractHours}"
             min="0.5" max="${contractHours}" step="0.5"
-            style="width:70px;padding:4px 8px;font-size:12px"/>
+            style="width:70px;padding:4px 8px;font-size:12px"
+            oninput="checkPtAdjChanged(this, ${contractHours})"/>
           <span style="font-size:11px;color:var(--th)">h</span>
           ${adjustedH !== null && adjustedH !== contractHours
             ? `<span style="font-size:10px;color:var(--rd)">조정됨</span>` : ''}
         </div>
+        <input type="text" class="pt-adj-note form-input" data-date="${dateStr}"
+          value="${note||''}"
+          placeholder="조정 사유 필수 입력"
+          style="font-size:11px;padding:4px 8px;width:100%;display:none"
+          id="note-${dateStr}"/>
       </td>
     </tr>`).join('');
 
@@ -8963,22 +8977,55 @@ function openPtHoursAdjust(staffName, contractHours) {
   document.body.appendChild(m);
 }
 
+
+function checkPtAdjChanged(inp, contractH) {
+  const dateStr = inp.dataset.date;
+  const noteEl  = document.getElementById('note-' + dateStr);
+  if (!noteEl) return;
+  const changed = parseFloat(inp.value) !== contractH;
+  noteEl.style.display = changed ? '' : 'none';
+  if (changed) noteEl.focus();
+}
+
 function savePtHoursAdjust(userId, contractHours) {
   const m = document.getElementById('ptAdjustModal');
   if (!m) return;
-  const inputs = m.querySelectorAll('input[data-date]');
-  inputs.forEach(inp => {
+
+  const hourInputs = m.querySelectorAll('.pt-adj-hours');
+  const noteInputs = m.querySelectorAll('.pt-adj-note');
+  const errors = [];
+
+  hourInputs.forEach(inp => {
     const dateStr = inp.dataset.date;
-    const hours = parseFloat(inp.value);
-    const key = userId + '_' + dateStr;
-    if (curScheduleEntries[key]) {
-      curScheduleEntries[key].adjusted_hours = (hours !== contractHours) ? hours : null;
-    }
+    const hours   = parseFloat(inp.value);
+    const changed = Math.abs(hours - contractHours) > 0.01;
+    if (!changed) return;
+    // 조정값이 있으면 사유 필수
+    const noteEl = m.querySelector(`.pt-adj-note[data-date="${dateStr}"]`);
+    const note   = noteEl?.value.trim() || '';
+    if (!note) errors.push(dateStr.slice(5) + '일 사유 없음');
   });
+
+  if (errors.length) {
+    alert('근무시간을 조정한 날짜에 사유를 입력해주세요.\n\n미입력: ' + errors.join(', '));
+    return;
+  }
+
+  hourInputs.forEach(inp => {
+    const dateStr = inp.dataset.date;
+    const hours   = parseFloat(inp.value);
+    const key     = userId + '_' + dateStr;
+    const noteEl  = m.querySelector(`.pt-adj-note[data-date="${dateStr}"]`);
+    const note    = noteEl?.value.trim() || '';
+    if (!curScheduleEntries[key]) curScheduleEntries[key] = {};
+    curScheduleEntries[key].adjusted_hours = Math.abs(hours - contractHours) > 0.01 ? hours : null;
+    if (note) curScheduleEntries[key].note = note;
+  });
+
   m.remove();
   window.__schHasPendingChanges = true;
   renderBalancePanel();
-  alert('일별 근무시간이 반영되었습니다. 임시저장 후 적용됩니다.');
+  alert('반영 완료. [임시저장] 또는 [작성 완료]를 눌러 저장하세요.');
 }
 
 function updateDailyCountRow() {
@@ -9223,6 +9270,15 @@ async function initBalancePanel() {
 // ═══════════════════════════════════════════
 // 스케줄 편집 모드 진입 / 종료
 // ═══════════════════════════════════════════
+
+// [작성 완료] — 임시저장 + 편집 모드 종료
+// 이후 [컨펌 요청] 버튼으로 제출
+async function finishScheduleEdit() {
+  await saveScheduleDraft();
+  // saveScheduleDraft 내부에서 exitSchEditMode 호출됨
+  // 완료 후 [컨펌 요청] 버튼이 표시됨
+}
+
 async function enterSchEditMode() {
   window.__schEditMode = true;
 
@@ -9232,10 +9288,12 @@ async function enterSchEditMode() {
   const btnCancel  = document.getElementById('btnSchEditCancel');
   const btnSave    = document.getElementById('btnSchSave');
   const btnConfirm = document.getElementById('btnSchConfirm');
+  const btnDone = document.getElementById('btnSchDone');
   if (btnEdit)    btnEdit.style.display    = 'none';
   if (btnSave)    btnSave.style.display    = '';
+  if (btnDone)    btnDone.style.display    = '';
   if (btnCancel)  btnCancel.style.display  = '';
-  if (btnConfirm) btnConfirm.style.display = 'none'; // 저장 후 뷰모드에서 사용
+  if (btnConfirm) btnConfirm.style.display = 'none';
 
   // 셀 전체를 select로 다시 그리기
   await rebuildScheduleCells(true);
@@ -9259,10 +9317,12 @@ async function exitSchEditMode(skipConfirm = false) {
   const btnCancel  = document.getElementById('btnSchEditCancel');
   const btnSave    = document.getElementById('btnSchSave');
   const btnConfirm = document.getElementById('btnSchConfirm');
-  if (btnEdit)    btnEdit.style.display    = '';       // [스케줄 수정] 다시 표시
-  if (btnSave)    btnSave.style.display    = 'none';   // [임시저장] 숨김
-  if (btnCancel)  btnCancel.style.display  = 'none';   // [수정 취소] 숨김
-  if (btnConfirm) btnConfirm.style.display = '';        // [컨펌 요청] 다시 표시
+  const btnDoneX = document.getElementById('btnSchDone');
+  if (btnEdit)    btnEdit.style.display    = '';
+  if (btnSave)    btnSave.style.display    = 'none';
+  if (btnDoneX)   btnDoneX.style.display   = 'none';
+  if (btnCancel)  btnCancel.style.display  = 'none';
+  if (btnConfirm) btnConfirm.style.display = '';
 
   // 셀 전체를 뷰 모드 div로 다시 그리기
   await rebuildScheduleCells(false);
