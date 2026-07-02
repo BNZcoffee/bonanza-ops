@@ -7793,10 +7793,30 @@ function addExtraStaff() {
     }
     syncCellsToMemory();
     // 퇴사예정은 별도 목록에 저장 (스케줄 행에 추가하지 않음)
+    // 잔여 휴무 확인
+    const balTable = document.getElementById('leaveBalanceTable');
+    let remainLeave = 0;
+    if (balTable) {
+      const staffIdx = curScheduleStaff.findIndex(s => s.id === id);
+      const rows = balTable.querySelectorAll('tbody tr');
+      if (staffIdx >= 0 && rows[staffIdx]) {
+        const cells = rows[staffIdx].querySelectorAll('td');
+        const prevRemain  = parseFloat(cells[2]?.textContent||'0') || 0;
+        const monthRemain = parseFloat(cells[6]?.textContent||'0') || 0;
+        remainLeave = prevRemain + monthRemain;
+      }
+    }
+    if (remainLeave > 0) {
+      const confirmed = confirm(`⚠ ${name} 직원의 잔여 휴무가 ${remainLeave}일 남아있습니다.\n\n퇴사일 전에 잔여 휴무를 스케줄에 모두 입력한 후 등록해주세요.\n\n[확인] 잔여 휴무 무시하고 그대로 등록\n[취소] 닫고 휴무 먼저 입력`);
+      if (!confirmed) return;
+    }
+
     if (!window.__retireList) window.__retireList = [];
     const existing = window.__retireList.find(r => r.id === id);
     if (existing) { existing.retireDate = retireDate; }
     else { window.__retireList.push({ id, name, store, retireDate }); }
+    // 편집 모드에서만 즉시 셀 비활성화
+    if (window.__schEditMode) applyRetireToSchedule(id, retireDate);
     renderRetirePanel();
     staffSel.value = '';
     dateInput.value = '';
@@ -7966,8 +7986,7 @@ async function renderRetirePanel() {
         ${leaveInfo}
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0;align-items:flex-start;padding-top:2px">
-        <button onclick="editRetireEntry(${i})" style="background:none;border:0.5px solid var(--crd);border-radius:5px;color:var(--ts);cursor:pointer;font-size:12px;padding:2px 6px" title="퇴사일 수정"><i class="ti ti-pencil"></i></button>
-        <button onclick="removeRetireEntry(${i})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:13px;padding:2px 4px" title="삭제"><i class="ti ti-x"></i></button>
+        <button onclick="editRetireEntry(${i})" style="background:none;border:0.5px solid var(--crd);border-radius:5px;color:var(--ts);cursor:pointer;font-size:12px;padding:2px 6px" title="퇴사일 수정"><i class="ti ti-pencil"></i> 날짜 수정</button>
       </div>
     </div>`;
   }).join('');
@@ -8021,11 +8040,11 @@ function applyRetireToSchedule(userId, retireDate) {
     const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     if (dateStr <= retireDate) continue;
 
-    // 메모리에서 해당 날짜 entry 삭제
+    // 메모리에서 해당 직원의 해당 날짜 entry만 삭제
     const key = userId + '_' + dateStr;
     delete curScheduleEntries[key];
 
-    // 편집모드: select 처리
+    // 편집모드: 해당 직원의 select만 처리 (querySelector는 이미 userId로 특정)
     const sel = tbody.querySelector(`select[data-staff="${userId}"][data-date="${dateStr}"]`);
     if (sel) {
       sel.value = '';
@@ -8034,30 +8053,10 @@ function applyRetireToSchedule(userId, retireDate) {
       sel.style.cursor = 'not-allowed';
       const td = sel.closest('td');
       if (td) { td.style.background = '#F0F0F0'; td.title = '퇴사 이후 날짜'; }
-    } else {
-      // 뷰모드: td 직접 회색 처리
-      // tr에서 해당 날짜의 td 찾기 (data-date 속성이 td에 없으므로 인덱스 기반)
-      const allRows = Array.from(tbody.rows);
-      allRows.forEach(tr => {
-        const staffSel = tr.querySelector(`select[data-staff="${userId}"]`);
-        const isThisRow = staffSel || (tr.dataset && tr.dataset.userId === userId);
-        // name cell로 판단: 첫 td의 텍스트에 직원명 포함
-        const tds = tr.querySelectorAll('td');
-        if (tds.length < 2) return;
-        // 날짜 열 인덱스: d번째 날짜는 d번째 데이터 td (첫 td는 이름)
-        const dateTd = tds[d]; // 이름 td가 0번, 날짜 td는 1~daysInMonth
-        // 해당 row가 이 직원인지 확인: 첫 td에 staff id data
-        const firstSel = tr.querySelector('select');
-        if (firstSel && firstSel.dataset.staff !== userId) return;
-        if (dateTd) {
-          dateTd.style.background = '#F0F0F0';
-          dateTd.title = '퇴사 이후 날짜';
-          const div = dateTd.querySelector('div');
-          if (div) div.innerHTML = '<span style="color:#CCCCCC;font-size:10px">-</span>';
-        }
-      });
     }
+    // 뷰모드에서는 DOM 직접 조작 안 함 — 메모리 삭제 후 renderBalancePanel에서 반영
   }
+
   updateDailyCountRow();
   if (document.getElementById('leaveBalanceTable')?.dataset.loaded) renderBalancePanel();
 }
@@ -8124,6 +8123,33 @@ function calcRetireLeave(retiree, year, month, retireDate, holSet, daysInMonth) 
   };
 }
 
+
+// 인원 순서 ↑↓ 이동
+function moveStaffRow(si, dir) {
+  const newIdx = si + dir;
+  if (newIdx < 0 || newIdx >= curScheduleStaff.length) return;
+  syncCellsToMemory();
+
+  // 배열 교체
+  const tmp = curScheduleStaff[si];
+  curScheduleStaff[si] = curScheduleStaff[newIdx];
+  curScheduleStaff[newIdx] = tmp;
+
+  // DOM 행 교체
+  const tbody = document.getElementById('schTbody');
+  if (!tbody) return;
+  const rows = Array.from(tbody.rows);
+  if (!rows[si] || !rows[newIdx]) return;
+  if (dir === -1) {
+    tbody.insertBefore(rows[si], rows[newIdx]);
+  } else {
+    tbody.insertBefore(rows[newIdx], rows[si]);
+  }
+  // si 갱신
+  Array.from(tbody.rows).forEach((row, i) => row.dataset.staffIdx = i);
+  updateDailyCountRow();
+}
+
 function removeStaffFromSchedule(idx) {
   if (!confirm('이 직원을 이번 달 스케줄 목록에서 제외할까요?')) return;
   // 현재 셀 값 저장
@@ -8175,11 +8201,14 @@ function appendStaffRow(staff, si) {
   const nameTd = document.createElement('td');
   nameTd.style.cssText = 'position:sticky;left:0;background:#fff;z-index:2;padding:4px 6px;font-size:12px;font-weight:600;border:0.5px solid var(--crd);white-space:nowrap;min-width:100px';
   nameTd.innerHTML = `
-    <div style="display:flex;align-items:center;gap:4px">
-      <span class="sch-drag-handle" style="cursor:grab;color:var(--th);font-size:15px;padding:2px 3px;flex-shrink:0;user-select:none" title="드래그하여 순서 변경">⠿</span>
-      <span style="flex:1">${staff.name} <span style="font-size:9px;color:${tagColor}">(${tag})</span></span>
+    <div style="display:flex;align-items:center;gap:2px">
+      <div style="display:flex;flex-direction:column;gap:0;flex-shrink:0">
+        <button onclick="moveStaffRow(${si},-1)" title="위로" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:9px;padding:0 1px;line-height:1.1">▲</button>
+        <button onclick="moveStaffRow(${si},1)" title="아래로" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:9px;padding:0 1px;line-height:1.1">▼</button>
+      </div>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${staff.name} <span style="font-size:9px;color:${tagColor}">(${tag})</span></span>
       <button onclick="removeExtraStaff(${si})" title="목록에서 제외"
-        style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:12px">✕</button>
+        style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:12px;flex-shrink:0">✕</button>
     </div>`;
   tr.appendChild(nameTd);
 
@@ -8284,12 +8313,15 @@ async function buildStaffRowWithCross(staff, si, daysInMonth, year, month, allCo
 
   let rowHtml = `<tr data-staff-idx="${si}" data-staff-id="${staff.id||''}" draggable="false">
     <td style="position:sticky;left:0;background:#fff;z-index:2;padding:4px 6px;font-size:12px;font-weight:600;border:0.5px solid var(--crd);white-space:nowrap;min-width:100px">
-      <div style="display:flex;align-items:center;gap:4px">
-        <span class="sch-drag-handle" style="cursor:grab;color:var(--th);font-size:15px;padding:2px 3px;flex-shrink:0;user-select:none" title="드래그하여 순서 변경">⠿</span>
-        <span style="flex:1">${staff.name}${staff.isExtra?' <span style="font-size:9px;color:var(--th)">(지원)</span>':''}</span>
+      <div style="display:flex;align-items:center;gap:2px">
+        <div style="display:flex;flex-direction:column;gap:0;flex-shrink:0">
+          <button onclick="moveStaffRow(${si},-1)" title="위로" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:9px;padding:0 1px;line-height:1.1">▲</button>
+          <button onclick="moveStaffRow(${si},1)" title="아래로" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:9px;padding:0 1px;line-height:1.1">▼</button>
+        </div>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${staff.name}${staff.isExtra?' <span style="font-size:9px;color:var(--th)">(지원)</span>':''}</span>
         ${!staff.isExtra
-          ? `<button onclick="removeStaffFromSchedule(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px" title="목록에서 제외">✕</button>`
-          : `<button onclick="removeExtraStaff(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px" title="지원인력 제외">✕</button>`}
+          ? `<button onclick="removeStaffFromSchedule(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px;flex-shrink:0" title="목록에서 제외">✕</button>`
+          : `<button onclick="removeExtraStaff(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px;flex-shrink:0" title="지원인력 제외">✕</button>`}
       </div>
     </td>`;
 
@@ -9305,7 +9337,9 @@ async function enterSchEditMode() {
   setTimeout(() => {
     registerCellMemoEvents();
     registerDragSort();
-  }, 150);
+    // 퇴사 예정자 셀 비활성화 재적용 (rebuildScheduleCells 후 DOM 새로 생성됨)
+    (window.__retireList||[]).forEach(r => applyRetireToSchedule(r.id, r.retireDate));
+  }, 200);
 }
 
 async function exitSchEditMode(skipConfirm = false) {
