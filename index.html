@@ -7173,11 +7173,8 @@ async function confirmDeleteSchedule(id, store, year, month) {
   alert(`"${label}" 삭제 완료`);
 
   // 목록 강제 새로고침
-  currentPage = 'schedules';
-  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-  const nb = document.getElementById('nav-schedules');
-  if (nb) nb.classList.add('active');
-  renderSchedules(document.getElementById('contentArea'));
+  curSchedule = null;
+  goPage('schedules');
 }
 
 async function goToScheduleEdit() {
@@ -7219,7 +7216,7 @@ async function renderScheduleEdit(area) {
 
   // 직원, 근무조코드, 휴무유형, 기존 entries, 휴무잔여 병렬 로드
   const [staffRes, shiftRes, leaveRes, entriesRes, balRes] = await Promise.all([
-    sb.from('users').select('id,name,store,role,employment_type,hire_date,retire_date,active').eq('store',store).order('name'),
+    sb.from('users').select('id,name,store,role,employment_type,hire_date,retire_date,active,pt_work_hours,pt_hours_per_day').eq('store',store).order('name'),
     sb.from('store_shift_codes').select('*').eq('store',store).eq('active',true).order('sort_order'),
     sb.from('leave_types').select('*').order('sort_order'),
     curSchedule ? sb.from('schedule_entries').select('*').eq('schedule_id', curSchedule.id) : Promise.resolve({data:[]}),
@@ -7277,7 +7274,7 @@ async function renderScheduleEdit(area) {
   const extraNames = [...new Set(entries.filter(e=>e.extra_name && !e.user_id).map(e=>e.extra_name))];
 
   curScheduleStaff = [
-    ...staffList.map(u=>({id:u.id, name:u.name, isExtra:false, hire_date:u.hire_date, retire_date:u.retire_date, employment_type:u.employment_type, pt_hours_per_day:u.pt_hours_per_day||null})),
+    ...staffList.map(u=>({id:u.id, name:u.name, isExtra:false, hire_date:u.hire_date, retire_date:u.retire_date, employment_type:u.employment_type, pt_work_hours:u.pt_work_hours||null, pt_hours_per_day:u.pt_hours_per_day||null})),
     ...extraStaffData,
     ...extraNames.map(n=>({id:null, extra_name:n, name:n, isExtra:true}))
   ];
@@ -7514,7 +7511,11 @@ async function renderScheduleEdit(area) {
     else updateDailyCountRow();
     restoreMemoCache();
     renderNewHirePanel();
-    if (window.__retireList?.length) renderRetirePanel();
+    if (window.__retireList?.length) {
+      renderRetirePanel();
+      // 재렌더 후 퇴사일 이후 셀 재비활성화
+      (window.__retireList||[]).forEach(r => applyRetireToSchedule(r.id, r.retireDate));
+    }
   }, 300);
 }
 
@@ -7898,6 +7899,62 @@ function editRetireEntry(idx) {
 }
 
 // 퇴사 비활성 셀 복원 (삭제/수정 시)
+
+// 퇴사일 이후 셀 비활성화 (편집모드: select 비활성 / 뷰모드: td 회색)
+function applyRetireToSchedule(userId, retireDate) {
+  if (!userId || !retireDate) return;
+  const year  = window.__schYear;
+  const month = window.__schMonth;
+  if (!year || !month) return;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const tbody = document.getElementById('schTbody');
+  if (!tbody) return;
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    if (dateStr <= retireDate) continue;
+
+    // 메모리에서 해당 날짜 entry 삭제
+    const key = userId + '_' + dateStr;
+    delete curScheduleEntries[key];
+
+    // 편집모드: select 처리
+    const sel = tbody.querySelector(`select[data-staff="${userId}"][data-date="${dateStr}"]`);
+    if (sel) {
+      sel.value = '';
+      sel.disabled = true;
+      sel.style.color = '#CCCCCC';
+      sel.style.cursor = 'not-allowed';
+      const td = sel.closest('td');
+      if (td) { td.style.background = '#F0F0F0'; td.title = '퇴사 이후 날짜'; }
+    } else {
+      // 뷰모드: td 직접 회색 처리
+      // tr에서 해당 날짜의 td 찾기 (data-date 속성이 td에 없으므로 인덱스 기반)
+      const allRows = Array.from(tbody.rows);
+      allRows.forEach(tr => {
+        const staffSel = tr.querySelector(`select[data-staff="${userId}"]`);
+        const isThisRow = staffSel || (tr.dataset && tr.dataset.userId === userId);
+        // name cell로 판단: 첫 td의 텍스트에 직원명 포함
+        const tds = tr.querySelectorAll('td');
+        if (tds.length < 2) return;
+        // 날짜 열 인덱스: d번째 날짜는 d번째 데이터 td (첫 td는 이름)
+        const dateTd = tds[d]; // 이름 td가 0번, 날짜 td는 1~daysInMonth
+        // 해당 row가 이 직원인지 확인: 첫 td에 staff id data
+        const firstSel = tr.querySelector('select');
+        if (firstSel && firstSel.dataset.staff !== userId) return;
+        if (dateTd) {
+          dateTd.style.background = '#F0F0F0';
+          dateTd.title = '퇴사 이후 날짜';
+          const div = dateTd.querySelector('div');
+          if (div) div.innerHTML = '<span style="color:#CCCCCC;font-size:10px">-</span>';
+        }
+      });
+    }
+  }
+  updateDailyCountRow();
+  if (document.getElementById('leaveBalanceTable')?.dataset.loaded) renderBalancePanel();
+}
+
 function restoreRetireCells(userId) {
   if (!userId) return;
   const tbody = document.getElementById('schTbody');
@@ -8397,8 +8454,17 @@ async function saveScheduleDraft() {
   window.__schHasPendingChanges = false;
   window.__schEditMode = false;
   alert('임시저장 완료!');
-  openScheduleById(scheduleId);
-  setTimeout(() => initBalancePanel(), 600);
+  // retireList 백업 (openScheduleById 재렌더 후 복원)
+  const _savedRetireList = window.__retireList ? [...window.__retireList] : [];
+  await openScheduleById(scheduleId);
+  window.__retireList = _savedRetireList;
+  setTimeout(() => {
+    initBalancePanel();
+    if (_savedRetireList.length) {
+      renderRetirePanel();
+      _savedRetireList.forEach(r => applyRetireToSchedule(r.id, r.retireDate));
+    }
+  }, 400);
 }
 
 // entries DB 반영 (전체 삭제 후 재삽입 — 단순하고 안전)
@@ -8702,6 +8768,112 @@ function updateRealtimeBalance() {
 }
 
 // 날짜별 근무 인원 합계 행 갱신
+
+// PT 일별 근무시간 조정 모달
+// 계약 근로시간을 못 채운 날짜의 실제 근무시간을 입력
+function openPtHoursAdjust(staffName, contractHours) {
+  const year  = window.__schYear;
+  const month = window.__schMonth;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const tbody = document.getElementById('schTbody');
+  if (!tbody) return;
+
+  // 해당 직원의 근무일 목록 수집 (shift 코드가 있는 날)
+  const staffSels = tbody.querySelectorAll(`select[data-date]`);
+  // 직원 이름으로 id 찾기
+  const staffRow = Array.from(tbody.rows).find(r => {
+    const nameEl = r.querySelector('td span');
+    return nameEl && nameEl.textContent.includes(staffName);
+  });
+  if (!staffRow) { alert('해당 직원 행을 찾을 수 없습니다.'); return; }
+  const userId = staffRow.querySelector('select')?.dataset.staff;
+  if (!userId) return;
+
+  // 근무일 (shift 코드가 입력된 날) 목록
+  const workDates = [];
+  for (let d=1; d<=daysInMonth; d++) {
+    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const key = userId + '_' + dateStr;
+    const entry = curScheduleEntries[key];
+    const sel = tbody.querySelector(`select[data-staff="${userId}"][data-date="${dateStr}"]`);
+    const val = sel?.value || entry?.shift_code || entry?.entry_type || '';
+    // shift 코드면 근무일
+    const isShift = val && !['휴무','대휴','연차','반차','오전반차','오후반차','공가','경조','결근','무급휴가',''].includes(val);
+    if (isShift) workDates.push({dateStr, val, adjustedH: entry?.adjusted_hours || null});
+  }
+
+  if (!workDates.length) { alert('이번 달 근무 입력된 날이 없습니다.'); return; }
+
+  const old = document.getElementById('ptAdjustModal');
+  if (old) old.remove();
+
+  const rows = workDates.map(({dateStr, val, adjustedH}) => `
+    <tr>
+      <td style="padding:5px 8px;font-size:12px">${dateStr.slice(5)}</td>
+      <td style="padding:5px 8px;font-size:12px;color:var(--ts)">${val}</td>
+      <td style="padding:5px 8px">
+        <div style="display:flex;align-items:center;gap:5px">
+          <input type="number" class="form-input" data-date="${dateStr}"
+            value="${adjustedH !== null ? adjustedH : contractHours}"
+            min="0.5" max="${contractHours}" step="0.5"
+            style="width:70px;padding:4px 8px;font-size:12px"/>
+          <span style="font-size:11px;color:var(--th)">h</span>
+          ${adjustedH !== null && adjustedH !== contractHours
+            ? `<span style="font-size:10px;color:var(--rd)">조정됨</span>` : ''}
+        </div>
+      </td>
+    </tr>`).join('');
+
+  const m = document.createElement('div');
+  m.id = 'ptAdjustModal';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:300;display:flex;align-items:center;justify-content:center';
+  m.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:22px;width:min(95vw,420px);max-height:85vh;overflow-y:auto">
+      <div style="font-size:15px;font-weight:600;color:var(--tm);margin-bottom:4px">
+        <i class="ti ti-clock-edit"></i> PT 일별 근무시간 조정
+      </div>
+      <div style="font-size:12px;color:var(--th);margin-bottom:14px">
+        ${staffName} · 계약 ${contractHours}h/일<br>
+        계약 시간보다 짧게 근무한 날짜의 실제 시간을 입력하세요.
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="background:var(--crm)">
+            <th style="padding:5px 8px;font-size:11px;text-align:left">날짜</th>
+            <th style="padding:5px 8px;font-size:11px;text-align:left">근무조</th>
+            <th style="padding:5px 8px;font-size:11px;text-align:left">실근무(h)</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button class="btn-cancel-sm" onclick="document.getElementById('ptAdjustModal').remove()">취소</button>
+        <button class="btn-submit" onclick="savePtHoursAdjust('${userId}',${contractHours})">
+          <i class="ti ti-device-floppy"></i> 저장
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+}
+
+function savePtHoursAdjust(userId, contractHours) {
+  const m = document.getElementById('ptAdjustModal');
+  if (!m) return;
+  const inputs = m.querySelectorAll('input[data-date]');
+  inputs.forEach(inp => {
+    const dateStr = inp.dataset.date;
+    const hours = parseFloat(inp.value);
+    const key = userId + '_' + dateStr;
+    if (curScheduleEntries[key]) {
+      curScheduleEntries[key].adjusted_hours = (hours !== contractHours) ? hours : null;
+    }
+  });
+  m.remove();
+  window.__schHasPendingChanges = true;
+  renderBalancePanel();
+  alert('일별 근무시간이 반영되었습니다. 임시저장 후 적용됩니다.');
+}
+
 function updateDailyCountRow() {
   const tbody   = document.getElementById('schTbody');
   const footRow = document.getElementById('dailyCountRow');
@@ -8804,13 +8976,16 @@ async function renderBalancePanel() {
   const LEAVE_ONLY = new Set(['휴무','대휴']);
   const ANNUAL_SET = new Set(['연차','오전반차','오후반차','반차']);
 
-  // DOM 실시간 집계
+  // 집계: select(편집모드) 또는 curScheduleEntries(뷰모드) 우선 사용
   const rows = staffList.map(staff => {
     let workDays=0, leaveDays=0, annualUsed=0, totalFilled=0;
     for (let d=1; d<=daysInMonth; d++) {
       const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const key = staff.id + '_' + dateStr;
+      // 편집모드: select 우선 / 뷰모드: 메모리 entry 사용
       const sel = tbody?.querySelector(`select[data-staff="${staff.id}"][data-date="${dateStr}"]`);
-      const val = sel?.value || '';
+      const val = sel?.value !== undefined ? sel.value
+        : (curScheduleEntries[key]?.shift_code || curScheduleEntries[key]?.entry_type || '');
       if (!val) continue;
       totalFilled++;
       const half = val==='오전반차'||val==='오후반차'||val==='반차';
@@ -8835,10 +9010,27 @@ async function renderBalancePanel() {
     const annualTotal  = autoDays + (alb.adjust||0);
     const annualRemain = annualTotal - (alb.init_used||0) - (alb.expire_used||0) - (todayUsedMap[staff.id]||0);
 
-    // PT 직원 처리
-    const isPT    = staff.employment_type === 'parttime';
-    const ptHours = staff.pt_hours_per_day || 0;
-    const workHours = isPT ? Math.round(workDays * ptHours * 10) / 10 : 0;
+    // PT 직원 처리 — 실제 근무시간 합산 (adjusted_hours 우선)
+    const isPT        = staff.employment_type === 'parttime';
+    const ptContractH = staff.pt_work_hours || staff.pt_hours_per_day || 0;
+    let workHours = 0;
+    if (isPT) {
+      for (let d=1; d<=daysInMonth; d++) {
+        const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const key = staff.id + '_' + dateStr;
+        const sel = tbody?.querySelector(`select[data-staff="${staff.id}"][data-date="${dateStr}"]`);
+        const val = sel?.value !== undefined ? sel.value
+          : (curScheduleEntries[key]?.shift_code || curScheduleEntries[key]?.entry_type || '');
+        const NON_WORK_PT = new Set(['휴무','대휴','결근','공가','경조','연차','오전반차','오후반차','반차','무급휴가','']);
+        if (!NON_WORK_PT.has(val) && val) {
+          // adjusted_hours가 있으면 사용, 없으면 계약시간
+          const adj = curScheduleEntries[key]?.adjusted_hours;
+          workHours += (adj != null ? adj : ptContractH);
+        }
+      }
+      workHours = Math.round(workHours * 10) / 10;
+    }
+    const ptHours = ptContractH;
     return { name:staff.name, workDays, leaveDays, annualUsed, annualRemain,
              totalFilled, carryIn, carryUsed, carryOut, baseQuota, baseUsed, baseRemain,
              isPT, ptHours, workHours };
@@ -8876,6 +9068,7 @@ async function renderBalancePanel() {
       ${isPT ? `
         <td colspan="6" style="padding:5px 8px;text-align:center;font-size:10px;color:var(--th);border-left:0.5px solid var(--crd)">
           PT (계약 ${r.ptHours}h/일)
+          ${r.ptHours ? `<button onclick="openPtHoursAdjust('${r.name}',${r.ptHours})" style="margin-left:4px;background:none;border:0.5px solid var(--crd);border-radius:4px;font-size:9px;padding:1px 5px;cursor:pointer;color:var(--ts)" title="일별 근무시간 조정"><i class="ti ti-adjustments-horizontal"></i></button>` : ''}
         </td>
         <td style="padding:5px 8px;text-align:center;font-size:11px;border-left:0.5px solid var(--crd)">
           <span style="font-size:11px;font-weight:600;color:var(--bl)">${r.workHours}h</span>
