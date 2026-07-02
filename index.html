@@ -986,6 +986,8 @@ function copyAcctGuide() {
 
 async function loginAs(user) {
   currentUser = user;
+  // 최종 로그인 일시 업데이트 (비동기, 오류 무시)
+  sb.from('users').update({last_login_at: new Date().toISOString()}).eq('id', user.id).then(() => {});
   // 마지막 로그인 일시 기록 (비동기, 실패해도 로그인 진행)
   sb.from('users').update({ last_login_at: new Date().toISOString() }).eq('id', user.id).then(()=>{});
   document.getElementById('loginScreen').style.display = 'none';
@@ -7146,25 +7148,43 @@ async function renderSchedules(area) {
 async function confirmDeleteSchedule(id, store, year, month) {
   const label = `${store} ${year}년 ${month}월 스케줄`;
 
-  // 1단계: 본인 비밀번호 확인
+  // 1단계: 비밀번호 확인
   const pw = prompt(`[삭제 확인] "${label}"\n\n본인 비밀번호를 입력하세요.`);
-  if (pw === null) return; // 취소
+  if (pw === null) return;
   if (pw !== currentUser.password_hash) {
     alert('비밀번호가 일치하지 않습니다.');
     return;
   }
 
   // 2단계: 최종 확인
-  if (!confirm(`"${label}"을 삭제합니까?\n삭제하면 모든 스케줄 내용이 사라지며 복구할 수 없습니다.`)) return;
+  if (!confirm(`"${label}"을 삭제합니까?\n삭제하면 복구할 수 없습니다.`)) return;
 
-  // 연쇄 삭제 (오류 무시 후 최종 schedules 삭제)
-  await sb.from('schedule_entries').delete().eq('schedule_id', id);
-  await sb.from('schedule_leave_balance').delete().eq('schedule_id', id);
-  await sb.from('schedule_history').delete().eq('schedule_id', id);
+  // 존재 여부 확인
+  const { data: chk } = await sb.from('schedules').select('id').eq('id', id).maybeSingle();
+  if (!chk) { alert('이미 삭제된 스케줄이거나 접근 권한이 없습니다.'); goPage('schedules'); return; }
 
-  const { error: eFinal } = await sb.from('schedules').delete().eq('id', id);
-  if (eFinal) {
-    alert('삭제 오류: ' + eFinal.message + '\n\n관리자에게 문의하세요.');
+  // 연쇄 삭제 — 각 테이블 개별 처리
+  const del = async (table, col) => {
+    try { await sb.from(table).delete().eq(col, id); } catch(e) {}
+  };
+  await del('schedule_entries',      'schedule_id');
+  await del('schedule_leave_balance','schedule_id');
+  await del('schedule_history',      'schedule_id');
+
+  const { error, count } = await sb.from('schedules').delete().eq('id', id);
+  if (error) {
+    // RLS 정책으로 막히면 권한 오류 — Supabase에서 직접 설정 필요
+    const msg = error.message.includes('policy')
+      ? `삭제 권한 오류\nSupabase 대시보드 → Authentication → RLS 정책에서\nschedules 테이블의 DELETE 정책을 확인하세요.\n\n오류: ${error.message}`
+      : `삭제 오류: ${error.message}`;
+    alert(msg);
+    return;
+  }
+
+  // 삭제 성공 확인
+  const { data: still } = await sb.from('schedules').select('id').eq('id', id).maybeSingle();
+  if (still) {
+    alert('삭제가 적용되지 않았습니다.\nSupabase RLS 정책에서 DELETE 권한을 허용해주세요.');
     return;
   }
 
@@ -7858,17 +7878,38 @@ async function renderRetirePanel() {
     const retireD = r.retireDate; // YYYY-MM-DD
     const retireInMonth = retireD >= monthStart && retireD <= monthEnd;
 
-    // 퇴사일이 이번 달에 포함된 경우 휴무 계산
+    // 직원 정보 조회 (PT 여부 + 연차)
+    const staffInfo  = curScheduleStaff.find(s => s.id === r.id) || {};
+    const isPT       = staffInfo.employment_type === 'parttime';
+    const ptWorkH    = staffInfo.pt_work_hours || 0;
+    const ptBreakMin = staffInfo.pt_break_minutes != null ? staffInfo.pt_break_minutes : 30;
+    const ptTotalH   = ptWorkH ? (ptWorkH + ptBreakMin/60).toFixed(1) : '-';
+
     let leaveInfo = '';
     if (retireInMonth) {
-      const result = calcRetireLeave(r, year, month, retireD, holSet, daysInM);
-      leaveInfo = `
-        <div style="font-size:11px;color:var(--ts);margin-top:5px;line-height:1.8">
-          퇴사일: <strong>${retireD}</strong> &nbsp;|&nbsp;
-          실근무 기간 내 주말/공휴일: <strong>${result.offDays}일</strong>
-          (= 당월 휴무 발생 기준)
-          ${result.note ? `<br><span style="color:var(--th)">${result.note}</span>` : ''}
-        </div>`;
+      if (isPT) {
+        // PT: 휴무 기준 없이 계약 조건 + 연차만 표시
+        const today = new Date().toISOString().slice(0,10);
+        const { days: annualDays } = calcAnnualLeave(staffInfo.hire_date, today);
+        leaveInfo = `
+          <div style="font-size:11px;color:var(--ts);margin-top:5px;line-height:1.8">
+            퇴사일: <strong>${retireD}</strong>
+            &nbsp;|&nbsp; 계약 근로시간: <strong>${ptWorkH}h</strong>
+            &nbsp;|&nbsp; 총 체류시간: <strong>${ptTotalH}h</strong>
+            &nbsp;|&nbsp; 발생 연차: <strong>${annualDays}일</strong>
+            <span style="font-size:10px;color:var(--th);display:block;margin-top:2px">※ PT 직원은 실근무 기반 휴무 발생 없음</span>
+          </div>`;
+      } else {
+        // 정규직: 실근무 기간 주말/공휴일 = 휴무 발생 기준
+        const result = calcRetireLeave(r, year, month, retireD, holSet, daysInM);
+        leaveInfo = `
+          <div style="font-size:11px;color:var(--ts);margin-top:5px;line-height:1.8">
+            퇴사일: <strong>${retireD}</strong> &nbsp;|&nbsp;
+            실근무 기간 내 주말/공휴일: <strong>${result.offDays}일</strong>
+            (= 당월 휴무 발생 기준)
+            ${result.note ? `<br><span style="color:var(--th)">${result.note}</span>` : ''}
+          </div>`;
+      }
     } else {
       leaveInfo = `<div style="font-size:11px;color:var(--th);margin-top:4px">퇴사일: <strong>${retireD}</strong> (이번 달 외)</div>`;
     }
@@ -8810,16 +8851,13 @@ function openPtHoursAdjust(staffName, contractHours) {
   const tbody = document.getElementById('schTbody');
   if (!tbody) return;
 
-  // 해당 직원의 근무일 목록 수집 (shift 코드가 있는 날)
-  const staffSels = tbody.querySelectorAll(`select[data-date]`);
-  // 직원 이름으로 id 찾기
-  const staffRow = Array.from(tbody.rows).find(r => {
-    const nameEl = r.querySelector('td span');
-    return nameEl && nameEl.textContent.includes(staffName);
-  });
-  if (!staffRow) { alert('해당 직원 행을 찾을 수 없습니다.'); return; }
-  const userId = staffRow.querySelector('select')?.dataset.staff;
-  if (!userId) return;
+  // curScheduleStaff에서 직원 id 직접 조회 (뷰모드에서도 동작)
+  const staffObj = curScheduleStaff.find(s => s.name === staffName || s.name.startsWith(staffName));
+  if (!staffObj || !staffObj.id) {
+    alert(`"${staffName}" 직원 정보를 찾을 수 없습니다.\n집계 새로고침 후 다시 시도해주세요.`);
+    return;
+  }
+  const userId = staffObj.id;
 
   // 근무일 (shift 코드가 입력된 날) 목록
   const workDates = [];
@@ -9100,7 +9138,7 @@ async function renderBalancePanel() {
       ${isPT ? `
         <td colspan="6" style="padding:5px 8px;text-align:center;font-size:10px;color:var(--th);border-left:0.5px solid var(--crd)">
           PT (계약 ${r.ptHours}h/일)
-          ${r.ptHours ? `<button onclick="openPtHoursAdjust('${r.name}',${r.ptHours})" style="margin-left:4px;background:none;border:0.5px solid var(--crd);border-radius:4px;font-size:9px;padding:1px 5px;cursor:pointer;color:var(--ts)" title="일별 근무시간 조정"><i class="ti ti-adjustments-horizontal"></i></button>` : ''}
+          ${r.ptHours ? `<button onclick="openPtHoursAdjust('${r.name}',${r.ptHours})" style="margin-left:4px;background:none;border:0.5px solid var(--crd);border-radius:4px;font-size:9px;padding:1px 5px;cursor:pointer;color:var(--ts)" title="일별 근무시간 조정"><i class="ti ti-adjustments-horizontal"></i> 시간조정</button>` : ''}
         </td>
         <td style="padding:5px 8px;text-align:center;font-size:11px;border-left:0.5px solid var(--crd)">
           <span style="font-size:11px;font-weight:600;color:var(--bl)">${r.workHours}h</span>
