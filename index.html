@@ -6046,7 +6046,191 @@ async function renderReqDetail(area) {
       '<div class="section-label">신청 내용</div>' +
       '<div style="margin-bottom:6px">' + contentHtml + '</div>' +
       attHtml + rejectHtml + manageHtml + viewerHtml +
+      '<div id="reqCommentSection"></div>' +
     '</div>';
+
+  // 댓글 섹션 로드
+  await renderReqComments(r.id);
+}
+
+
+// ═══════════════════════════════════════════
+// 업무신청 댓글 + 인원 태그 기능
+// ═══════════════════════════════════════════
+async function renderReqComments(reqId) {
+  const sec = document.getElementById('reqCommentSection');
+  if (!sec) return;
+
+  // 댓글 로드 (request_comments 테이블)
+  const { data: comments } = await sb.from('request_comments')
+    .select('*, author:users!request_comments_author_id_fkey(name,store,role)')
+    .eq('request_id', reqId)
+    .order('created_at', {ascending: true});
+
+  const cmtHtml = (comments||[]).map(c => {
+    const isMine = c.author_id === currentUser.id;
+    const tags   = Array.isArray(c.tagged_users) ? c.tagged_users : [];
+    const tagBadge = tags.length
+      ? `<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px">
+          ${tags.map(t => `<span style="background:var(--blb);color:var(--bl);border-radius:10px;padding:1px 8px;font-size:10px">@${t.name}</span>`).join('')}
+         </div>` : '';
+    return `
+      <div style="padding:10px 12px;border-bottom:0.5px solid var(--crd);background:${isMine?'var(--crm)':'#fff'}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span style="font-size:12px;font-weight:600;color:var(--tm)">${c.author?.name||'?'}</span>
+          <span style="font-size:10px;color:var(--th)">${c.author?.store||''}</span>
+          <span style="font-size:10px;color:var(--th);margin-left:auto">${(c.created_at||'').slice(0,16).replace('T',' ')}</span>
+        </div>
+        <div style="font-size:13px;color:var(--tm);white-space:pre-wrap;line-height:1.6">${c.content||''}</div>
+        ${tagBadge}
+      </div>`;
+  }).join('') || '<div style="padding:16px;text-align:center;font-size:12px;color:var(--th)">댓글이 없습니다.</div>';
+
+  sec.innerHTML = `
+    <div style="border-top:0.5px solid var(--crd);margin-top:16px;padding-top:14px">
+      <div class="section-label">댓글 <span style="font-size:11px;font-weight:400;color:var(--th)">(인원 태그로 액션 지시 가능)</span></div>
+      <div style="border:0.5px solid var(--crd);border-radius:10px;overflow:hidden;margin-bottom:10px;background:#fff">
+        ${cmtHtml}
+      </div>
+
+      <!-- 댓글 입력 -->
+      <div style="background:var(--crm);border-radius:10px;padding:12px">
+        <textarea id="reqCmtInput_${reqId}" rows="3" class="form-input"
+          placeholder="댓글 내용 입력... @이름 입력으로 인원 태그 (태그된 인원에게 알림 발송)"
+          style="margin-bottom:8px;resize:vertical"
+          oninput="reqCmtAtTrigger(this, ${reqId})"></textarea>
+
+        <!-- 태그 후보 드롭다운 -->
+        <div id="reqCmtAtMenu_${reqId}"
+          style="display:none;position:absolute;background:#fff;border:0.5px solid var(--crd);border-radius:8px;max-height:180px;overflow-y:auto;z-index:50;min-width:200px;box-shadow:0 4px 16px rgba(0,0,0,.12)">
+        </div>
+
+        <!-- 태그된 인원 뱃지 -->
+        <div id="reqCmtTags_${reqId}" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:11px;color:var(--th)">@이름 입력으로 인원 태그 → 알림 발송</span>
+          <button class="btn-submit" onclick="submitReqComment(${reqId})" style="padding:7px 18px">
+            <i class="ti ti-send"></i> 등록
+          </button>
+        </div>
+      </div>
+    </div>`;
+
+  window.__reqCmtTags = window.__reqCmtTags || {};
+  window.__reqCmtTags[reqId] = window.__reqCmtTags[reqId] || [];
+  renderReqCmtTagBadges(reqId);
+}
+
+// @ 트리거 — 인원 드롭다운 표시
+let _reqCmtTimer = null;
+function reqCmtAtTrigger(ta, reqId) {
+  clearTimeout(_reqCmtTimer);
+  _reqCmtTimer = setTimeout(async () => {
+    const val   = ta.value;
+    const atPos = val.lastIndexOf('@');
+    if (atPos < 0) { hideReqCmtMenu(reqId); return; }
+    const query = val.slice(atPos + 1);
+    if (query.length < 1) { hideReqCmtMenu(reqId); return; }
+
+    const users = (window.__assignable||[]).filter(u =>
+      u.name.includes(query) || (u.store||'').includes(query)
+    ).slice(0, 10);
+
+    const menu = document.getElementById(`reqCmtAtMenu_${reqId}`);
+    if (!menu) return;
+    if (!users.length) { menu.style.display = 'none'; return; }
+
+    menu.innerHTML = users.map(u =>
+      `<div onclick="selectReqCmtTag(${reqId},'${u.id}','${u.name}','${u.store||''}')"
+        style="padding:8px 12px;cursor:pointer;font-size:12px;display:flex;gap:8px;align-items:center"
+        onmouseover="this.style.background='var(--crm)'" onmouseout="this.style.background=''">
+        <span style="font-weight:600">${u.name}</span>
+        <span style="color:var(--th);font-size:11px">${u.store||''}</span>
+      </div>`
+    ).join('');
+    menu.style.display = 'block';
+    // 입력창 기준 위치
+    const rect = ta.getBoundingClientRect();
+    menu.style.top  = (rect.bottom + window.scrollY + 2) + 'px';
+    menu.style.left = (rect.left  + window.scrollX)    + 'px';
+  }, 200);
+}
+
+function hideReqCmtMenu(reqId) {
+  const m = document.getElementById(`reqCmtAtMenu_${reqId}`);
+  if (m) m.style.display = 'none';
+}
+
+function selectReqCmtTag(reqId, userId, name, store) {
+  if (!window.__reqCmtTags) window.__reqCmtTags = {};
+  if (!window.__reqCmtTags[reqId]) window.__reqCmtTags[reqId] = [];
+  // 중복 방지
+  if (!window.__reqCmtTags[reqId].find(t => t.id === userId)) {
+    window.__reqCmtTags[reqId].push({id: userId, name, store});
+  }
+  // 입력창에서 @query 제거
+  const ta = document.getElementById(`reqCmtInput_${reqId}`);
+  if (ta) {
+    const atPos = ta.value.lastIndexOf('@');
+    if (atPos >= 0) ta.value = ta.value.slice(0, atPos) + `@${name} `;
+  }
+  hideReqCmtMenu(reqId);
+  renderReqCmtTagBadges(reqId);
+}
+
+function removeReqCmtTag(reqId, userId) {
+  if (!window.__reqCmtTags?.[reqId]) return;
+  window.__reqCmtTags[reqId] = window.__reqCmtTags[reqId].filter(t => t.id !== userId);
+  renderReqCmtTagBadges(reqId);
+}
+
+function renderReqCmtTagBadges(reqId) {
+  const el = document.getElementById(`reqCmtTags_${reqId}`);
+  if (!el) return;
+  const tags = window.__reqCmtTags?.[reqId] || [];
+  el.innerHTML = tags.map(t =>
+    `<span style="background:var(--blb);color:var(--bl);border-radius:12px;padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:5px">
+      @${t.name} <span style="font-size:10px;color:var(--th)">${t.store}</span>
+      <button onclick="removeReqCmtTag(${reqId},'${t.id}')"
+        style="background:none;border:none;cursor:pointer;color:var(--bl);font-size:11px;padding:0">✕</button>
+    </span>`
+  ).join('');
+}
+
+async function submitReqComment(reqId) {
+  const ta   = document.getElementById(`reqCmtInput_${reqId}`);
+  const text = ta?.value.trim();
+  if (!text) { alert('댓글 내용을 입력해주세요.'); return; }
+
+  const tags = window.__reqCmtTags?.[reqId] || [];
+
+  const { error } = await sb.from('request_comments').insert({
+    request_id:   reqId,
+    author_id:    currentUser.id,
+    content:      text,
+    tagged_users: tags.length ? tags : null,
+    created_at:   new Date().toISOString()
+  });
+  if (error) { alert('등록 오류: ' + error.message); return; }
+
+  // 태그된 인원에게 알림 발송
+  if (tags.length) {
+    const { data: req } = await sb.from('requests').select('title').eq('id', reqId).single();
+    const msg = `[업무신청 태그] "${req?.title||'업무신청'}" 댓글에 회원님이 태그되었습니다. 확인해주세요.`;
+    for (const t of tags) {
+      await createNotification(t.id, 'req_comment_tag', reqId, 'request', msg);
+    }
+    updateNotifDot();
+  }
+
+  // 입력 초기화
+  if (ta) ta.value = '';
+  window.__reqCmtTags[reqId] = [];
+  renderReqCmtTagBadges(reqId);
+
+  // 댓글 목록 새로고침
+  await renderReqComments(reqId);
 }
 
 // 열람 권한 부여 (교육 등 목적)
