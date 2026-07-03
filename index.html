@@ -502,11 +502,11 @@ textarea.form-input{min-height:120px;resize:vertical}
       <label class="form-label">슬랙 멤버 ID <span style="color:var(--th);font-weight:400">(선택 — 개인 DM 알림용)</span></label>
       <input class="form-input" id="slackMemberId" placeholder="예: U012AB3CD" />
       <div style="font-size:11px;color:var(--th);margin-top:5px;line-height:1.6;background:var(--cr);border-radius:7px;padding:8px 10px">
-        📱 <strong>멤버 ID 확인 방법</strong><br>
-        슬랙 앱 → 본인 프로필 사진 탭<br>
-        → <strong>프로필 보기</strong> → 점 세 개(...) 메뉴<br>
-        → <strong>멤버 ID 복사</strong> (U로 시작하는 영문+숫자)<br>
-        <span style="color:var(--th)">입력 시 공지 등록 때 개인 슬랙 DM으로도 알림이 옵니다.</span>
+        📱 <strong>슬랙 멤버 ID 확인 방법</strong><br>
+        슬랙 앱 → 본인 프로필 클릭<br>
+        → <strong>다음으로 보기</strong> 우측 <strong>···</strong> 클릭<br>
+        → <strong>멤버 ID 복사</strong> (U로 시작하는 8자리)<br>
+        <span style="color:var(--th)">등록 후 공지·업무신청·스케줄 알림이 슬랙 개인 DM으로도 옵니다.</span>
       </div>
     </div>
 
@@ -3585,21 +3585,22 @@ async function renderNotifSettings(area) {
     <div class="notif-card">
       <div class="section-label" style="margin-bottom:10px">알림 채널</div>
       <div class="setting-row">
-        <div><div class="setting-title"><i class="ti ti-brand-slack" style="font-size:15px;vertical-align:-2px;margin-right:5px"></i>Slack 웹훅 알림<span class="badge-free">무료</span></div>
-          <div class="setting-sub">기존 Slack 채널로 새 공지 자동 발송</div></div>
+        <div><div class="setting-title"><i class="ti ti-brand-slack" style="font-size:15px;vertical-align:-2px;margin-right:5px"></i>Slack 채널 웹훅 알림<span class="badge-free">무료</span></div>
+          <div class="setting-sub">Slack 채널에 새 공지 자동 발송 (Incoming Webhook URL)</div></div>
         <button class="toggle-switch${ns?.slack_enabled?' on':''}" id="ts-slack" onclick="this.classList.toggle('on')"></button>
       </div>
       <div style="padding:10px 0;border-bottom:0.5px solid var(--crd)">
         <label class="form-label">Slack Webhook URL</label>
         <!-- 슬랙 Bot Token — DM 개인 알림 -->
-        <label class="form-label" style="margin-top:10px"><i class="ti ti-brand-slack"></i> 슬랙 Bot Token <span style="font-size:10px;background:var(--bl);color:#fff;border-radius:4px;padding:1px 7px;margin-left:6px">개인 DM 알림</span></label>
+        <label class="form-label" style="margin-top:10px"><i class="ti ti-brand-slack"></i> 봇 유저 OAuth 토큰 <span style="font-size:10px;background:var(--bl);color:#fff;border-radius:4px;padding:1px 7px;margin-left:6px">개인 DM 알림</span></label>
         <input class="form-input" id="slackBotToken" type="password"
           value="${ns?.slack_bot_token||''}"
-          placeholder="xoxb-xxxxxxxxxx-xxxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx"
+          placeholder="xoxb-..."
           style="margin-bottom:4px;font-family:monospace"/>
         <div style="font-size:11px;color:var(--th);margin-bottom:12px;line-height:1.6">
-          api.slack.com/apps → 앱 선택 → OAuth &amp; Permissions → Bot User OAuth Token 복사<br>
-          필요 권한: chat:write, im:write &nbsp;|&nbsp; 직원별 슬랙 멤버 ID(U로 시작) 등록 필요
+          api.slack.com/apps → 앱 선택 → <strong>OAuth &amp; Permissions</strong> → Bot User OAuth Token (xoxb-...) 복사<br>
+          필요 권한: <code>chat:write</code>, <code>im:write</code> &nbsp;|&nbsp;
+          직원 인원현황에서 슬랙 멤버 ID(U로 시작 8자리) 등록 필요
         </div>
 
         <label class="form-label"><i class="ti ti-link"></i> 스케줄 Sheets 웹훅 URL</label>
@@ -4300,7 +4301,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-07-03';   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-07-04';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -12423,9 +12424,9 @@ async function sendSlackDM(slackMemberId, msg) {
         'Authorization': 'Bearer ' + ns.slack_bot_token
       },
       body: JSON.stringify({
-        channel: slackMemberId,  // U로 시작하는 멤버 ID → DM으로 자동 전환
+        channel: slackMemberId,
         text:    msg,
-        unfurl_links: false
+        unfurl_links: true  // 링크 미리보기 활성화
       })
     });
   } catch(e) {
@@ -12436,11 +12437,17 @@ async function sendSlackDM(slackMemberId, msg) {
 // createNotification 이후 슬랙 DM도 함께 발송하는 wrapper
 async function createNotificationWithSlack(userId, type, refId, refType, msg) {
   await createNotification(userId, type, refId, refType, msg);
-  // 해당 직원의 slack_member_id 조회 후 DM 발송
   const { data: u } = await sb.from('users')
     .select('slack_member_id').eq('id', userId).maybeSingle();
   if (u?.slack_member_id) {
-    await sendSlackDM(u.slack_member_id, '🔔 ' + msg);
+    // refType에 따라 딥링크 생성
+    const BASE = 'https://bnzcoffee.github.io/bonanza-ops/';
+    let link = BASE;
+    if (refType === 'post')    link = BASE + '?post='     + refId;
+    if (refType === 'request') link = BASE + '?request='  + refId;
+    if (refType === 'schedule')link = BASE + '?schedule=' + refId;
+    const dmMsg = '🔔 ' + msg + '\n' + link;
+    await sendSlackDM(u.slack_member_id, dmMsg);
   }
 }
 
