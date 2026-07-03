@@ -4618,7 +4618,7 @@ const REQ_STATUS = {
   done: {label:'처리 완료', bg:'#EAF4EE', fg:'#2D6A4F'},
   rejected: {label:'반려', bg:'#FAF0EE', fg:'#A0291E'}
 };
-let reqTab = 'mine';      // mine(우리매장/내파트) | in_progress | done | rejected
+let reqTab = 'active';      // mine(우리매장/내파트) | in_progress | done | rejected
 let reqSearchQ = '';
 let curReq = null;
 
@@ -5697,9 +5697,12 @@ async function renderRequests(area) {
   let visible = (reqs||[]).filter(canSeeReq);
 
   // 탭 필터
-  if (reqTab === 'in_progress') visible = visible.filter(r => r.status === 'in_progress');
+  if (reqTab === 'active') visible = visible.filter(r => r.status !== 'done' && r.status !== 'rejected');  // 접수+진행중
+  else if (reqTab === 'all') { /* 전체 표시 */ }
+  else if (reqTab === 'in_progress') visible = visible.filter(r => r.status === 'in_progress');
   else if (reqTab === 'done') visible = visible.filter(r => r.status === 'done');
   else if (reqTab === 'rejected') visible = visible.filter(r => r.status === 'rejected');
+  // 'all': 필터 없음
 
   // 검색 (제목 + form_data 내부 값)
   if (reqSearchQ) {
@@ -5726,14 +5729,17 @@ async function renderRequests(area) {
     const due = r.due_date ? (' · 완료 예정 ' + r.due_date) : '';
     const isNew = new Date(r.created_at) >= reqWeek;
     const newBadge = isNew ? '<span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 6px;background:#E8C07A;color:#3B2314">NEW</span>' : '';
-    return '<div class="post-card" onclick="openReqById(' + r.id + ')">' +
+    const isDone = r.status === 'done';
+    const cardStyle = isDone ? 'opacity:0.55;background:#F5F5F5;' : '';
+    const doneStamp = isDone ? '<span style="font-size:10px;color:var(--th);margin-left:auto">완료 ' + (r.done_date||'') + '</span>' : '';
+    return '<div class="post-card" onclick="openReqById(' + r.id + ')" style="' + cardStyle + '">' +
       '<div class="post-card-top">' +
         '<span style="font-size:9px;font-weight:700;border-radius:8px;padding:2px 8px;background:#EAF0FA;color:#1A4B7A">' + typeName + '</span>' +
-        '<span class="post-title-txt">' + r.title + '</span>' +
+        '<span class="post-title-txt"' + (isDone ? ' style="text-decoration:line-through;color:var(--th)"' : '') + '>' + r.title + '</span>' +
         newBadge +
         '<span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:' + st.bg + ';color:' + st.fg + '">' + st.label + '</span>' +
       '</div>' +
-      '<div class="post-meta"><span>' + r.store + '</span><span>신청 ' + fmtDate(r.created_at) + due + '</span></div>' +
+      '<div class="post-meta"><span>' + r.store + '</span><span>신청 ' + fmtDate(r.created_at) + due + '</span>' + doneStamp + '</div>' +
     '</div>';
   }).join('') : '<div style="text-align:center;padding:40px;color:var(--th)">해당하는 신청이 없습니다.</div>';
 
@@ -5745,7 +5751,7 @@ async function renderRequests(area) {
     '<div class="page-sub">' + scopeLabel + ' 기준으로 신청 내역을 확인합니다</div></div>' +
     myStatCard +
     '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">' +
-      tabBtn('mine','전체') + tabBtn('in_progress','진행 중') + tabBtn('done','완료') + tabBtn('rejected','반려') +
+      tabBtn('active','📋 접수+진행중') + tabBtn('all','전체') + tabBtn('done','완료') + tabBtn('rejected','반려') +
       '<div style="margin-left:auto">' + newBtn + '</div>' +
     '</div>' +
     '<div class="search-box" style="margin-bottom:12px"><i class="ti ti-search" style="color:var(--th)"></i>' +
@@ -6143,10 +6149,13 @@ function reqCmtAtTrigger(ta, reqId) {
 
     menu.innerHTML = users.map(u =>
       `<div onclick="selectReqCmtTag(${reqId},'${u.id}','${u.name}','${u.store||''}')"
-        style="padding:8px 12px;cursor:pointer;font-size:12px;display:flex;gap:8px;align-items:center"
+        style="padding:8px 12px;cursor:pointer;font-size:12px;display:flex;gap:10px;align-items:center;border-bottom:0.5px solid var(--crd)"
         onmouseover="this.style.background='var(--crm)'" onmouseout="this.style.background=''">
-        <span style="font-weight:600">${u.name}</span>
-        <span style="color:var(--th);font-size:11px">${u.store||''}</span>
+        <div>
+          <span style="font-weight:600;color:var(--tm)">${u.name}</span>
+          <span style="font-size:10px;color:#fff;background:var(--brm);border-radius:4px;padding:1px 5px;margin-left:4px">${u.store||''}</span>
+        </div>
+        <span style="font-size:10px;color:var(--th);margin-left:auto">${u.role||''}</span>
       </div>`
     ).join('');
     menu.style.display = 'block';
