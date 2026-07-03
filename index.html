@@ -61,6 +61,13 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--cr);color:var(
 .nav-btn:hover{background:var(--cr)}
 .nav-btn.active{background:var(--crm);color:var(--br);font-weight:600}
 .nav-btn i{font-size:15px;width:18px;text-align:center}
+/* 토글 스위치 (feature flags 모달용) */
+.switch{position:relative;display:inline-block;width:40px;height:22px}
+.switch input{opacity:0;width:0;height:0}
+.switch .slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:22px;transition:.2s}
+.switch .slider:before{position:absolute;content:'';height:16px;width:16px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s}
+.switch input:checked + .slider{background:var(--gn)}
+.switch input:checked + .slider:before{transform:translateX(18px)}
 .nav-new{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:var(--gd);color:var(--br);font-size:9px;font-weight:700;border-radius:10px;padding:2px 5px}
 .sidebar-footer{margin-top:auto;padding:10px 14px;border-top:0.5px solid var(--crd);font-size:11px;color:var(--th)}
 
@@ -1071,6 +1078,7 @@ async function loadCats() {
   renderCatNav();
   goPage('all');
   updateNotifDot();
+  loadFeatureFlags();  // 기능 표시/숨김 적용
 }
 
 function visibleCats() {
@@ -1204,6 +1212,12 @@ function canWrite() {
 
 // ── PAGES ─────────────────────────────────────────
 function goPage(page) {
+  // 숨겨진 기능 접근 방지 (총괄/부총괄/운영팀 제외)
+  const hiddenKeys = ['requests','reqarchive','reports','interviews','handover','repairs','schedules','attendance','manual'];
+  if (hiddenKeys.includes(page) && !isFeatureEnabled(page)) {
+    alert('이 기능은 현재 준비 중입니다.');
+    return;
+  }
   if (window.innerWidth <= 768) closeSidebar();
   currentPage = page;
   const area = document.getElementById('contentArea');
@@ -4158,6 +4172,121 @@ async function loadNotifyStoreOptions(postId) {
   });
 }
 
+
+// ═══════════════════════════════════════════
+// 기능 표시/숨김 (Feature Flags)
+// 관리자가 준비 전 기능을 숨기고, 준비 완료 후 공개할 때 사용
+// ═══════════════════════════════════════════
+window.__featureFlags = {};
+
+async function loadFeatureFlags() {
+  const { data } = await sb.from('feature_flags').select('*');
+  window.__featureFlags = {};
+  (data||[]).forEach(f => { window.__featureFlags[f.feature_key] = f.enabled !== false; });
+  applyFeatureFlagsToUI();
+}
+
+// 총괄만 볼 수 있는 기능은 별도 표시
+function isFeatureEnabled(key) {
+  // 총괄/부총괄/운영팀은 숨김 상태에서도 볼 수 있음 (테스트 목적)
+  const isAdminUser = currentUser?.is_master || currentUser?.is_vice_master || currentUser?.role === 'admin';
+  if (isAdminUser) return true;
+  // 명시적으로 false가 아니면 기본 표시
+  return window.__featureFlags[key] !== false;
+}
+
+function applyFeatureFlagsToUI() {
+  // 메뉴 버튼 표시/숨김
+  const menuMap = {
+    'requests':    'nav-requests',
+    'reqarchive':  'nav-reqarchive',
+    'reports':     'nav-reports',
+    'interviews':  'nav-interviews',
+    'handover':    'nav-handover',
+    'repairs':     'nav-repairs',
+    'schedules':   'nav-schedules',
+    'attendance':  'nav-attendance',
+    'manual':      'nav-manual'
+  };
+  Object.entries(menuMap).forEach(([key, id]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const enabled = isFeatureEnabled(key);
+    el.style.display = enabled ? '' : 'none';
+    if (!enabled) el.setAttribute('data-hidden-feature','true');
+  });
+}
+
+// 관리자용 — 기능 표시/숨김 설정 화면
+async function openFeatureFlagsAdmin() {
+  if (!currentUser?.is_master) { alert('총괄만 접근 가능합니다.'); return; }
+  const FEATURES = [
+    {key:'requests',    label:'업무 신청',   desc:'매장에서 운영팀에 신청'},
+    {key:'reqarchive',  label:'완료 내역',   desc:'처리 완료된 업무 신청'},
+    {key:'reports',     label:'업무 보고',   desc:'매장 업무 보고 (준비 중)'},
+    {key:'interviews',  label:'직원 면담',   desc:'면담 기록 관리'},
+    {key:'handover',    label:'매장 인수인계', desc:'매장 인수인계 문서'},
+    {key:'repairs',     label:'보수 내역',   desc:'매장 보수 이력'},
+    {key:'schedules',   label:'매장 스케줄', desc:'월간 스케줄 편성'},
+    {key:'attendance',  label:'근태 마감',   desc:'인사팀 근태 확인'},
+    {key:'manual',      label:'사용 설명서', desc:'앱 사용법'}
+  ];
+
+  await loadFeatureFlags();
+  const old = document.getElementById('featureFlagsModal');
+  if (old) old.remove();
+
+  const rows = FEATURES.map(f => {
+    const enabled = window.__featureFlags[f.key] !== false;
+    return `<tr>
+      <td style="padding:8px 10px;font-size:13px;font-weight:600;color:var(--tm)">${f.label}</td>
+      <td style="padding:8px 10px;font-size:11px;color:var(--th)">${f.desc}</td>
+      <td style="padding:8px 10px;text-align:center">
+        <label class="switch">
+          <input type="checkbox" ${enabled?'checked':''} onchange="setFeatureFlag('${f.key}', this.checked)"/>
+          <span class="slider"></span>
+        </label>
+        <div style="font-size:10px;color:${enabled?'var(--gn)':'var(--rd)'};margin-top:2px">${enabled?'표시':'숨김'}</div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const m = document.createElement('div');
+  m.id = 'featureFlagsModal';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:300;display:flex;align-items:center;justify-content:center';
+  m.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:22px;width:min(95vw,540px);max-height:85vh;overflow-y:auto">
+      <div style="font-size:15px;font-weight:600;color:var(--tm);margin-bottom:6px">
+        <i class="ti ti-eye-off"></i> 메뉴 표시 관리
+      </div>
+      <div style="font-size:11px;color:var(--th);margin-bottom:14px;line-height:1.6">
+        준비 중인 기능을 숨기고, 준비 완료 후 공개할 수 있습니다.<br>
+        숨김 처리해도 데이터는 유지되며, 매뉴얼에서도 자동으로 숨겨집니다.<br>
+        <strong>총괄·부총괄·운영팀은</strong> 숨김 상태에서도 접근할 수 있어 테스트가 가능합니다.
+      </div>
+      <table style="width:100%;border-collapse:collapse;background:var(--cr);border-radius:8px;overflow:hidden">
+        <thead>
+          <tr style="background:var(--crm)">
+            <th style="padding:8px 10px;font-size:11px;text-align:left">메뉴</th>
+            <th style="padding:8px 10px;font-size:11px;text-align:left">설명</th>
+            <th style="padding:8px 10px;font-size:11px;text-align:center">표시</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button class="btn-cancel-sm" onclick="document.getElementById('featureFlagsModal').remove()">닫기</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+}
+
+async function setFeatureFlag(key, enabled) {
+  await sb.from('feature_flags').upsert({feature_key: key, enabled}, {onConflict: 'feature_key'});
+  window.__featureFlags[key] = enabled;
+  applyFeatureFlagsToUI();
+}
+
 async function createNotification(userId, type, refId, refType, message) {
   if (!userId) return;
   const { error } = await sb.from('notifications').insert({
@@ -4376,6 +4505,14 @@ async function renderAppSettings(area){
       <div class="section-label" style="margin-bottom:10px">시스템 정보</div>
       <div class="setting-row"><div><div class="setting-title">마지막 업데이트</div><div class="setting-sub">${APP_UPDATED_AT?fmtDateTime(APP_UPDATED_AT):'-'}</div></div></div>
       <div class="setting-row"><div><div class="setting-title">데이터베이스</div><div class="setting-sub">Supabase (한국 리전)</div></div></div>
+      ${currentUser.is_master ? `
+      <div class="setting-row" onclick="openFeatureFlagsAdmin()" style="cursor:pointer">
+        <div>
+          <div class="setting-title"><i class="ti ti-eye-off"></i> 메뉴 표시 관리</div>
+          <div class="setting-sub">준비 중인 기능을 숨기고 준비 완료 후 공개할 수 있습니다</div>
+        </div>
+        <div style="color:var(--br)"><i class="ti ti-chevron-right"></i></div>
+      </div>` : ''}
       <div class="setting-row"><div><div class="setting-title">호스팅</div><div class="setting-sub">GitHub Pages — bnzcoffee.github.io/bonanza-ops</div></div></div>
     </div>
     ${hasPerm('cat_manage_full') ? `<div class="notif-card" style="margin-bottom:12px">
@@ -8021,6 +8158,34 @@ function onCellChange(sel) {
   }
 
   // PT 직원 근무조 시간 체크
+  // ── 정규직 대휴 입력 검증 (전월 이월 잔여 있어야만 입력 가능) ──
+  if (val === '대휴' && userId) {
+    const staffInfo0 = curScheduleStaff.find(s => s.id === userId);
+    if (staffInfo0 && staffInfo0.employment_type !== 'parttime') {
+      // curScheduleStaff에 carryIn 정보가 있으면 확인
+      const carryIn = window.__leaveBalanceMap?.[userId]?.carryIn || 0;
+      // 이미 이 스케줄에 입력된 대휴 개수
+      let usedCarry = 0;
+      const year  = window.__schYear;
+      const month = window.__schMonth;
+      const daysInMonth = new Date(year, month, 0).getDate();
+      for (let d = 1; d <= daysInMonth; d++) {
+        const ds = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const k  = userId + '_' + ds;
+        const otherSel = tbody?.querySelector(`select[data-staff="${userId}"][data-date="${ds}"]`);
+        const otherVal = otherSel?.value !== undefined ? otherSel.value
+          : (curScheduleEntries[k]?.shift_code || curScheduleEntries[k]?.entry_type || '');
+        if (otherVal === '대휴' && ds !== date) usedCarry++;
+      }
+      if (carryIn - usedCarry < 1) {
+        const prev = curScheduleEntries[key];
+        sel.value = prev?._rawCode || prev?.entry_type || prev?.shift_code || '';
+        alert(`⚠ ${staffInfo0.name} 직원의 전월 휴무 이월 잔여가 없습니다.\n\n이월 잔여: ${carryIn - usedCarry}일 (원래 ${carryIn}일 · 이번 달 이미 사용 ${usedCarry}일)\n\n대휴는 전월 잔여 휴무가 있을 때만 입력할 수 있습니다.\n일반 휴무(오프)로 변경하거나 인사팀에 문의하세요.`);
+        return;
+      }
+    }
+  }
+
   if (val && userId) {
     const staffInfo = curScheduleStaff.find(s => s.id === userId);
     if (staffInfo && staffInfo.employment_type === 'parttime' && staffInfo.pt_hours_per_day) {
@@ -8036,7 +8201,9 @@ function onCellChange(sel) {
         if (Math.abs(shiftTotalH - contractTotalH) > 0.5) {
           const prev = curScheduleEntries[key];
           sel.value = prev?._rawCode || prev?.entry_type || prev?.shift_code || '';
-          alert(`PT 직원 ${staffInfo.name}의 총 체류시간은 ${contractTotalH}시간입니다.\n(계약 근로 ${contractWorkH}h + 휴게 ${Math.round(breakH*60)}분)\n\n선택한 근무조 "${val}"의 총 시간(${shiftTotalH}h)과 일치하지 않아 입력이 제한됩니다.\n총 체류시간에 맞는 근무조를 선택하거나 인사팀에 문의하세요.`);
+          const breakMin = Math.round(Math.abs(breakH) * 60);
+          const sign     = breakH < 0 ? '⚠ 계산 오류 (인사팀 문의 필요)' : `계약 근로 ${contractWorkH}h + 휴게 ${breakMin}분`;
+          alert(`PT 직원 ${staffInfo.name}의 총 체류시간은 ${contractTotalH}시간입니다.\n(${sign})\n\n선택한 근무조 "${val}"의 총 시간(${shiftTotalH}h)과 일치하지 않아 입력이 제한됩니다.\n총 체류시간에 맞는 근무조를 선택하거나 인사팀에 문의하세요.`);
           return;
         }
       }
@@ -8155,7 +8322,12 @@ function addExtraStaff() {
     syncCellsToMemory();
     // 퇴사예정은 별도 목록에 저장 (스케줄 행에 추가하지 않음)
     // 잔여 휴무 확인
-    const balTable = document.getElementById('leaveBalanceTable');
+    // 대휴 검증용 balance map 저장
+  window.__leaveBalanceMap = {};
+  rows.forEach(r => {
+    if (r.userId) window.__leaveBalanceMap[r.userId] = {carryIn: r.carryIn||0};
+  });
+  const balTable = document.getElementById('leaveBalanceTable');
     let remainLeave = 0;
     if (balTable) {
       const staffIdx = curScheduleStaff.findIndex(s => s.id === id);
@@ -9574,7 +9746,7 @@ async function renderBalancePanel() {
       workHours = Math.round(workHours * 10) / 10;
     }
     const ptHours = ptContractH;
-    return { name:staff.name, workDays, leaveDays, annualUsed, annualRemain,
+    return { userId:staff.id, name:staff.name, workDays, leaveDays, annualUsed, annualRemain,
              totalFilled, carryIn, carryUsed, carryOut, baseQuota, baseUsed, baseRemain,
              isPT, ptHours, workHours };
   });
