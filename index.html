@@ -3591,6 +3591,18 @@ async function renderNotifSettings(area) {
       </div>
       <div style="padding:10px 0;border-bottom:0.5px solid var(--crd)">
         <label class="form-label">Slack Webhook URL</label>
+        <!-- 슬랙 Bot Token — DM 개인 알림 -->
+        <label class="form-label" style="margin-top:10px"><i class="ti ti-brand-slack"></i> 슬랙 Bot Token <span style="font-size:10px;background:var(--bl);color:#fff;border-radius:4px;padding:1px 7px;margin-left:6px">개인 DM 알림</span></label>
+        <input class="form-input" id="slackBotToken" type="password"
+          value="${ns?.slack_bot_token||''}"
+          placeholder="xoxb-xxxxxxxxxx-xxxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx"
+          style="margin-bottom:4px;font-family:monospace"/>
+        <div style="font-size:11px;color:var(--th);margin-bottom:12px;line-height:1.6">
+          api.slack.com/apps → 앱 선택 → OAuth &amp; Permissions → Bot User OAuth Token 복사<br>
+          필요 권한: chat:write, im:write &nbsp;|&nbsp; 직원별 슬랙 멤버 ID(U로 시작) 등록 필요
+        </div>
+
+        <label class="form-label"><i class="ti ti-link"></i> 스케줄 Sheets 웹훅 URL</label>
         <input class="form-input" id="slackUrl" value="${ns?.slack_webhook_url||''}" placeholder="https://hooks.slack.com/services/..." />
       </div>
       <div class="setting-row">
@@ -3671,6 +3683,7 @@ async function saveNotifSettings() {
     pwa_enabled: document.getElementById('ts-pwa').classList.contains('on'),
     remind_unread: document.getElementById('ts-remind').classList.contains('on'),
     remind_target: window.__remindTarget || 'unread',
+    slack_bot_token:   document.getElementById('slackBotToken')?.value.trim() || null,
     slack_webhook_url: document.getElementById('slackUrl').value.trim(),
     updated_at: new Date().toISOString()
   }).eq('id', ns.id);
@@ -12392,6 +12405,45 @@ async function savePartWebhook(id) {
 }
 
 // 슬랙 웹훅으로 알림 발송 (no-cors)
+// ═══════════════════════════════════════════
+// 슬랙 Bot Token DM 발송
+// users.slack_member_id (U로 시작하는 슬랙 멤버 ID)가 있으면 DM 발송
+// ═══════════════════════════════════════════
+async function sendSlackDM(slackMemberId, msg) {
+  if (!slackMemberId) return;
+  const { data: ns } = await sb.from('notification_settings')
+    .select('slack_bot_token').single();
+  if (!ns?.slack_bot_token) return;
+
+  try {
+    await fetch('https://slack.com/api/chat.postMessage', {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json; charset=utf-8',
+        'Authorization': 'Bearer ' + ns.slack_bot_token
+      },
+      body: JSON.stringify({
+        channel: slackMemberId,  // U로 시작하는 멤버 ID → DM으로 자동 전환
+        text:    msg,
+        unfurl_links: false
+      })
+    });
+  } catch(e) {
+    console.warn('슬랙 DM 오류:', e);
+  }
+}
+
+// createNotification 이후 슬랙 DM도 함께 발송하는 wrapper
+async function createNotificationWithSlack(userId, type, refId, refType, msg) {
+  await createNotification(userId, type, refId, refType, msg);
+  // 해당 직원의 slack_member_id 조회 후 DM 발송
+  const { data: u } = await sb.from('users')
+    .select('slack_member_id').eq('id', userId).maybeSingle();
+  if (u?.slack_member_id) {
+    await sendSlackDM(u.slack_member_id, '🔔 ' + msg);
+  }
+}
+
 // 스케줄용 슬랙 알림 — notification_settings.slack_webhook_url 자동 사용
 async function sendScheduleSlackNotify(text) {
   try {
