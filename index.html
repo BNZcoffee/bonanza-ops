@@ -4357,15 +4357,44 @@ function isFeatureEnabled(key) {
 
 function applyFeatureFlagsToUI() {
   const isAdminUser = currentUser?.is_master || currentUser?.is_vice_master || currentUser?.role === 'admin';
+
+  // 섹션(div) 단위 숨김
+  const sectionMap = {
+    'sec_requests':  'requestNav',
+    'sec_reports':   'interviewNav',
+    'sec_schedule':  'scheduleNav'
+  };
+  Object.entries(sectionMap).forEach(([key, id]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const flagEnabled = window.__featureFlags[key] !== false;
+    if (flagEnabled) {
+      el.style.display = '';
+      el.style.opacity = '';
+    } else if (isAdminUser) {
+      el.style.display = '';
+      el.style.opacity = '0.5';
+      const lbl = el.querySelector('.sidebar-label');
+      if (lbl && !lbl.textContent.includes('(숨김)')) lbl.textContent += ' (숨김)';
+    } else {
+      el.style.display = 'none';
+    }
+  });
+
+  // 개별 메뉴 버튼
   const menuMap = {
     'requests':    'nav-requests',
     'reqarchive':  'nav-reqarchive',
+    'reqstats':    'nav-reqstats',
+    'reqtypes':    'nav-reqtypes',
     'reports':     'nav-reports',
     'interviews':  'nav-interviews',
     'handover':    'nav-handover',
     'repairs':     'nav-repairs',
     'schedules':   'nav-schedules',
+    'sch_confirm': 'nav-sch-confirm',
     'attendance':  'nav-attendance',
+    'leave_settings':'nav-leave-settings',
     'manual':      'nav-manual'
   };
   Object.entries(menuMap).forEach(([key, id]) => {
@@ -4405,28 +4434,51 @@ function applyFeatureFlagsToUI() {
 // 관리자용 — 기능 표시/숨김 설정 화면
 async function openFeatureFlagsAdmin() {
   if (!currentUser?.is_master) { alert('총괄만 접근 가능합니다.'); return; }
+
+  // DB에서 최신 상태 로드
+  await loadFeatureFlags();
+
+  // 카테고리(섹션) + 세부 메뉴 각각 제어
   const FEATURES = [
-    {key:'requests',    label:'업무 신청',   desc:'매장에서 운영팀에 신청'},
-    {key:'reqarchive',  label:'완료 내역',   desc:'처리 완료된 업무 신청'},
-    {key:'reports',     label:'업무 보고',   desc:'매장 업무 보고'},
-    {key:'interviews',  label:'직원 면담',   desc:'면담 기록 관리'},
-    {key:'handover',    label:'매장 인수인계', desc:'매장 인수인계 문서'},
-    {key:'repairs',     label:'보수 내역',   desc:'매장 보수 이력'},
-    {key:'schedules',   label:'매장 스케줄', desc:'월간 스케줄 편성'},
-    {key:'attendance',  label:'근태 마감',   desc:'인사팀 근태 확인'},
-    {key:'manual',      label:'사용 설명서', desc:'앱 사용법'}
+    {key:'sec_requests',  label:'── 업무 신청 ──', desc:'섹션 전체', isSection:true},
+    {key:'requests',      label:'  업무 신청',      desc:'매장에서 운영팀에 신청'},
+    {key:'reqarchive',    label:'  완료 내역',      desc:'처리 완료된 업무 신청'},
+    {key:'reqstats',      label:'  처리 통계',      desc:'업무 신청 처리 현황'},
+    {key:'reqtypes',      label:'  신청 유형 관리', desc:'신청 유형 설정'},
+    {key:'sec_reports',   label:'── 업무 보고 ──', desc:'섹션 전체', isSection:true},
+    {key:'reports',       label:'  업무 보고',      desc:'매장 업무 보고'},
+    {key:'interviews',    label:'  직원 면담',      desc:'면담 기록 관리'},
+    {key:'handover',      label:'  매장 인수인계',  desc:'매장 인수인계 문서'},
+    {key:'repairs',       label:'  보수 내역',      desc:'매장 보수 이력'},
+    {key:'sec_schedule',  label:'── 스케줄 관리 ──', desc:'섹션 전체', isSection:true},
+    {key:'schedules',     label:'  매장 스케줄',    desc:'월간 스케줄 편성'},
+    {key:'sch_confirm',   label:'  컨펌 대기 목록', desc:'운영팀 컨펌 대기'},
+    {key:'attendance',    label:'  근태 마감 현황', desc:'인사팀 근태 확인'},
+    {key:'leave_settings',label:'  휴무 기준 설정', desc:'휴무 일수 기준'},
+    {key:'manual',        label:'  사용 설명서',    desc:'앱 사용법'}
   ];
 
-  await loadFeatureFlags();
   const old = document.getElementById('featureFlagsModal');
   if (old) old.remove();
 
   const rows = FEATURES.map(f => {
     const enabled = window.__featureFlags[f.key] !== false;
+    if (f.isSection) {
+      return `<tr style="background:var(--crm)">
+        <td colspan="2" style="padding:10px;font-size:12px;font-weight:700;color:var(--br)">${f.label}</td>
+        <td style="padding:8px 10px;text-align:center">
+          <label class="switch">
+            <input type="checkbox" ${enabled?'checked':''} onchange="toggleSection('${f.key}', this.checked, this)"/>
+            <span class="slider"></span>
+          </label>
+          <div style="font-size:10px;color:${enabled?'var(--gn)':'var(--rd)'};margin-top:2px">${enabled?'전체 표시':'전체 숨김'}</div>
+        </td>
+      </tr>`;
+    }
     return `<tr>
-      <td style="padding:8px 10px;font-size:13px;font-weight:600;color:var(--tm)">${f.label}</td>
-      <td style="padding:8px 10px;font-size:11px;color:var(--th)">${f.desc}</td>
-      <td style="padding:8px 10px;text-align:center">
+      <td style="padding:6px 10px 6px 24px;font-size:13px;color:var(--tm)">${f.label}</td>
+      <td style="padding:6px 10px;font-size:11px;color:var(--th)">${f.desc}</td>
+      <td style="padding:6px 10px;text-align:center">
         <label class="switch">
           <input type="checkbox" ${enabled?'checked':''} onchange="setFeatureFlag('${f.key}', this.checked, this)"/>
           <span class="slider"></span>
@@ -4464,6 +4516,36 @@ async function openFeatureFlagsAdmin() {
       </div>
     </div>`;
   document.body.appendChild(m);
+}
+
+
+// 섹션 토글 — 하위 메뉴 일괄 ON/OFF
+async function toggleSection(sectionKey, enabled, checkbox) {
+  const sectionMap = {
+    'sec_requests':  ['requests','reqarchive','reqstats','reqtypes'],
+    'sec_reports':   ['reports','interviews','handover','repairs'],
+    'sec_schedule':  ['schedules','sch_confirm','attendance','leave_settings']
+  };
+  const children = sectionMap[sectionKey] || [];
+
+  if (!enabled) {
+    const ok = confirm('이 섹션의 모든 메뉴를 숨기시겠습니까?\n\n숨김 처리해도 데이터는 유지되며, 총괄·부총괄·운영팀은 계속 접근 가능합니다.');
+    if (!ok) { if (checkbox) checkbox.checked = true; return; }
+  }
+
+  // 섹션 자체 저장
+  await sb.from('feature_flags').upsert({feature_key: sectionKey, enabled, updated_at: new Date().toISOString()}, {onConflict: 'feature_key'});
+  window.__featureFlags[sectionKey] = enabled;
+
+  // 하위 메뉴 일괄 변경
+  for (const key of children) {
+    await sb.from('feature_flags').upsert({feature_key: key, enabled, updated_at: new Date().toISOString()}, {onConflict: 'feature_key'});
+    window.__featureFlags[key] = enabled;
+  }
+
+  applyFeatureFlagsToUI();
+  // 모달 갱신
+  openFeatureFlagsAdmin();
 }
 
 async function setFeatureFlag(key, enabled, checkbox) {
@@ -4629,7 +4711,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-07-04';   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-07-05';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -8114,7 +8196,7 @@ async function renderScheduleEdit(area) {
           </button>` : ''}
         <!-- 컨펌/재컨펌 요청: 편집 모드에서 표시 -->
         ${canEdit ? `
-          <button id="btnSchConfirmReq" onclick="requestScheduleReconfirm()"
+          <button id="btnSchConfirmReq" onclick="openReconfirmModal()"
             style="display:none;background:var(--gn);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer">
             <i class="ti ti-send"></i> ${!curSchedule || curSchedule.status==='draft' ? '컨펌 요청' : '재컨펌 요청'}
           </button>` : ''}
@@ -9323,7 +9405,9 @@ async function saveScheduleDraft() {
 
   // 임시저장: 히스토리 미기록, 편집 모드 유지
   window.__schHasPendingChanges = false;
-  alert('내용이 저장되었습니다.\n\n재컨펌 요청 후 승인을 받아야 확정됩니다.\n(재컨펌 요청 없이 페이지를 나가면 최종 컨펌본으로 복원됩니다)');
+  if (!window.__suppressSaveAlert) {
+    alert('내용이 저장되었습니다.\n\n컨펌 요청 후 승인을 받아야 확정됩니다.');
+  }
 
   // 집계 패널 갱신
   const _savedRetireList = window.__retireList ? [...window.__retireList] : [];
@@ -10083,6 +10167,85 @@ async function initBalancePanel() {
 
 // [작성 완료] — 임시저장 + 편집 모드 종료
 // 이후 [컨펌 요청] 버튼으로 제출
+
+// ═══════════════════════════════════════════
+// [재컨펌 요청] 모달 — 수정 사유 입력 후 제출
+// ═══════════════════════════════════════════
+function openReconfirmModal() {
+  const old = document.getElementById('reconfirmModal');
+  if (old) old.remove();
+
+  const isNewDraft = !curSchedule || curSchedule.status === 'draft';
+  const title = isNewDraft ? '컨펌 요청' : '재컨펌 요청';
+
+  const m = document.createElement('div');
+  m.id = 'reconfirmModal';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:300;display:flex;align-items:center;justify-content:center';
+  m.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:22px;width:min(95vw,480px)">
+      <div style="font-size:15px;font-weight:600;color:var(--tm);margin-bottom:6px">
+        <i class="ti ti-send" style="color:var(--gn)"></i> ${title}
+      </div>
+      <div style="font-size:12px;color:var(--th);margin-bottom:12px;line-height:1.6">
+        ${window.__schStore} ${window.__schYear}년 ${window.__schMonth}월 스케줄을 ${title}합니다.<br>
+        ${isNewDraft ? '승인 후 최종본으로 확정됩니다.' : '수정 내용과 사유를 입력해주세요. 승인 후 최종본이 갱신됩니다.'}
+      </div>
+      <textarea id="reconfirmMemo" class="form-input" rows="4"
+        placeholder="${isNewDraft ? '특이사항이 있으면 입력해주세요 (선택)' : '예: 8/12 홍길동 연차 → 휴무 변경 / 신규 입사자 추가 반영'}"
+        style="width:100%;margin-bottom:12px;resize:vertical"></textarea>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn-cancel-sm" onclick="document.getElementById('reconfirmModal').remove()">취소</button>
+        <button class="btn-submit" onclick="submitReconfirm()" style="background:var(--gn)">
+          <i class="ti ti-send"></i> ${title}
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+  document.getElementById('reconfirmMemo')?.focus();
+}
+
+async function submitReconfirm() {
+  const memo = document.getElementById('reconfirmMemo')?.value.trim();
+  const isNewDraft = !curSchedule || curSchedule.status === 'draft';
+  const label = isNewDraft ? '컨펌 요청' : '재컨펌 요청';
+
+  if (!isNewDraft && !memo) {
+    alert('수정 사유를 입력해주세요.');
+    return;
+  }
+
+  document.getElementById('reconfirmModal')?.remove();
+
+  // 먼저 임시저장 (alert 표시 억제)
+  window.__suppressSaveAlert = true;
+  await saveScheduleDraft();
+  window.__suppressSaveAlert = false;
+  if (!curSchedule) return;
+
+  // 상태를 requested로 변경 + 메모 저장
+  await sb.from('schedules').update({
+    status: 'requested',
+    requested_at: new Date().toISOString(),
+    reconfirm_memo: memo || null
+  }).eq('id', curSchedule.id);
+
+  // 히스토리 기록 (컨펌 요청만 기록)
+  await saveScheduleHistory(curSchedule.id, label + (memo ? ': ' + memo : ''));
+
+  // 운영팀(컨펌 담당)에게 알림
+  const { data: admins } = await sb.from('users').select('id')
+    .eq('role','admin').eq('active',true);
+  const notifMsg = '[스케줄 ' + label + '] ' + window.__schStore + ' ' + window.__schYear + '년 ' + window.__schMonth + '월' + (memo ? ' — ' + memo : '');
+  for (const a of (admins||[])) {
+    await createNotificationWithSlack(a.id, 'schedule_confirm_req', curSchedule.id, 'schedule', notifMsg);
+  }
+  updateNotifDot();
+
+  alert(label + '이 완료되었습니다.\n운영팀 승인을 기다려주세요.');
+  window.__schEditMode = false;
+  await openScheduleById(curSchedule.id);
+}
+
 async function finishScheduleEdit() {
   // finishScheduleEdit은 더 이상 사용하지 않음
   // 임시저장은 saveScheduleDraftQuiet, 컨펌은 requestScheduleReconfirm
