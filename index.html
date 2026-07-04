@@ -4395,7 +4395,7 @@ function applyFeatureFlagsToUI() {
     'sch_confirm': 'nav-sch-confirm',
     'attendance':  'nav-attendance',
     'leave_settings':'nav-leave-settings',
-    'manual':      'nav-manual'
+    // manual은 항상 표시 — Feature Flags 대상 아님
   };
   Object.entries(menuMap).forEach(([key, id]) => {
     const el = document.getElementById(id);
@@ -4454,9 +4454,10 @@ async function openFeatureFlagsAdmin() {
     {key:'schedules',     label:'  매장 스케줄',    desc:'월간 스케줄 편성'},
     {key:'sch_confirm',   label:'  컨펌 대기 목록', desc:'운영팀 컨펌 대기'},
     {key:'attendance',    label:'  근태 마감 현황', desc:'인사팀 근태 확인'},
-    {key:'leave_settings',label:'  휴무 기준 설정', desc:'휴무 일수 기준'},
-    {key:'manual',        label:'  사용 설명서',    desc:'앱 사용법'}
+    {key:'leave_settings',label:'  휴무 기준 설정', desc:'휴무 일수 기준'}
   ];
+  // 사용 설명서는 항상 표시 (Feature Flags 대상 아님)
+  // 숨겨진 기능의 매뉴얼 내용은 manual_sections에서 자동 필터
 
   const old = document.getElementById('featureFlagsModal');
   if (old) old.remove();
@@ -4529,43 +4530,45 @@ async function toggleSection(sectionKey, enabled, checkbox) {
   const children = sectionMap[sectionKey] || [];
 
   if (!enabled) {
-    const ok = confirm('이 섹션의 모든 메뉴를 숨기시겠습니까?\n\n숨김 처리해도 데이터는 유지되며, 총괄·부총괄·운영팀은 계속 접근 가능합니다.');
+    const ok = confirm('이 섹션의 모든 메뉴를 숨기시겠습니까?\n\n숨김 처리해도 데이터는 유지됩니다.\n총괄·부총괄·운영팀은 숨김 상태에서도 접근 가능합니다.');
     if (!ok) { if (checkbox) checkbox.checked = true; return; }
   }
 
-  // 섹션 자체 저장
-  await sb.from('feature_flags').upsert({feature_key: sectionKey, enabled, updated_at: new Date().toISOString()}, {onConflict: 'feature_key'});
-  window.__featureFlags[sectionKey] = enabled;
-
-  // 하위 메뉴 일괄 변경
-  for (const key of children) {
-    await sb.from('feature_flags').upsert({feature_key: key, enabled, updated_at: new Date().toISOString()}, {onConflict: 'feature_key'});
+  // 섹션 + 하위 메뉴 일괄 저장
+  const allKeys = [sectionKey, ...children];
+  for (const key of allKeys) {
+    // 기존 행 있는지 확인 후 insert 또는 update
+    const { data: existing } = await sb.from('feature_flags').select('feature_key').eq('feature_key', key).maybeSingle();
+    if (existing) {
+      await sb.from('feature_flags').update({enabled, updated_at: new Date().toISOString()}).eq('feature_key', key);
+    } else {
+      await sb.from('feature_flags').insert({feature_key: key, enabled, updated_at: new Date().toISOString()});
+    }
     window.__featureFlags[key] = enabled;
   }
 
   applyFeatureFlagsToUI();
-  // 모달 갱신
+  // 모달 갱신 (DB 기준으로 다시 열기)
   openFeatureFlagsAdmin();
 }
 
 async function setFeatureFlag(key, enabled, checkbox) {
   if (!enabled) {
-    // 끌 때 확인 팝업
     const ok = confirm('이 메뉴를 숨기시겠습니까?\n\n숨김 처리하면 일반 직원에게 메뉴가 보이지 않습니다.\n(총괄·부총괄·운영팀은 계속 접근 가능)');
-    if (!ok) {
-      if (checkbox) checkbox.checked = true; // 토글 복원
-      return;
-    }
+    if (!ok) { if (checkbox) checkbox.checked = true; return; }
   }
-  await sb.from('feature_flags').upsert({feature_key: key, enabled, updated_at: new Date().toISOString()}, {onConflict: 'feature_key'});
+  // 기존 행 확인 후 insert/update
+  const { data: existing } = await sb.from('feature_flags').select('feature_key').eq('feature_key', key).maybeSingle();
+  if (existing) {
+    await sb.from('feature_flags').update({enabled, updated_at: new Date().toISOString()}).eq('feature_key', key);
+  } else {
+    await sb.from('feature_flags').insert({feature_key: key, enabled, updated_at: new Date().toISOString()});
+  }
   window.__featureFlags[key] = enabled;
   applyFeatureFlagsToUI();
-  // 모달 내 상태 라벨 갱신
-  const label = checkbox?.closest('tr')?.querySelector('div');
-  if (label) {
-    label.textContent = enabled ? '표시' : '숨김';
-    label.style.color = enabled ? 'var(--gn)' : 'var(--rd)';
-  }
+  // 모달 내 라벨 갱신
+  const lbl = checkbox?.closest('tr')?.querySelector('div[style]');
+  if (lbl) { lbl.textContent = enabled ? '표시' : '숨김'; lbl.style.color = enabled ? 'var(--gn)' : 'var(--rd)'; }
 }
 
 async function createNotification(userId, type, refId, refType, message) {
@@ -5090,8 +5093,31 @@ async function renderManual(area) {
   // 현재 선택된 파트가 열람 불가하면 첫 파트로
   if (!auds.find(([a]) => a === manualAudience)) manualAudience = auds[0][0];
 
-  const { data: sections } = await sb.from('manual_sections')
+  const { data: allSections } = await sb.from('manual_sections')
     .select('*').eq('audience', manualAudience).order('sort_order');
+
+  // 숨겨진 기능에 해당하는 매뉴얼 섹션 자동 필터
+  const MANUAL_FEATURE_MAP = {
+    '업무 신청': 'requests', '업무신청': 'requests',
+    '완료 내역': 'reqarchive', '완료내역': 'reqarchive',
+    '업무 보고': 'reports', '업무보고': 'reports',
+    '직원 면담': 'interviews', '면담': 'interviews',
+    '매장 인수인계': 'handover', '인수인계': 'handover',
+    '보수 내역': 'repairs', '보수': 'repairs',
+    '스케줄': 'schedules', '매장 스케줄': 'schedules',
+    '컨펌': 'sch_confirm', '컨펌 대기': 'sch_confirm',
+    '근태': 'attendance', '근태 마감': 'attendance',
+    '휴무 기준': 'leave_settings'
+  };
+  const sections = (allSections||[]).filter(s => {
+    // 해당 섹션 제목이 숨겨진 기능과 매칭되면 필터
+    for (const [keyword, featureKey] of Object.entries(MANUAL_FEATURE_MAP)) {
+      if (s.title && s.title.includes(keyword) && !isFeatureEnabled(featureKey)) {
+        return false;  // 숨겨진 기능 → 매뉴얼에서도 제외
+      }
+    }
+    return true;
+  });
 
   // 파트가 2개 이상일 때만 탭 표시
   const tabBar = auds.length > 1 ? `
