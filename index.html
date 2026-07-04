@@ -1078,10 +1078,39 @@ async function loadCats() {
   if (!currentUser?.is_master) catQuery = catQuery.neq('active', false);
   const { data } = await catQuery;
   allCats = data || [];
+
+  // "기능 오류 접수" 카테고리 자동 생성 (없으면)
+  if (!allCats.find(c => c.name === '기능 오류 접수')) {
+    const maxSort = allCats.reduce((m,c) => Math.max(m, c.sort_order||0), 0);
+    await sb.from('categories').insert({
+      name: '기능 오류 접수',
+      icon: 'ti-bug',
+      sort_order: maxSort + 1,
+      description: '웹 앱 사용 중 기능 오류가 있으면 여기에 접수해주세요.',
+      active: true
+    });
+    // 안내 게시글 자동 생성
+    const { data: newCat } = await sb.from('categories').select('id').eq('name','기능 오류 접수').single();
+    if (newCat) {
+      await sb.from('posts').insert({
+        category_id: newCat.id,
+        title: '기능 오류 접수 안내',
+        body: `이 앱은 보난자커피 운영 관리를 위한 웹 앱입니다.\n\n웹 앱의 특성상 모든 기능을 완벽하게 지원하기 어렵고, 사용 환경(브라우저, 기기)에 따라 일부 기능이 다르게 동작할 수 있습니다.\n\n사용 중 구동되어야 하는 기능에 문제가 있다면, 아래 댓글로 접수해주세요.\n\n📌 접수 시 꼭 적어주세요:\n• 문제가 발생한 메뉴 이름 (예: 스케줄 작성, 공지 열람 등)\n• 어떤 증상인지 (예: 버튼 눌러도 반응 없음, 저장이 안 됨 등)\n• 사용하신 기기/브라우저 (예: 아이폰 사파리, 갤럭시 크롬 등)\n\n가급적 빠르게 확인 후 개선하겠습니다. 감사합니다.`,
+        access: 'all',
+        comments_on: true,
+        author_id: currentUser.id,
+        status: 'published'
+      });
+    }
+    // 카테고리 목록 재로드
+    const { data: data2 } = await sb.from('categories').select('*').order('sort_order');
+    allCats = data2 || [];
+  }
+
   renderCatNav();
   goPage('all');
   updateNotifDot();
-  loadFeatureFlags();  // 기능 표시/숨김 적용
+  loadFeatureFlags();
 }
 
 function visibleCats() {
@@ -1571,8 +1600,13 @@ async function renderPostDetail(area) {
       <div class="section-label">댓글 ${comments.length}개</div>
       ${cmtItems}
       <div class="comment-input-row">
-        <textarea id="cmtInput" placeholder="의견이나 질문을 남겨주세요..."></textarea>
-        <button class="btn-comment-submit" onclick="submitComment(${p.id})">등록</button>
+        <textarea id="cmtInput" placeholder="의견이나 질문을 남겨주세요... (@이름으로 태그 가능)" oninput="postCmtAtTrigger(this,${p.id})"></textarea>
+        <div id="postCmtAtMenu_${p.id}" style="display:none;position:absolute;background:#fff;border:0.5px solid var(--crd);border-radius:8px;max-height:180px;overflow-y:auto;z-index:50;min-width:220px;box-shadow:0 4px 16px rgba(0,0,0,.12)"></div>
+        <div id="postCmtTags_${p.id}" style="display:flex;flex-wrap:wrap;gap:5px;margin:6px 0"></div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:10px;color:var(--th)">@이름으로 인원 태그 → 알림 발송</span>
+          <button class="btn-comment-submit" onclick="submitComment(${p.id})" style="margin-left:auto">등록</button>
+        </div>
       </div>
       ${(currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master) ? `
       <div style="margin-top:10px;padding:10px 12px;background:var(--crm);border-radius:8px;border:0.5px solid var(--crd)">
@@ -1755,11 +1789,95 @@ async function confirmRead(postId) {
   openPostById(postId);
 }
 
+// ── 게시판 댓글 @태그 기능 ──
+window.__postCmtTags = {};
+
+function postCmtAtTrigger(ta, postId) {
+  clearTimeout(window.__postCmtTimer);
+  window.__postCmtTimer = setTimeout(async () => {
+    const val   = ta.value;
+    const atPos = val.lastIndexOf('@');
+    if (atPos < 0) { hidePostCmtMenu(postId); return; }
+    const query = val.slice(atPos + 1);
+    if (query.length < 1 || query.includes(' ')) { hidePostCmtMenu(postId); return; }
+
+    if (!window.__allActiveUsers?.length) {
+      const {data} = await sb.from('users').select('id,name,store,role').eq('active',true).order('name');
+      window.__allActiveUsers = data || [];
+    }
+    const users = window.__allActiveUsers.filter(u =>
+      u.name.includes(query) || (u.store||'').includes(query)
+    ).slice(0,8);
+
+    const menu = document.getElementById(`postCmtAtMenu_${postId}`);
+    if (!menu || !users.length) { hidePostCmtMenu(postId); return; }
+    menu.innerHTML = users.map(u =>
+      `<div onclick="selectPostCmtTag(${postId},'${u.id}','${u.name}','${u.store||''}')"
+        style="padding:8px 12px;cursor:pointer;font-size:12px;display:flex;gap:8px;align-items:center;border-bottom:0.5px solid var(--crd)"
+        onmouseover="this.style.background='var(--crm)'" onmouseout="this.style.background=''">
+        <span style="font-weight:600">${u.name}</span>
+        <span style="font-size:10px;color:#fff;background:var(--brm);border-radius:4px;padding:1px 5px">${u.store||''}</span>
+      </div>`
+    ).join('');
+    menu.style.display = 'block';
+  }, 200);
+}
+
+function hidePostCmtMenu(postId) {
+  const m = document.getElementById(`postCmtAtMenu_${postId}`);
+  if (m) m.style.display = 'none';
+}
+
+function selectPostCmtTag(postId, userId, name, store) {
+  if (!window.__postCmtTags[postId]) window.__postCmtTags[postId] = [];
+  if (!window.__postCmtTags[postId].find(t => t.id === userId)) {
+    window.__postCmtTags[postId].push({id:userId, name, store});
+  }
+  const ta = document.getElementById('cmtInput');
+  if (ta) { const at = ta.value.lastIndexOf('@'); if(at>=0) ta.value = ta.value.slice(0,at) + '@'+name+' '; }
+  hidePostCmtMenu(postId);
+  renderPostCmtTags(postId);
+}
+
+function removePostCmtTag(postId, userId) {
+  if (!window.__postCmtTags?.[postId]) return;
+  window.__postCmtTags[postId] = window.__postCmtTags[postId].filter(t => t.id !== userId);
+  renderPostCmtTags(postId);
+}
+
+function renderPostCmtTags(postId) {
+  const el = document.getElementById(`postCmtTags_${postId}`);
+  if (!el) return;
+  const tags = window.__postCmtTags?.[postId] || [];
+  el.innerHTML = tags.map(t =>
+    `<span style="background:var(--blb);color:var(--bl);border-radius:12px;padding:2px 10px;font-size:11px;display:flex;align-items:center;gap:4px">
+      @${t.name} <span style="font-size:10px;color:var(--th)">${t.store}</span>
+      <button onclick="removePostCmtTag(${postId},'${t.id}')" style="background:none;border:none;cursor:pointer;color:var(--bl);font-size:11px;padding:0">✕</button>
+    </span>`).join('');
+}
+
 async function submitComment(postId) {
   const inp = document.getElementById('cmtInput');
   const body = inp?.value.trim();
   if (!body) return;
-  await sb.from('comments').insert({post_id: postId, author_id: currentUser.id, body});
+
+  const tags = window.__postCmtTags?.[postId] || [];
+  await sb.from('comments').insert({
+    post_id: postId, author_id: currentUser.id, body,
+    tagged_users: tags.length ? JSON.stringify(tags) : null
+  });
+
+  // 태그된 인원에게 알림 + 슬랙 DM
+  if (tags.length) {
+    const {data:post} = await sb.from('posts').select('title').eq('id',postId).single();
+    const msg = '[댓글 태그] "' + (post?.title||'공지') + '" 댓글에 회원님이 태그되었습니다.';
+    for (const t of tags) {
+      await createNotificationWithSlack(t.id, 'post_comment_tag', postId, 'post', msg);
+    }
+    updateNotifDot();
+  }
+
+  window.__postCmtTags[postId] = [];
   openPostById(postId);
 }
 
@@ -3992,10 +4110,14 @@ async function loadNotifPanel() {
     if (items.length) {
       html += `<div style="font-size:10px;color:var(--th);padding:0 0 8px;letter-spacing:.5px">최근 30일 확인한 알림 ${items.length}건</div>`;
       html += items.map(n => {
-        const icon  = n.ref_type==='interview' ? 'ti-message-report' : 'ti-clipboard-check';
-        const onclick = n.ref_type==='interview'
-          ? `openInterviewById(${n.ref_id});closeNotifPanel()`
-          : `openReqById(${n.ref_id});closeNotifPanel()`;
+        const iconMap2  = {interview:'ti-message-report', post:'ti-article', schedule:'ti-calendar-event', request:'ti-clipboard-check'};
+        const icon  = iconMap2[n.ref_type] || 'ti-bell';
+        let onclick = 'closeNotifPanel();';
+        if (n.ref_type==='post')          onclick += `openPostById(${n.ref_id})`;
+        else if (n.ref_type==='request')  onclick += `openReqById(${n.ref_id})`;
+        else if (n.ref_type==='schedule') onclick += `openScheduleById(${n.ref_id})`;
+        else if (n.ref_type==='interview')onclick += `openInterviewById(${n.ref_id})`;
+        else                               onclick += `goPage('all')`;
         return `<div class="notif-item" onclick="${onclick}" style="opacity:.6;border-left:3px solid var(--crd);padding-left:10px">
           <div class="notif-item-title" style="color:var(--ts)">
             <i class="ti ${icon}" style="color:var(--th);margin-right:5px;font-size:12px"></i>${n.message}
@@ -4041,11 +4163,16 @@ async function loadNotifPanel() {
   if (notifItems.length) {
     html += `<div style="font-size:10px;font-weight:700;color:var(--rd);letter-spacing:1px;padding:4px 0 6px">업무 알림 ${notifItems.length}건</div>`;
     html += notifItems.map(n => {
-      const icon  = n.ref_type==='interview' ? 'ti-message-report' : 'ti-clipboard-check';
-      const color = n.ref_type==='interview' ? 'var(--pu)' : 'var(--gn)';
-      const onclick = n.ref_type==='interview'
-        ? `markNotifRead(${n.id});openInterviewById(${n.ref_id});closeNotifPanel()`
-        : `markNotifRead(${n.id});openReqById(${n.ref_id});closeNotifPanel()`;
+      const iconMap  = {interview:'ti-message-report', post:'ti-article', schedule:'ti-calendar-event', request:'ti-clipboard-check'};
+      const colorMap = {interview:'var(--pu)', post:'var(--bl)', schedule:'var(--gd)', request:'var(--gn)'};
+      const icon  = iconMap[n.ref_type] || 'ti-bell';
+      const color = colorMap[n.ref_type] || 'var(--gn)';
+      let onclick = `markNotifRead(${n.id});closeNotifPanel();`;
+      if (n.ref_type==='post')          onclick += `openPostById(${n.ref_id})`;
+      else if (n.ref_type==='request')  onclick += `openReqById(${n.ref_id})`;
+      else if (n.ref_type==='schedule') onclick += `openScheduleById(${n.ref_id})`;
+      else if (n.ref_type==='interview')onclick += `openInterviewById(${n.ref_id})`;
+      else                               onclick += `goPage('all')`;
       return `<div class="notif-item" onclick="${onclick}" style="border-left:3px solid ${color};padding-left:10px">
         <div class="notif-item-title">
           <i class="ti ${icon}" style="color:${color};margin-right:5px;font-size:13px"></i>${n.message}
