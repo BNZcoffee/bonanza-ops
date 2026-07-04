@@ -55,8 +55,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--cr);color:var(
 /* MAIN */
 #mainScreen{display:none;flex:1;flex-direction:row}
 .sidebar{width:210px;background:#fff;border-right:0.5px solid var(--crd);display:flex;flex-direction:column;padding:14px 0;flex-shrink:0;min-height:calc(100vh - 50px)}
-.sidebar-section{padding:0 10px;margin-bottom:6px}
-.sidebar-label{font-size:10px;font-weight:700;color:var(--th);letter-spacing:2px;text-transform:uppercase;padding:4px 8px 5px}
+.sidebar-section{padding:0 10px;margin-bottom:6px;border-bottom:0.5px solid var(--crd);padding-bottom:8px}
+.sidebar-label{font-size:10px;font-weight:700;color:var(--th);letter-spacing:2px;text-transform:uppercase;padding:8px 8px 5px}
 .nav-btn{display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;text-align:left;padding:7px 8px;border-radius:8px;font-size:13px;color:var(--ts);cursor:pointer;position:relative}
 .nav-btn:hover{background:var(--cr)}
 .nav-btn.active{background:var(--crm);color:var(--br);font-weight:600}
@@ -1130,11 +1130,22 @@ function visibleCats() {
 }
 function renderCatNav() {
   const area = document.getElementById('catNavArea');
-  area.innerHTML = visibleCats().map(c => {
+  const cats = visibleCats();
+  area.innerHTML = cats.map((c, idx) => {
     const ic = c.icon || 'ti-folder';
     const hideMark = c.hidden ? ' <span style="font-size:9px;color:var(--th)">(숨김)</span>' : '';
-    return `<button class="nav-btn" onclick="switchCat(${c.id},'${c.name}')" id="nav-cat-${c.id}">
-      <i class="ti ${ic}"></i> ${c.name}${hideMark}
+    // 구매팀/인사팀 등 부서 전용 카테고리는 회색 배경
+    const isDept = ['구매팀','인사팀'].includes(c.name);
+    const deptStyle = isDept ? 'background:#F0EDE8;opacity:0.75;' : '';
+    // 비활성화(숨김)된 카테고리도 관리자에겐 회색 표시
+    const isInactive = c.active === false;
+    const inactiveStyle = isInactive ? 'background:#F0EDE8;opacity:0.6;' : '';
+    const inactiveMark = isInactive ? ' <span style="font-size:9px;color:var(--rd)">(숨김)</span>' : '';
+    // 카테고리 사이 구분선
+    const divider = idx > 0 ? '<hr style="border:none;border-top:0.5px solid var(--crd);margin:2px 8px"/>' : '';
+    return divider + `<button class="nav-btn" onclick="switchCat(${c.id},'${c.name}')" id="nav-cat-${c.id}"
+      style="${deptStyle}${inactiveStyle}">
+      <i class="ti ${ic}"></i> ${c.name}${hideMark}${inactiveMark}
       <span class="nav-new" id="newBadge-${c.id}" style="display:none">N</span>
     </button>`;
   }).join('');
@@ -4345,7 +4356,7 @@ function isFeatureEnabled(key) {
 }
 
 function applyFeatureFlagsToUI() {
-  // 메뉴 버튼 표시/숨김
+  const isAdminUser = currentUser?.is_master || currentUser?.is_vice_master || currentUser?.role === 'admin';
   const menuMap = {
     'requests':    'nav-requests',
     'reqarchive':  'nav-reqarchive',
@@ -4360,9 +4371,34 @@ function applyFeatureFlagsToUI() {
   Object.entries(menuMap).forEach(([key, id]) => {
     const el = document.getElementById(id);
     if (!el) return;
-    const enabled = isFeatureEnabled(key);
-    el.style.display = enabled ? '' : 'none';
-    if (!enabled) el.setAttribute('data-hidden-feature','true');
+    const flagEnabled = window.__featureFlags[key] !== false;
+
+    if (flagEnabled) {
+      // 표시 상태 — 원래대로
+      el.style.display = '';
+      el.style.background = '';
+      el.style.opacity = '';
+      el.removeAttribute('data-hidden-feature');
+      // (숨김) 라벨 제거
+      const badge = el.querySelector('.hidden-badge');
+      if (badge) badge.remove();
+    } else if (isAdminUser) {
+      // 숨김 상태지만 관리자는 보임 — 회색 배경 + (숨김) 라벨
+      el.style.display = '';
+      el.style.background = '#F0EDE8';
+      el.style.opacity = '0.7';
+      el.setAttribute('data-hidden-feature','true');
+      if (!el.querySelector('.hidden-badge')) {
+        const badge = document.createElement('span');
+        badge.className = 'hidden-badge';
+        badge.style.cssText = 'font-size:9px;color:var(--rd);background:var(--rdb);border-radius:8px;padding:1px 5px;margin-left:4px';
+        badge.textContent = '숨김';
+        el.appendChild(badge);
+      }
+    } else {
+      // 일반 직원 — 완전 숨김
+      el.style.display = 'none';
+    }
   });
 }
 
@@ -4372,7 +4408,7 @@ async function openFeatureFlagsAdmin() {
   const FEATURES = [
     {key:'requests',    label:'업무 신청',   desc:'매장에서 운영팀에 신청'},
     {key:'reqarchive',  label:'완료 내역',   desc:'처리 완료된 업무 신청'},
-    {key:'reports',     label:'업무 보고',   desc:'매장 업무 보고 (준비 중)'},
+    {key:'reports',     label:'업무 보고',   desc:'매장 업무 보고'},
     {key:'interviews',  label:'직원 면담',   desc:'면담 기록 관리'},
     {key:'handover',    label:'매장 인수인계', desc:'매장 인수인계 문서'},
     {key:'repairs',     label:'보수 내역',   desc:'매장 보수 이력'},
@@ -4392,7 +4428,7 @@ async function openFeatureFlagsAdmin() {
       <td style="padding:8px 10px;font-size:11px;color:var(--th)">${f.desc}</td>
       <td style="padding:8px 10px;text-align:center">
         <label class="switch">
-          <input type="checkbox" ${enabled?'checked':''} onchange="setFeatureFlag('${f.key}', this.checked)"/>
+          <input type="checkbox" ${enabled?'checked':''} onchange="setFeatureFlag('${f.key}', this.checked, this)"/>
           <span class="slider"></span>
         </label>
         <div style="font-size:10px;color:${enabled?'var(--gn)':'var(--rd)'};margin-top:2px">${enabled?'표시':'숨김'}</div>
@@ -4430,10 +4466,24 @@ async function openFeatureFlagsAdmin() {
   document.body.appendChild(m);
 }
 
-async function setFeatureFlag(key, enabled) {
-  await sb.from('feature_flags').upsert({feature_key: key, enabled}, {onConflict: 'feature_key'});
+async function setFeatureFlag(key, enabled, checkbox) {
+  if (!enabled) {
+    // 끌 때 확인 팝업
+    const ok = confirm('이 메뉴를 숨기시겠습니까?\n\n숨김 처리하면 일반 직원에게 메뉴가 보이지 않습니다.\n(총괄·부총괄·운영팀은 계속 접근 가능)');
+    if (!ok) {
+      if (checkbox) checkbox.checked = true; // 토글 복원
+      return;
+    }
+  }
+  await sb.from('feature_flags').upsert({feature_key: key, enabled, updated_at: new Date().toISOString()}, {onConflict: 'feature_key'});
   window.__featureFlags[key] = enabled;
   applyFeatureFlagsToUI();
+  // 모달 내 상태 라벨 갱신
+  const label = checkbox?.closest('tr')?.querySelector('div');
+  if (label) {
+    label.textContent = enabled ? '표시' : '숨김';
+    label.style.color = enabled ? 'var(--gn)' : 'var(--rd)';
+  }
 }
 
 async function createNotification(userId, type, refId, refType, message) {
@@ -11765,7 +11815,26 @@ async function renderHandoverList(area) {
       <div class="page-title">매장 인수인계</div>
       <div class="page-sub">매장별 운영 정보를 기록하고 관리합니다. 관리자가 바뀌어도 인계가 원활하도록 최신 상태를 유지해 주세요.</div>
     </div>
-    <div class="post-list">${cards||'<div style="text-align:center;padding:40px;color:var(--th)">표시할 매장이 없습니다.</div>'}</div>`;
+    <div class="board-toolbar" style="margin-bottom:14px">
+      <div class="search-box">
+        <i class="ti ti-search" style="color:var(--th)"></i>
+        <input id="handoverSearch" placeholder="매장 검색..." oninput="filterHandoverList()" />
+      </div>
+    </div>
+    <div class="post-list" id="handoverListArea">${cards||'<div style="text-align:center;padding:40px;color:var(--th)">표시할 매장이 없습니다.</div>'}</div>`;
+  // 검색 필터 함수 등록
+  window.__handoverCards = cards;
+}
+
+function filterHandoverList() {
+  const q = (document.getElementById('handoverSearch')?.value || '').toLowerCase();
+  const area = document.getElementById('handoverListArea');
+  if (!area) return;
+  const cards = area.querySelectorAll('.post-card');
+  cards.forEach(card => {
+    const text = card.textContent.toLowerCase();
+    card.style.display = text.includes(q) ? '' : 'none';
+  });
 }
 
 async function openHandover(store) {
