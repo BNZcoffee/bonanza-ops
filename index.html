@@ -1073,7 +1073,10 @@ async function doLogout() {
 
 // ── CATEGORIES ────────────────────────────────────
 async function loadCats() {
-  const { data } = await sb.from('categories').select('*').order('sort_order');
+  let catQuery = sb.from('categories').select('*').order('sort_order');
+  // 총괄이 아니면 활성 카테고리만 표시
+  if (!currentUser?.is_master) catQuery = catQuery.neq('active', false);
+  const { data } = await catQuery;
   allCats = data || [];
   renderCatNav();
   goPage('all');
@@ -3767,11 +3770,30 @@ function addCatField() {
   list.appendChild(div);
 }
 async function deleteCat(id) {
+  const {data:cat} = await sb.from('categories').select('name').eq('id',id).single();
+  const catName = cat?.name||'';
   const {data:posts} = await sb.from('posts').select('id').eq('category_id',id);
-  const msg = posts&&posts.length>0 ? `게시글 ${posts.length}개가 있습니다. 함께 삭제할까요?` : '카테고리를 삭제할까요?';
-  if (!confirm(msg)) return;
-  if (posts&&posts.length>0) await sb.from('posts').delete().eq('category_id',id);
-  await sb.from('categories').delete().eq('id',id);
+  const cnt = (posts||[]).length;
+
+  // 비밀번호 확인
+  const pw = prompt('"' + catName + '" 카테고리를 비활성화(숨김)합니다.' + (cnt>0?'\n(게시글 '+cnt+'개 포함)':'') + '\n\n비밀번호를 입력해주세요:');
+  if (!pw) return;
+  if (pw !== currentUser.password_hash) { alert('비밀번호가 일치하지 않습니다.'); return; }
+
+  if (currentUser.is_master) {
+    const fullDel = confirm('총괄 권한으로 처리합니다.\n\n[확인] 완전 삭제 (복구 불가)\n[취소] 비활성화(숨김, 데이터 보존)');
+    if (fullDel) {
+      if (cnt>0) await sb.from('posts').delete().eq('category_id',id);
+      await sb.from('categories').delete().eq('id',id);
+      alert('완전 삭제되었습니다.');
+    } else {
+      await sb.from('categories').update({active:false}).eq('id',id);
+      alert('숨김 처리되었습니다. 게시글은 보존됩니다.');
+    }
+  } else {
+    await sb.from('categories').update({active:false}).eq('id',id);
+    alert('숨김 처리되었습니다. 완전 삭제는 총괄만 가능합니다.');
+  }
   closeCatModal();
   await loadCats();
 }
@@ -9687,26 +9709,42 @@ async function renderBalancePanel() {
     todayUsedMap[e.user_id] = (todayUsedMap[e.user_id]||0) + (e.entry_type==='연차'?1:0.5);
   });
 
-  const NON_WORK   = new Set(['휴무','대휴','결근','공가','경조','연차','오전반차','오후반차','반차']);
-  const LEAVE_ONLY = new Set(['휴무','대휴']);
-  const ANNUAL_SET = new Set(['연차','오전반차','오후반차','반차']);
+  // ── 집계 규칙 ──
+  // 당월 휴무 사용: '휴무'만 (대휴는 전월 이월 소진으로 별도 집계)
+  // 근무일 집계: 근무조 + 연차/반차(유급) + 공가/경조(회사 인정 유급)
+  // 결근: 총 근무일수 자체에서 제외 (31일 중 결근 2회 → 29일)
+  const BASE_LEAVE   = new Set(['휴무']);  // 당월 휴무 소진
+  const CARRY_LEAVE  = new Set(['대휴']);  // 전월 이월 소진 (별도 집계)
+  const ANNUAL_SET   = new Set(['연차','오전반차','오후반차','반차']);
+  const PAID_LEAVE   = new Set(['공가','경조']); // 유급 → 근무일 산정
+  const ABSENT       = new Set(['결근']);  // 근무일수에서 제외
+  const ALL_OFF      = new Set(['휴무','대휴','결근','공가','경조','연차','오전반차','오후반차','반차','무급휴가']);
 
-  // 집계: select(편집모드) 또는 curScheduleEntries(뷰모드) 우선 사용
   const rows = staffList.map(staff => {
-    let workDays=0, leaveDays=0, annualUsed=0, totalFilled=0;
+    let workDays=0, leaveDays=0, annualUsed=0, totalFilled=0, absentDays=0;
     for (let d=1; d<=daysInMonth; d++) {
       const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
       const key = staff.id + '_' + dateStr;
-      // 편집모드: select 우선 / 뷰모드: 메모리 entry 사용
       const sel = tbody?.querySelector(`select[data-staff="${staff.id}"][data-date="${dateStr}"]`);
       const val = sel?.value !== undefined ? sel.value
         : (curScheduleEntries[key]?.shift_code || curScheduleEntries[key]?.entry_type || '');
       if (!val) continue;
       totalFilled++;
       const half = val==='오전반차'||val==='오후반차'||val==='반차';
-      if (LEAVE_ONLY.has(val)) leaveDays += half ? 0.5 : 1;
+
+      // 당월 휴무 사용: '휴무'만
+      if (BASE_LEAVE.has(val)) leaveDays++;
+
+      // 연차 사용 집계
       if (ANNUAL_SET.has(val)) annualUsed += half ? 0.5 : 1;
-      if (!NON_WORK.has(val)) workDays += half ? 0.5 : 1;
+
+      // 결근: 근무일 제외
+      if (ABSENT.has(val)) { absentDays++; continue; }
+
+      // 근무일 산정: 근무조 + 연차/반차(유급) + 공가/경조(유급) → 모두 근무일
+      if (!BASE_LEAVE.has(val) && !CARRY_LEAVE.has(val) && !ABSENT.has(val)) {
+        workDays += half ? 0.5 : 1;
+      }
     }
 
     // 전월 휴무 이월
