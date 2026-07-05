@@ -1304,6 +1304,8 @@ function goPage(page) {
     document.getElementById('nav-ns').classList.add('active');
     renderNotifSettings(area);
   } else if (page === 'all') {
+    // 테스트 모드: 페이지 전환 후에도 UI 유지
+    if (window.__testMode) setTimeout(() => applyTestModeUI(), 100);
     const nb = document.getElementById('nav-all');
     if (nb) nb.classList.add('active');
     renderAll(area);
@@ -4807,11 +4809,53 @@ function startTestMode(role, store, label) {
   const contentEl = document.querySelector('.content');
   if (contentEl) contentEl.style.paddingTop = '50px';
 
-  // 사이드바/메뉴를 선택한 권한 기준으로 재렌더
-  applyMenuPermissions();
-  applyFeatureFlagsToUI();
-  renderCatNav();
+  // 테스트 모드 전용: 사이드바 강제 재렌더
+  applyTestModeUI();
   goPage('all');
+}
+
+// 테스트 모드 전용 UI 적용 — 모든 메뉴를 선택한 권한 기준으로 강제 표시/숨김
+function applyTestModeUI() {
+  if (!window.__testMode) return;
+
+  // 1. 기본 권한별 메뉴 표시
+  applyMenuPermissions();
+
+  // 2. Feature Flags 적용 (관리자 우회 없이)
+  applyFeatureFlagsToUI();
+
+  // 3. 카테고리 재렌더
+  renderCatNav();
+
+  // 4. 추가 강제 숨김 — 테스트 역할에 따라
+  const role = window.__testMode.role;
+  const show = (id, cond) => { const el = document.getElementById(id); if (el) el.style.display = cond ? '' : 'none'; };
+
+  // 현장 직원 (barista/pastry): 업무 신청, 업무 보고 전체 숨김
+  if (role === 'barista' || role === 'pastry') {
+    show('requestNav', false);      // 업무 신청 섹션
+    show('interviewNav', false);    // 업무 보고 섹션
+    show('adminNav', false);        // 관리 섹션
+    show('nav-scheduleConfirm', false);
+    show('nav-scheduleClose', false);
+    show('nav-scheduleSettings', false);
+  }
+
+  // 매니저: 관리 섹션 숨김
+  if (role === 'manager') {
+    show('adminNav', false);
+    show('nav-scheduleConfirm', false);
+    show('nav-scheduleClose', false);
+    show('nav-reqstats', false);
+    show('nav-reqadmin', false);
+  }
+
+  // 인사팀: 앱 관리 등 숨김
+  if (role === 'hr') {
+    show('nav-app', false);
+    show('nav-manualedit', false);
+    show('nav-perm', false);
+  }
 }
 
 function exitTestMode() {
@@ -4836,6 +4880,9 @@ function exitTestMode() {
   renderCatNav();
   goPage('all');
 }
+
+// goPage 호출 시에도 테스트 모드 UI 유지
+const _origGoPage = typeof goPage === 'function' ? null : null; // 아래서 처리
 
 // 테스트 모드에서 저장 차단
 function isTestMode() { return !!window.__testMode; }
