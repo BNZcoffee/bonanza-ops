@@ -5750,7 +5750,8 @@ function applyMenuPermissions() {
   const isAdminRole = currentUser.role === 'admin' || currentUser.is_master || currentUser.is_vice_master;
   const isHrRole = currentUser.role === 'hr';
   const canSchedule = isAdminRole || isManagerRole(currentUser.role) || isHrRole;
-  show('scheduleNav', canSchedule);
+  // 스케줄 메뉴: 전 직원 열람 가능 (편집은 매니저 이상으로 화면 내 분기)
+  show('scheduleNav', true);
   show('nav-scheduleConfirm', isAdminRole);                 // 컨펌 처리: 운영팀/총괄/부총괄
   show('nav-scheduleClose', isAdminRole || isHrRole);        // 마감 현황: 운영팀/인사팀
   show('nav-scheduleSettings', isAdminRole || isManagerRole(currentUser.role)); // 휴무 기준 설정: 운영팀+매니저(본인매장만)
@@ -5808,13 +5809,19 @@ async function loadPermMap() {
 // 권한 판단 (총괄은 항상 true, 개인 예외가 등급 기본값보다 우선)
 function hasPerm(permKey, u) {
   const grade = userGrade(u);
+
+  // 테스트 모드: PERM_DEFAULT 기준으로만 판단 (총괄 우회 X, PERM_MAP 무시)
+  if (window.__testMode) {
+    const idx = GRADES.indexOf(grade);
+    return PERM_DEFAULT[permKey] ? !!PERM_DEFAULT[permKey][idx] : false;
+  }
+
   if (grade === 'master') return true;  // 총괄은 모든 권한
-  // 개인 예외 권한 (현재 로그인 사용자 본인에 대해서만 적용)
+  // 개인 예외 권한
   if ((!u || u === currentUser) && MY_PERM_OVERRIDE && Object.prototype.hasOwnProperty.call(MY_PERM_OVERRIDE, permKey)) {
     return MY_PERM_OVERRIDE[permKey];
   }
   if (!PERM_MAP || !PERM_MAP[permKey]) {
-    // 맵 미로드 시 기본값
     const idx = GRADES.indexOf(grade);
     return PERM_DEFAULT[permKey] ? !!PERM_DEFAULT[permKey][idx] : false;
   }
