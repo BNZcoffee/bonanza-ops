@@ -4375,15 +4375,17 @@ async function loadFeatureFlags() {
 
 // 총괄만 볼 수 있는 기능은 별도 표시
 function isFeatureEnabled(key) {
-  // 총괄/부총괄/운영팀은 숨김 상태에서도 볼 수 있음 (테스트 목적)
-  const isAdminUser = currentUser?.is_master || currentUser?.is_vice_master || currentUser?.role === 'admin';
-  if (isAdminUser) return true;
-  // 명시적으로 false가 아니면 기본 표시
+  // 테스트 모드에서는 관리자 우회 없이 실제 flag 기준으로 판단
+  if (!window.__testMode) {
+    const isAdminUser = currentUser?.is_master || currentUser?.is_vice_master || currentUser?.role === 'admin';
+    if (isAdminUser) return true;
+  }
   return window.__featureFlags[key] !== false;
 }
 
 function applyFeatureFlagsToUI() {
-  const isAdminUser = currentUser?.is_master || currentUser?.is_vice_master || currentUser?.role === 'admin';
+  // 테스트 모드에서는 관리자 판정을 현재 교체된 currentUser 기준으로
+  const isAdminUser = !window.__testMode && (currentUser?.is_master || currentUser?.is_vice_master || currentUser?.role === 'admin');
 
   // 섹션(div) 단위 숨김
   const sectionMap = {
@@ -4739,12 +4741,12 @@ function openTestModeSelector() {
   if (old) old.remove();
 
   const roles = [
-    {role:'barista',  label:'바리스타 (현장직원)', store:'강남'},
-    {role:'pastry',   label:'파티쉐 (현장직원)',  store:'강남'},
-    {role:'manager',  label:'매니저',            store:'강남'},
-    {role:'manager_a',label:'부서담당 (팀장)',    store:'부서담당'},
-    {role:'admin',    label:'운영팀',            store:'본사'},
-    {role:'hr',       label:'인사팀',            store:'본사'}
+    {role:'barista',  label:'현장 직원 (바리스타/파티쉐)', store:'강남'},
+    {role:'manager',  label:'매니저',                    store:'강남'},
+    {role:'manager_a',label:'부서담당',                   store:'부서담당'},
+    {role:'admin',    label:'운영팀',                    store:'본사'},
+    {role:'hr',       label:'인사팀',                    store:'본사'},
+    {role:'vice',     label:'부총괄',                    store:'부총괄'}
   ];
 
   const m = document.createElement('div');
@@ -4776,32 +4778,62 @@ function startTestMode(role, store, label) {
   document.getElementById('testModeModal')?.remove();
   window.__testMode = { role, store, label };
 
-  // 워터마크 배너 추가
+  // 원래 currentUser 백업
+  window.__realUser = {...currentUser};
+
+  // currentUser를 선택한 권한으로 임시 교체
+  currentUser = {
+    ...currentUser,
+    role: role,
+    store: store,
+    is_master: false,
+    is_vice_master: (role === 'vice'),
+    part: (role === 'manager_a') ? '부서담당' : null
+  };
+
+  // 워터마크 배너
   let banner = document.getElementById('testModeBanner');
   if (!banner) {
     banner = document.createElement('div');
     banner.id = 'testModeBanner';
     document.body.prepend(banner);
   }
-  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:rgba(200,30,30,.9);color:#fff;text-align:center;padding:8px;font-size:13px;font-weight:700;letter-spacing:2px;pointer-events:auto;cursor:pointer';
-  banner.innerHTML = `⚠ 테스트 페이지 — [ ${label} ] 권한으로 보는 중 &nbsp;&nbsp;<button onclick="exitTestMode()" style="background:#fff;color:var(--rd);border:none;border-radius:6px;padding:4px 14px;font-weight:600;cursor:pointer;font-size:12px">테스트 종료</button>`;
-  banner.title = '클릭하여 테스트 종료';
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:rgba(200,30,30,.92);color:#fff;text-align:center;padding:10px 16px;font-size:14px;font-weight:700;letter-spacing:1px;display:flex;align-items:center;justify-content:center;gap:12px';
+  banner.innerHTML = `<span style="font-size:20px">⚠</span> 테스트 페이지 &nbsp;—&nbsp; <span style="background:rgba(255,255,255,.2);padding:3px 12px;border-radius:6px;font-size:15px">${label}</span> <span style="font-size:12px;opacity:.8">권한으로 보는 중 (읽기 전용)</span> <button onclick="exitTestMode()" style="background:#fff;color:var(--rd);border:none;border-radius:6px;padding:5px 16px;font-weight:700;cursor:pointer;font-size:12px;margin-left:12px">테스트 종료</button>`;
 
-  // 메인 컨텐츠 상단 여백
-  document.querySelector('.content')?.style && (document.querySelector('.content').style.paddingTop = '44px');
+  // 사이드바 여백 + 메인 컨텐츠 여백
+  const sidebar = document.querySelector('.sidebar');
+  if (sidebar) sidebar.style.paddingTop = '50px';
+  const contentEl = document.querySelector('.content');
+  if (contentEl) contentEl.style.paddingTop = '50px';
 
-  // 사이드바/메뉴를 해당 권한 기준으로 표시
+  // 사이드바/메뉴를 선택한 권한 기준으로 재렌더
+  applyMenuPermissions();
   applyFeatureFlagsToUI();
+  renderCatNav();
   goPage('all');
-  alert('테스트 모드가 시작되었습니다.\n\n' + label + ' 권한으로 보는 중입니다.\n모든 작성·저장·수정은 차단됩니다.');
 }
 
 function exitTestMode() {
   window.__testMode = null;
+
+  // 원래 currentUser 복원
+  if (window.__realUser) {
+    currentUser = {...window.__realUser};
+    window.__realUser = null;
+  }
+
   const banner = document.getElementById('testModeBanner');
   if (banner) banner.remove();
-  document.querySelector('.content')?.style && (document.querySelector('.content').style.paddingTop = '');
+  const sidebar = document.querySelector('.sidebar');
+  if (sidebar) sidebar.style.paddingTop = '';
+  const contentEl = document.querySelector('.content');
+  if (contentEl) contentEl.style.paddingTop = '';
+
+  // 원래 권한으로 복원
+  applyMenuPermissions();
   applyFeatureFlagsToUI();
+  renderCatNav();
   goPage('all');
 }
 
