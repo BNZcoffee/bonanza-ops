@@ -697,6 +697,10 @@ let commentsOnNew = false;
 function toKST(s){if(!s)return '';return new Date(new Date(s).getTime()+9*3600000).toISOString();}
 function fmtDate(s){if(!s)return '';return toKST(s).slice(0,10);}
 function fmtDateTime(s){if(!s)return '';return toKST(s).slice(0,16).replace('T',' ');}
+// KST 현재 시각 ISO 문자열 (DB 저장용 — 서울 기준 정확한 시각)
+function nowKST(){return new Date(Date.now()+9*3600000).toISOString();}
+// KST 오늘 날짜 문자열
+function todayKST(){return toKST(new Date().toISOString()).slice(0,10);}
 function daysAgo(s){return Math.floor((new Date()-new Date(s))/864e5);}
 
 // ── AUTH ──────────────────────────────────────────
@@ -745,14 +749,14 @@ async function doLogin() {
   }
 
   // 퇴사일 지난 경우 로그인 즉시 차단
-  const loginToday = new Date().toISOString().slice(0,10);
+  const loginToday = todayKST();
   if (data.retire_date && data.retire_date < loginToday) {
     if (data.active) await sb.from('users').update({active:false}).eq('id', data.id);
     err.textContent = '퇴사 처리된 계정입니다. 운영팀에 문의해주세요.'; return;
   }
   if (!data.active) { err.textContent = '비활성화된 계정입니다. 운영팀에 문의해 주세요.'; return; }
 
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayKST();
   if (data.retire_date && data.retire_date <= today) {
     await sb.from('users').update({active:false}).eq('id', data.id);
     err.textContent = '접근 권한이 만료된 계정입니다.'; return;
@@ -1131,18 +1135,34 @@ function visibleCats() {
 function renderCatNav() {
   const area = document.getElementById('catNavArea');
   const cats = visibleCats();
+
+  // 구분선 삽입 위치 결정 (카테고리 이름 기반)
+  const DEPT_CATS = new Set(['구매팀','인사팀']);
+  const DIVIDER_BEFORE = new Set(['기능 오류 접수']); // 인사팀 다음 카테고리 앞에 구분선
+
   area.innerHTML = cats.map((c, idx) => {
     const ic = c.icon || 'ti-folder';
     const hideMark = c.hidden ? ' <span style="font-size:9px;color:var(--th)">(숨김)</span>' : '';
-    // 구매팀/인사팀 등 부서 전용 카테고리는 회색 배경
-    const isDept = ['구매팀','인사팀'].includes(c.name);
+    const isDept = DEPT_CATS.has(c.name);
     const deptStyle = isDept ? 'background:#F0EDE8;opacity:0.75;' : '';
-    // 비활성화(숨김)된 카테고리도 관리자에겐 회색 표시
     const isInactive = c.active === false;
     const inactiveStyle = isInactive ? 'background:#F0EDE8;opacity:0.6;' : '';
     const inactiveMark = isInactive ? ' <span style="font-size:9px;color:var(--rd)">(숨김)</span>' : '';
-    // 카테고리 사이 구분선
-    const divider = idx > 0 ? '<hr style="border:none;border-top:0.5px solid var(--crd);margin:2px 8px"/>' : '';
+
+    // 구분선: 부서 카테고리(구매팀) 앞 + 특정 카테고리 앞만
+    let divider = '';
+    if (idx > 0) {
+      const prevName = cats[idx-1]?.name || '';
+      // 인사팀 → 다음 카테고리 사이에 구분선
+      if (DEPT_CATS.has(prevName) && !DEPT_CATS.has(c.name)) {
+        divider = '<hr style="border:none;border-top:0.5px solid var(--crd);margin:4px 8px"/>';
+      }
+      // 일반 카테고리 → 부서 카테고리 전환 시 구분선
+      if (!DEPT_CATS.has(prevName) && DEPT_CATS.has(c.name)) {
+        divider = '<hr style="border:none;border-top:0.5px solid var(--crd);margin:4px 8px"/>';
+      }
+    }
+
     return divider + `<button class="nav-btn" onclick="switchCat(${c.id},'${c.name}')" id="nav-cat-${c.id}"
       style="${deptStyle}${inactiveStyle}">
       <i class="ti ${ic}"></i> ${c.name}${hideMark}${inactiveMark}
@@ -1531,7 +1551,7 @@ async function renderPostDetail(area) {
       <div class="reach-bar"><div class="reach-fill" style="width:${rate}%"></div></div>
       <div class="reach-label"><span>전체 도달률 ${rate}%</span><span>${reads.length}/${total}명</span></div>
       <div style="margin-top:8px">
-        ${reads.map(r=>`<div class="read-row"><div><span style="font-weight:600;font-size:12px">${r.users?.name||''}</span> <span style="color:var(--th);font-size:11px">${r.users?.store||''}</span></div><span style="color:var(--th);font-size:11px">${r.read_at?.slice(0,16).replace('T',' ')||''}</span></div>`).join('')}
+        ${reads.map(r=>`<div class="read-row"><div><span style="font-weight:600;font-size:12px">${r.users?.name||''}</span> <span style="color:var(--th);font-size:11px">${r.users?.store||''}</span></div><span style="color:var(--th);font-size:11px">${fmtDateTime(r.read_at)||''}</span></div>`).join('')}
         ${total-reads.length>0?`<div class="read-row"><span class="unread-badge">미확인 ${total-reads.length}명</span></div>`:''}
       </div>
     </div>`;
@@ -1868,6 +1888,7 @@ function renderPostCmtTags(postId) {
 }
 
 async function submitComment(postId) {
+  if (isTestMode()) { alert('⚠ 테스트 모드에서는 댓글을 작성할 수 없습니다.'); return; }
   const inp = document.getElementById('cmtInput');
   const body = inp?.value.trim();
   if (!body) return;
@@ -2419,6 +2440,7 @@ function saveDraft(){
   submitPost(true);
 }
 async function submitPost(isDraft=false) {
+  if (isTestMode()) { alert('⚠ 테스트 모드에서는 저장할 수 없습니다.'); return; }
   const title = document.getElementById('nTitle')?.value.trim();
   const body = nQuill ? nQuill.root.innerHTML : '';
   const catId = parseInt(document.getElementById('nCat')?.value);
@@ -2500,6 +2522,8 @@ async function submitPost(isDraft=false) {
 
   // 슬랙 채널 알림 발송 (published 상태일 때만)
   if(status === 'published' && postId) {
+    // ── 권한별 자동 알림 발송 ──
+    await sendRoleBasedPostNotify(postId, title);
     sendPostSlackNotify(postId, title, catId);
   }
 
@@ -2579,7 +2603,7 @@ async function renderStaff(area) {
     sb.from('users').select('*').order('code'),
     sb.from('store_options').select('*').order('sort_order')
   ]);
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayKST();
 
   // 퇴사일 지난 직원 자동 비활성화
   for(const u of (users||[])){
@@ -3069,7 +3093,7 @@ async function submitEditUser(){
   const isMaster = document.getElementById('eu_master')?.checked || false;
   const isVice = document.getElementById('eu_vice')?.checked || false;
   if(!name||!store){alert('이름과 소속매장은 필수입니다.');return;}
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayKST();
   const active = !retire || (retire >= today);
   const employmentType = document.getElementById('eu_employment')?.value || 'fulltime';
   const ptWorkHours    = employmentType === 'parttime'
@@ -3124,7 +3148,7 @@ async function submitEditUser(){
       user_id:       savedUserId,
       work_hours:    ptWorkHours,
       break_minutes: ptBreakMin || 30,
-      start_date:    hire || new Date().toISOString().slice(0,10),
+      start_date:    hire || todayKST(),
       note:          '직원 정보 등록/수정 시 자동 저장',
       created_by:    currentUser.id
     }, { onConflict: 'user_id' });
@@ -3140,7 +3164,7 @@ async function toggleActive(id, cur){
     await sb.from('users').update({active:false}).eq('id',id);
   } else {
     const {data:u} = await sb.from('users').select('retire_date,name').eq('id',id).single();
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayKST();
     if(u && u.retire_date && u.retire_date <= today){
       alert('\u26a0\ufe0f 퇴사 처리된 직원입니다.\n\n'+u.name+' 님은 퇴사일('+u.retire_date+')이 지나 활성화할 수 없습니다.\n\n다시 근무하는 경우, 직원 정보 수정에서 퇴사일을 삭제하거나 미래 날짜로 변경해주세요.');
       return;
@@ -3372,7 +3396,7 @@ async function submitBulkAdd() {
         if (newUser) {
           await sb.from('pt_contracts').insert({
             user_id: newUser.id, work_hours: ptWrk, break_minutes: ptBrk||30,
-            start_date: hire || new Date().toISOString().slice(0,10),
+            start_date: hire || todayKST(),
             note: '일괄 등록', created_by: currentUser.id
           });
         }
@@ -3546,7 +3570,7 @@ async function submitBulk(){
   if(!canEditStaff()){alert('등록 권한이 없습니다.');return;}
   const tbody=document.getElementById('bulkTbody');
   const rows=Array.from(tbody.querySelectorAll('tr'));
-  const today=new Date().toISOString().slice(0,10);
+  const today=todayKST();
   const valid=[],errors=[];
   rows.forEach((row,i)=>{
     const name=row.querySelector('[data-col="name"]')?.value.trim();
@@ -4571,6 +4595,147 @@ async function setFeatureFlag(key, enabled, checkbox) {
   if (lbl) { lbl.textContent = enabled ? '표시' : '숨김'; lbl.style.color = enabled ? 'var(--gn)' : 'var(--rd)'; }
 }
 
+
+// ═══════════════════════════════════════════
+// 권한별 알림 라우팅
+// 공지 게시 시: 전 직원에게 알림
+// 업무신청 상태변경: 매니저+부서담당에게 알림
+// 스케줄 변경: 관련자에게 알림
+// ═══════════════════════════════════════════
+
+async function sendRoleBasedPostNotify(postId, title) {
+  // 공지 게시 → 전 활성 직원에게 알림 (본인 제외)
+  const { data: allUsers } = await sb.from('users')
+    .select('id,role,store,slack_member_id')
+    .eq('active', true)
+    .neq('id', currentUser.id);
+
+  if (!allUsers?.length) return;
+
+  const msg = '[새 공지] ' + (title||'새 공지가 등록되었습니다') + ' — 확인해주세요.';
+  let sent = 0;
+  for (const u of allUsers) {
+    // 앱 알림 생성
+    await sb.from('notifications').insert({
+      user_id: u.id, type: 'new_post', ref_id: postId, ref_type: 'post',
+      message: msg, is_read: false, created_at: new Date().toISOString()
+    });
+    // 슬랙 DM (멤버 ID 있으면)
+    if (u.slack_member_id) {
+      const link = 'https://bnzcoffee.github.io/bonanza-ops/?post=' + postId;
+      await sendSlackDM(u.slack_member_id, '🔔 ' + msg + '\n' + link);
+    }
+    sent++;
+  }
+  console.log(`공지 알림 ${sent}명 발송 완료`);
+}
+
+// 업무신청 상태 변경 시 관련자 알림
+async function sendReqStatusNotify(reqId, newStatus, store) {
+  const statusLabel = {
+    'in_progress':'처리 진행 중', 'done':'처리 완료',
+    'rejected':'반려', 'received':'접수 완료'
+  }[newStatus] || newStatus;
+
+  const { data: req } = await sb.from('requests').select('title,author_id').eq('id',reqId).single();
+  const msg = `[업무신청 ${statusLabel}] "${req?.title||''}" — ${store}`;
+
+  // 매니저 + 부서담당 + 총괄/부총괄에게 알림
+  const { data: targets } = await sb.from('users').select('id,role,store,slack_member_id')
+    .eq('active',true)
+    .or(`role.eq.admin,is_master.eq.true,is_vice_master.eq.true,and(role.in.(manager,manager_a,manager_b),store.eq.${store})`);
+
+  // 작성자에게도 알림
+  if (req?.author_id) {
+    await createNotificationWithSlack(req.author_id, 'req_status', reqId, 'request', msg);
+  }
+  for (const t of (targets||[])) {
+    if (t.id === currentUser.id || t.id === req?.author_id) continue;
+    await createNotificationWithSlack(t.id, 'req_status', reqId, 'request', msg);
+  }
+}
+
+
+// ═══════════════════════════════════════════
+// 총괄 전용: 권한별 사이트 테스트 모드
+// 실제 앱과 동일하게 보이지만 저장/동기화 차단
+// ═══════════════════════════════════════════
+window.__testMode = null; // null=정상, {role:'barista',store:'강남'} 등
+
+function openTestModeSelector() {
+  const old = document.getElementById('testModeModal');
+  if (old) old.remove();
+
+  const roles = [
+    {role:'barista',  label:'바리스타 (현장직원)', store:'강남'},
+    {role:'pastry',   label:'파티쉐 (현장직원)',  store:'강남'},
+    {role:'manager',  label:'매니저',            store:'강남'},
+    {role:'manager_a',label:'부서담당 (팀장)',    store:'부서담당'},
+    {role:'admin',    label:'운영팀',            store:'본사'},
+    {role:'hr',       label:'인사팀',            store:'본사'}
+  ];
+
+  const m = document.createElement('div');
+  m.id = 'testModeModal';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:400;display:flex;align-items:center;justify-content:center';
+  m.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:22px;width:min(95vw,420px)">
+      <div style="font-size:15px;font-weight:600;color:var(--tm);margin-bottom:6px">
+        <i class="ti ti-test-pipe" style="color:var(--bl)"></i> 권한별 사이트 테스트
+      </div>
+      <div style="font-size:11px;color:var(--th);margin-bottom:14px;line-height:1.6">
+        선택한 권한으로 앱 화면을 테스트합니다.<br>
+        <strong style="color:var(--rd)">작성·저장·수정은 모두 차단</strong>됩니다 (읽기 전용).<br>
+        테스트 중에는 상단에 빨간 워터마크가 표시됩니다.
+      </div>
+      ${roles.map(r => `
+        <button onclick="startTestMode('${r.role}','${r.store}','${r.label}')"
+          style="display:block;width:100%;text-align:left;padding:10px 14px;margin-bottom:6px;border:0.5px solid var(--crd);border-radius:8px;background:var(--cr);cursor:pointer;font-family:inherit;font-size:13px">
+          <strong>${r.label}</strong> <span style="color:var(--th);font-size:11px">— ${r.store}</span>
+        </button>`).join('')}
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button class="btn-cancel-sm" onclick="document.getElementById('testModeModal').remove()">취소</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+}
+
+function startTestMode(role, store, label) {
+  document.getElementById('testModeModal')?.remove();
+  window.__testMode = { role, store, label };
+
+  // 워터마크 배너 추가
+  let banner = document.getElementById('testModeBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'testModeBanner';
+    document.body.prepend(banner);
+  }
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:rgba(200,30,30,.9);color:#fff;text-align:center;padding:8px;font-size:13px;font-weight:700;letter-spacing:2px;pointer-events:auto;cursor:pointer';
+  banner.innerHTML = `⚠ 테스트 페이지 — [ ${label} ] 권한으로 보는 중 &nbsp;&nbsp;<button onclick="exitTestMode()" style="background:#fff;color:var(--rd);border:none;border-radius:6px;padding:4px 14px;font-weight:600;cursor:pointer;font-size:12px">테스트 종료</button>`;
+  banner.title = '클릭하여 테스트 종료';
+
+  // 메인 컨텐츠 상단 여백
+  document.querySelector('.content')?.style && (document.querySelector('.content').style.paddingTop = '44px');
+
+  // 사이드바/메뉴를 해당 권한 기준으로 표시
+  applyFeatureFlagsToUI();
+  goPage('all');
+  alert('테스트 모드가 시작되었습니다.\n\n' + label + ' 권한으로 보는 중입니다.\n모든 작성·저장·수정은 차단됩니다.');
+}
+
+function exitTestMode() {
+  window.__testMode = null;
+  const banner = document.getElementById('testModeBanner');
+  if (banner) banner.remove();
+  document.querySelector('.content')?.style && (document.querySelector('.content').style.paddingTop = '');
+  applyFeatureFlagsToUI();
+  goPage('all');
+}
+
+// 테스트 모드에서 저장 차단
+function isTestMode() { return !!window.__testMode; }
+
 async function createNotification(userId, type, refId, refType, message) {
   if (!userId) return;
   const { error } = await sb.from('notifications').insert({
@@ -4796,6 +4961,14 @@ async function renderAppSettings(area){
           <div class="setting-sub">준비 중인 기능을 숨기고 준비 완료 후 공개할 수 있습니다</div>
         </div>
         <div style="color:var(--br)"><i class="ti ti-chevron-right"></i></div>
+      </div>` : ''}
+      ${currentUser.is_master ? `
+      <div class="setting-row" onclick="openTestModeSelector()" style="cursor:pointer">
+        <div>
+          <div class="setting-title"><i class="ti ti-test-pipe"></i> 권한별 사이트 테스트</div>
+          <div class="setting-sub">다른 권한으로 앱 화면을 테스트합니다 (읽기 전용)</div>
+        </div>
+        <div style="color:var(--bl)"><i class="ti ti-chevron-right"></i></div>
       </div>` : ''}
       <div class="setting-row"><div><div class="setting-title">호스팅</div><div class="setting-sub">GitHub Pages — bnzcoffee.github.io/bonanza-ops</div></div></div>
     </div>
@@ -5213,8 +5386,8 @@ async function downloadManualPdf() {
   if (!sections || !sections.length) { alert('내용이 없습니다.'); return; }
 
   const audLabel = aud === 'admin' ? '관리자용' : '매장 직원용';
-  const wm = `${currentUser.name} · ${currentUser.code || ''} · ${new Date().toISOString().slice(0,10)}`;
-  const today = new Date().toISOString().slice(0,10);
+  const wm = `${currentUser.name} · ${currentUser.code || ''} · ${todayKST()}`;
+  const today = todayKST();
 
   const toc = sections.map((s,i) => `<li><a href="#sec${i}">${s.title}</a></li>`).join('');
   const body = sections.map((s,i) => `<section id="sec${i}"><h2>${i+1}. ${s.title}</h2><div class="mbody">${s.body||''}</div></section>`).join('');
@@ -6543,7 +6716,7 @@ async function renderReqComments(reqId) {
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
           <span style="font-size:12px;font-weight:600;color:var(--tm)">${c.author?.name||'?'}</span>
           <span style="font-size:10px;color:var(--th)">${c.author?.store||''}</span>
-          <span style="font-size:10px;color:var(--th);margin-left:auto">${(c.created_at||'').slice(0,16).replace('T',' ')}</span>
+          <span style="font-size:10px;color:var(--th);margin-left:auto">${(fmtDateTime(c.created_at||''))}</span>
         </div>
         <div style="font-size:13px;color:var(--tm);white-space:pre-wrap;line-height:1.6">${c.content||''}</div>
         ${tagBadge}
@@ -7129,7 +7302,7 @@ let editingInterviewId = null;
 async function renderInterviewNew(area, ex) {
   editingInterviewId = ex ? ex.id : null;
   const isAdmin = isInterviewAdmin();
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayKST();
 
   // 옵션 + 매장 목록 병렬 로드
   const [optsRes, storeRes] = await Promise.all([
@@ -7649,7 +7822,7 @@ let editingRepairId = null;
 async function renderRepairNew(area, ex) {
   editingRepairId = ex ? ex.id : null;
   const isAdmin = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayKST();
 
   const [catRes, storeRes] = await Promise.all([
     sb.from('repair_categories').select('*').eq('active',true).order('sort_order'),
@@ -8787,7 +8960,7 @@ async function renderRetirePanel() {
     if (retireInMonth) {
       if (isPT) {
         // PT: 휴무 기준 없이 계약 조건 + 연차만 표시
-        const today = new Date().toISOString().slice(0,10);
+        const today = todayKST();
         const { days: annualDays } = calcAnnualLeave(staffInfo.hire_date, today);
         leaveInfo = `
           <div style="font-size:11px;color:var(--ts);margin-top:5px;line-height:1.8">
@@ -9398,6 +9571,7 @@ async function saveScheduleDraftQuiet() {
 }
 
 async function saveScheduleDraft() {
+  if (isTestMode()) { alert('⚠ 테스트 모드에서는 저장할 수 없습니다.'); return; }
   const store = window.__schStore, year = window.__schYear, month = window.__schMonth;
   const opPlan = document.getElementById('schOpPlan')?.value.trim() || null;
   const notes  = document.getElementById('schNotes')?.value.trim() || null;
@@ -10009,7 +10183,7 @@ async function renderBalancePanel() {
   if (!staffIds.length) { panel.innerHTML = '<div style="padding:12px;color:var(--th)">직원이 없습니다.</div>'; return; }
 
   // 연차 잔여 + 전월 휴무 이월(schedule_leave_balance) 병렬 로드
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayKST();
   const [albRes, slbRes, entriesRes] = await Promise.all([
     sb.from('annual_leave_balance').select('user_id, adjust, init_used, expire_used').in('user_id', staffIds),
     curSchedule?.id
@@ -12544,7 +12718,7 @@ async function loadMyLeaveInfo() {
     .select('*').eq('user_id', currentUser.id).maybeSingle();
 
   // 스케줄에서 연차/반차 사용 내역 조회 (오늘 이전 도래한 날짜만 차감)
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayKST();
   const { data: entries } = await sb.from('schedule_entries')
     .select('date, entry_type, schedule:schedules(store, year, month, status)')
     .eq('user_id', currentUser.id)
@@ -12704,7 +12878,7 @@ function calcAnnualLeave(hireDateStr, baseDateStr, excludeDays = 0) {
  * (스케줄 entries 중 오늘까지 도래한 연차/반차만)
  */
 async function calcUsedLeave(userId) {
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayKST();
   const { data } = await sb.from('schedule_entries')
     .select('entry_type, date')
     .eq('user_id', userId)
@@ -12730,7 +12904,7 @@ function calcLeaveRemain(hireDateStr, alb, schUsedToday) {
 // 입사일 기반 자동 계산 + 오늘까지 도래한 사용분만 차감
 async function loadStaffLeaveBalance(userList) {
   if (!userList || !userList.length) return;
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayKST();
   const ids   = userList.filter(u=>u.id).map(u=>u.id);
   if (!ids.length) return;
 
@@ -12794,7 +12968,7 @@ async function openStaffLeaveEdit(userId, userName) {
   const hireDate  = userRes.data?.hire_date || '';
   const bal       = balRes.data || {};
   const expires   = expireRes.data || [];
-  const today     = new Date().toISOString().slice(0,10);
+  const today     = todayKST();
 
   // 자동 계산
   const { days: autoDays, desc: autoDesc } = calcAnnualLeave(hireDate, today);
