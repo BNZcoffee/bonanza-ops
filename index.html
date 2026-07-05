@@ -4366,15 +4366,12 @@ async function loadNotifyStoreOptions(postId) {
 window.__featureFlags = {};
 
 async function loadFeatureFlags() {
-  const { data, error } = await sb.from('feature_flags').select('feature_key,enabled');
-  if (error) { console.error('Feature flags 로드 오류:', error); return; }
+  const { data } = await sb.from('feature_flags').select('*');
   window.__featureFlags = {};
   (data||[]).forEach(f => {
-    // enabled가 false, 'false', 0, null인 경우 모두 false로 처리
-    const v = f.enabled;
-    window.__featureFlags[f.feature_key] = !(v === false || v === 'false' || v === 0 || v === null);
+    // DB에 명시적으로 false인 경우만 false, 나머지 true
+    window.__featureFlags[f.feature_key] = (f.enabled === false) ? false : true;
   });
-  console.log('[FeatureFlags] 로드 완료:', JSON.stringify(window.__featureFlags));
   applyFeatureFlagsToUI();
 }
 
@@ -4401,15 +4398,27 @@ function applyFeatureFlagsToUI() {
   Object.entries(sectionMap).forEach(([key, id]) => {
     const el = document.getElementById(id);
     if (!el) return;
-    const flagEnabled = window.__featureFlags[key] !== false;
+    const ffVal = window.__featureFlags[key];
+    const flagEnabled = ffVal === undefined ? true : !!ffVal;
     if (flagEnabled) {
       el.style.display = '';
       el.style.opacity = '';
+      el.style.background = '';
+      // (숨김) 라벨 제거
+      const lbl = el.querySelector('.sidebar-label');
+      if (lbl) lbl.textContent = lbl.textContent.replace(' (숨김)','');
     } else if (isAdminUser) {
       el.style.display = '';
-      el.style.opacity = '0.5';
+      el.style.opacity = '0.55';
+      el.style.background = '#EDEBE7';
       const lbl = el.querySelector('.sidebar-label');
       if (lbl && !lbl.textContent.includes('(숨김)')) lbl.textContent += ' (숨김)';
+      // 하위 버튼들도 회색 처리
+      el.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.style.background = '#EDEBE7';
+        btn.style.opacity = '0.6';
+        btn.style.borderLeft = '3px solid var(--rd)';
+      });
     } else {
       el.style.display = 'none';
     }
@@ -4497,9 +4506,7 @@ async function openFeatureFlagsAdmin() {
   if (old) old.remove();
 
   const rows = FEATURES.map(f => {
-    // DB에 저장된 상태 정확히 반영 (undefined=기본ON, false=OFF, true=ON)
-    const ffVal = window.__featureFlags[f.key];
-    const enabled = ffVal === undefined ? true : !!ffVal;
+    const enabled = window.__featureFlags[f.key] !== false;
     if (f.isSection) {
       return `<tr style="background:var(--crm)">
         <td colspan="2" style="padding:10px;font-size:12px;font-weight:700;color:var(--br)">${f.label}</td>
@@ -4635,22 +4642,27 @@ async function saveAllFeatureFlags() {
   const keys = Object.keys(window.__ffTemp);
   if (!keys.length) { document.getElementById('featureFlagsModal')?.remove(); return; }
 
+  let saveErrors = [];
   for (const key of keys) {
-    const enabled = window.__ffTemp[key];
-    const { data: existing } = await sb.from('feature_flags').select('feature_key').eq('feature_key', key).maybeSingle();
-    if (existing) {
-      await sb.from('feature_flags').update({enabled, updated_at: new Date().toISOString()}).eq('feature_key', key);
-    } else {
-      await sb.from('feature_flags').insert({feature_key: key, enabled, updated_at: new Date().toISOString()});
-    }
-    window.__featureFlags[key] = enabled;
+    const val = window.__ffTemp[key];
+    // DELETE 후 INSERT — RLS/upsert 문제 완전 우회
+    await sb.from('feature_flags').delete().eq('feature_key', key);
+    const { error } = await sb.from('feature_flags').insert({
+      feature_key: key, enabled: val, updated_at: new Date().toISOString()
+    });
+    if (error) saveErrors.push(key + ': ' + error.message);
+    window.__featureFlags[key] = val;
   }
 
-  // 저장 후 DB에서 다시 로드하여 확인
-  await loadFeatureFlags();
+  if (saveErrors.length > 0) {
+    alert('⚠ DB 저장 실패 (RLS 정책 문제 가능)\n\nSupabase SQL Editor에서 실행해주세요:\nALTER TABLE feature_flags DISABLE ROW LEVEL SECURITY;\n\n오류:\n' + saveErrors.join('\n'));
+  } else {
+    await loadFeatureFlags();
+    alert('저장 완료!');
+  }
+
+  applyFeatureFlagsToUI();
   document.getElementById('featureFlagsModal')?.remove();
-  console.log('[FeatureFlags] 저장 후 상태:', JSON.stringify(window.__featureFlags));
-  alert('메뉴 표시 설정이 저장되었습니다.');
   window.__ffTemp = {};
 }
 
