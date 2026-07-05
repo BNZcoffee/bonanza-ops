@@ -8806,12 +8806,13 @@ function onCellChange(sel) {
   }
 
   // PT 직원 근무조 시간 체크
-  // ── 정규직 대휴 입력 검증 (전월 이월 잔여 있어야만 입력 가능) ──
+  // ── 대휴 입력 검증 (전월 이월 잔여 있어야만 입력 가능 — 정규직+지원 모두) ──
   if (val === '대휴' && userId) {
     const staffInfo0 = curScheduleStaff.find(s => s.id === userId);
-    if (staffInfo0 && staffInfo0.employment_type !== 'parttime') {
-      // curScheduleStaff에 carryIn 정보가 있으면 확인
-      const carryIn = window.__leaveBalanceMap?.[userId]?.carryIn || 0;
+    if (staffInfo0) {
+      // __leaveBalanceMap이 없으면 집계 패널에서 생성 (안전장치)
+      if (!window.__leaveBalanceMap) window.__leaveBalanceMap = {};
+      const carryIn = window.__leaveBalanceMap[userId]?.carryIn || 0;
       // 이미 이 스케줄에 입력된 대휴 개수
       let usedCarry = 0;
       const year  = window.__schYear;
@@ -8827,8 +8828,11 @@ function onCellChange(sel) {
       }
       if (carryIn - usedCarry < 1) {
         const prev = curScheduleEntries[key];
-        sel.value = prev?._rawCode || prev?.entry_type || prev?.shift_code || '';
-        alert(`⚠ ${staffInfo0.name} 직원의 전월 휴무 이월 잔여가 없습니다.\n\n이월 잔여: ${carryIn - usedCarry}일 (원래 ${carryIn}일 · 이번 달 이미 사용 ${usedCarry}일)\n\n대휴는 전월 잔여 휴무가 있을 때만 입력할 수 있습니다.\n일반 휴무(오프)로 변경하거나 인사팀에 문의하세요.`);
+        const prevVal = prev?._rawCode || prev?.entry_type || prev?.shift_code || '';
+        sel.value = prevVal;
+        // 값 확실히 롤백
+        setTimeout(() => { sel.value = prevVal; }, 0);
+        alert(`⚠ ${staffInfo0.name} 직원의 전월 휴무 이월 잔여가 없습니다.\n\n이월 잔여: ${carryIn - usedCarry}일 (이월 ${carryIn}일 · 이번 달 사용 ${usedCarry}일)\n\n대휴는 전월 잔여 휴무가 있을 때만 입력할 수 있습니다.\n일반 휴무(오프)로 변경하거나 인사팀에 문의하세요.`);
         return;
       }
     }
@@ -9330,6 +9334,49 @@ function calcRetireLeave(retiree, year, month, retireDate, holSet, daysInMonth) 
   };
 }
 
+
+// 인원 순서 ↑↓ 이동
+function moveStaffRow(si, dir) {
+  const newIdx = si + dir;
+  if (newIdx < 0 || newIdx >= curScheduleStaff.length) return;
+  syncCellsToMemory();
+
+  // 배열 교체
+  const tmp = curScheduleStaff[si];
+  curScheduleStaff[si] = curScheduleStaff[newIdx];
+  curScheduleStaff[newIdx] = tmp;
+
+  // DOM 행 교체
+  const tbody = document.getElementById('schTbody');
+  if (!tbody) return;
+  const rows = Array.from(tbody.rows).filter(r => r.id !== 'dailyCountRow');
+  if (!rows[si] || !rows[newIdx]) return;
+  if (dir === -1) {
+    tbody.insertBefore(rows[si], rows[newIdx]);
+  } else {
+    if (rows[newIdx].nextSibling) {
+      tbody.insertBefore(rows[si], rows[newIdx].nextSibling);
+    } else {
+      tbody.appendChild(rows[si]);
+    }
+  }
+  // onclick 인덱스 재할당
+  Array.from(tbody.rows).forEach((tr, i) => {
+    if (tr.id === 'dailyCountRow') return;
+    tr.dataset.staffIdx = i;
+    tr.querySelectorAll('button[onclick]').forEach(btn => {
+      const oc = btn.getAttribute('onclick');
+      if (oc.includes('moveStaffRow')) {
+        const dir2 = oc.includes('-1') ? -1 : 1;
+        btn.setAttribute('onclick', `moveStaffRow(${i},${dir2})`);
+      }
+      if (oc.includes('removeExtraStaff')) btn.setAttribute('onclick', `removeExtraStaff(${i})`);
+      if (oc.includes('removeStaffFromSchedule')) btn.setAttribute('onclick', `removeStaffFromSchedule(${i})`);
+    });
+  });
+  updateDailyCountRow();
+}
+
 function removeStaffFromSchedule(idx) {
   if (!confirm('이 직원을 이번 달 스케줄 목록에서 제외할까요?')) return;
   // 현재 셀 값 저장
@@ -9432,15 +9479,27 @@ function removeExtraStaff(si) {
   if (!confirm('이 지원/교육 인원을 목록에서 제외할까요?')) return;
   syncCellsToMemory();
   curScheduleStaff.splice(si, 1);
-  document.getElementById(`staff-row-extra-${si}`)?.remove();
-  // 나머지 행 idx 갱신
-  document.querySelectorAll('#schTbody tr').forEach((tr, i) => {
-    tr.dataset.staffIdx = i;
-    const btn = tr.querySelector(`button[onclick^="removeExtraStaff"]`);
-    if (btn) btn.setAttribute('onclick', `removeExtraStaff(${i})`);
-    const btn2 = tr.querySelector(`button[onclick^="removeStaffFromSchedule"]`);
-    if (btn2) btn2.setAttribute('onclick', `removeStaffFromSchedule(${i})`);
-  });
+  // tbody에서 해당 인덱스의 행 직접 삭제
+  const tbody = document.getElementById('schTbody');
+  if (tbody && tbody.rows[si]) tbody.deleteRow(si);
+  // 나머지 행 인덱스 재할당
+  if (tbody) {
+    Array.from(tbody.rows).forEach((tr, i) => {
+      if (tr.id === 'dailyCountRow') return;
+      tr.dataset.staffIdx = i;
+      // onclick 인덱스 갱신
+      tr.querySelectorAll('button[onclick]').forEach(btn => {
+        const oc = btn.getAttribute('onclick');
+        if (oc.includes('removeExtraStaff')) btn.setAttribute('onclick', `removeExtraStaff(${i})`);
+        if (oc.includes('removeStaffFromSchedule')) btn.setAttribute('onclick', `removeStaffFromSchedule(${i})`);
+        if (oc.includes('moveStaffRow')) {
+          const dir = oc.includes('-1') ? -1 : 1;
+          btn.setAttribute('onclick', `moveStaffRow(${i},${dir})`);
+        }
+      });
+    });
+  }
+  updateDailyCountRow();
 }
 
 
@@ -9490,12 +9549,15 @@ async function buildStaffRowWithCross(staff, si, daysInMonth, year, month, allCo
 
   let rowHtml = `<tr data-staff-idx="${si}" data-staff-id="${staff.id||''}" draggable="false">
     <td style="position:sticky;left:0;background:#fff;z-index:2;padding:4px 6px;font-size:12px;font-weight:600;border:0.5px solid var(--crd);white-space:nowrap;min-width:100px">
-      <div style="display:flex;align-items:center;gap:4px">
-        <span class="sch-drag-handle" style="cursor:grab;color:var(--th);font-size:15px;padding:2px 3px;flex-shrink:0;user-select:none" title="드래그하여 순서 변경">⠿</span>
-        <span style="flex:1">${staff.name}${staff.isExtra?' <span style="font-size:9px;color:var(--th)">(지원)</span>':''}</span>
+      <div style="display:flex;align-items:center;gap:2px">
+        <div style="display:flex;flex-direction:column;gap:0;flex-shrink:0">
+          <button onclick="moveStaffRow(${si},-1)" title="위로" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:9px;padding:0 1px;line-height:1.1">▲</button>
+          <button onclick="moveStaffRow(${si},1)" title="아래로" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:9px;padding:0 1px;line-height:1.1">▼</button>
+        </div>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${staff.name}${staff.isExtra?' <span style="font-size:9px;color:var(--th)">(지원)</span>':''}</span>
         ${!staff.isExtra
-          ? `<button onclick="removeStaffFromSchedule(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px" title="목록에서 제외">✕</button>`
-          : `<button onclick="removeExtraStaff(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px" title="지원인력 제외">✕</button>`}
+          ? `<button onclick="removeStaffFromSchedule(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px;flex-shrink:0" title="목록에서 제외">✕</button>`
+          : `<button onclick="removeExtraStaff(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px;flex-shrink:0" title="지원인력 제외">✕</button>`}
       </div>
     </td>`;
 
@@ -10310,23 +10372,34 @@ function updateDailyCountRow() {
 
     // tbody 모든 행의 해당 날짜 select 확인
     Array.from(tbody.rows).forEach(tr => {
-      // 해당 날짜 셀 찾기
-      const sel = tr.querySelector(`select[data-date="${dateStr}"]`);
-      // 읽기전용(크로스매장) 셀 찾기
-      const readonlyDiv = tr.querySelector(`td div[title*="지원근무"]`);
+      if (tr.id === 'dailyCountRow') return; // 합계 행 자체 제외
+
+      // 해당 날짜의 td 찾기 (d번째 = d+0 인덱스, 첫 td는 이름)
+      const tds = tr.querySelectorAll('td');
+      const dateTd = tds[d]; // 이름 td가 0, 날짜 td는 1~daysInMonth
+      if (!dateTd) return;
+
+      // select가 있으면 (편집 모드)
+      const sel = dateTd.querySelector('select');
+      // select가 없으면 div 텍스트에서 값 읽기 (뷰 모드)
       const nameText = tr.querySelector('td span')?.textContent?.trim() || '';
 
+      let val = '';
       if (sel) {
-        const val = sel.value || '';
+        val = sel.value || '';
         if (!val) return; // 빈칸 = 미입력
         if (NON_WORK.has(val)) return; // 비출근
         const cnt = HALF.has(val) ? 0.5 : 1;
         count += cnt;
         details.push(nameText + (cnt < 1 ? '(0.5)' : ''));
-      } else if (readonlyDiv) {
-        // 크로스 매장 지원인원 포함
-        count += 1;
-        details.push(nameText + '(지원)');
+      } else {
+        // 뷰 모드 또는 읽기전용: td 텍스트에서 값 읽기
+        const divEl = dateTd?.querySelector('div');
+        const txt = (divEl?.textContent?.trim() || '').split('\n')[0].trim();
+        if (txt && txt !== '-' && !NON_WORK.has(txt)) {
+          count += HALF.has(txt) ? 0.5 : 1;
+          details.push(nameText);
+        }
       }
     });
 
