@@ -1528,9 +1528,29 @@ async function renderPostDetail(area) {
   const comments = cmtsRes.data || [];
   const attachments = attRes.data || [];
 
-  // active non-admin user count for reach
-  const { data: activeUsers } = await sb.from('users').select('id').eq('active',true).neq('role','admin');
-  const total = (activeUsers||[]).length;
+  // 확인 대상: access 권한에 따라 현장 직원 또는 매니저만
+  let targetQuery = sb.from('users').select('id,name,store,role,is_master,is_vice_master,part')
+    .eq('active', true);
+  const { data: allActiveUsers } = await targetQuery;
+
+  // 대상 필터: 총괄/부총괄/운영팀/인사팀은 확인 대상에서 제외 (현장 직원 대상 공지)
+  const targetUsers = (allActiveUsers||[]).filter(u => {
+    // 총괄/부총괄 제외
+    if (u.is_master || u.is_vice_master) return false;
+    // 운영팀(admin)/인사팀(hr) 제외
+    if (u.role === 'admin' || u.role === 'hr') return false;
+    // 부서담당(part 있는 사람) 제외
+    if (u.part) return false;
+
+    if (p.access === 'manager') {
+      // 매니저 이상 대상 공지 → 매니저만
+      return isManagerRole(u.role);
+    }
+    // 전 직원 대상 → 현장 직원(바리스타/파티쉐/PT) + 매니저
+    return true;
+  });
+
+  const total = targetUsers.length;
   const rate = total > 0 ? Math.round(reads.length/total*100) : 0;
 
   const myRead = reads.find(r => r.user_id === currentUser.id);
@@ -1554,7 +1574,15 @@ async function renderPostDetail(area) {
       <div class="reach-label"><span>전체 도달률 ${rate}%</span><span>${reads.length}/${total}명</span></div>
       <div style="margin-top:8px">
         ${reads.map(r=>`<div class="read-row"><div><span style="font-weight:600;font-size:12px">${r.users?.name||''}</span> <span style="color:var(--th);font-size:11px">${r.users?.store||''}</span></div><span style="color:var(--th);font-size:11px">${fmtDateTime(r.read_at)||''}</span></div>`).join('')}
-        ${total-reads.length>0?`<div class="read-row"><span class="unread-badge">미확인 ${total-reads.length}명</span></div>`:''}
+        ${(() => {
+          const readSet = new Set(reads.map(r=>r.user_id));
+          const unread = targetUsers.filter(u => !readSet.has(u.id));
+          return unread.length > 0
+            ? '<div style="margin-top:8px;padding:10px;background:var(--crm);border-radius:8px">' +
+              '<div style="font-size:11px;font-weight:600;color:var(--rd);margin-bottom:6px">미확인 ' + unread.length + '명</div>' +
+              unread.map(u => '<span style="font-size:11px;color:var(--th);margin-right:10px">' + u.store + ' ' + u.name + '</span>').join('') +
+              '</div>' : '';
+        })()}
       </div>
     </div>`;
   }
@@ -4008,7 +4036,8 @@ async function openRemindModal(postId){
   const {data:ns} = await sb.from('notification_settings').select('remind_target').single();
   const defTarget = ns?.remind_target || 'unread';
   // 미확인 인원 수 계산
-  const {data:activeUsers} = await sb.from('users').select('id').eq('active',true).neq('role','admin');
+  const {data:activeUsersRaw} = await sb.from('users').select('id,role,is_master,is_vice_master,part').eq('active',true);
+  const activeUsers = (activeUsersRaw||[]).filter(u => !u.is_master && !u.is_vice_master && u.role !== 'admin' && u.role !== 'hr' && !u.part);
   const {data:reads} = await sb.from('post_reads').select('user_id').eq('post_id',postId);
   const readSet = new Set((reads||[]).map(r=>r.user_id));
   const total = (activeUsers||[]).length;
@@ -5049,7 +5078,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-07-05';   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-07-06';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
