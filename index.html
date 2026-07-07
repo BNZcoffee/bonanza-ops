@@ -2757,7 +2757,7 @@ async function renderStaff(area) {
           <th>연락처</th><th>이메일</th>
           <th onclick="sortStaff('hire_date')" style="cursor:pointer">입사일 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
           <th>퇴사일</th>
-          <th style="color:var(--gn)">연차잔여</th>
+          ${isFeatureEnabled('annual_leave') ? '<th style="color:var(--gn)">연차잔여</th>' : ''}
           ${currentUser.is_master ? `
             <th style="color:var(--gd);font-size:10px;cursor:pointer;user-select:none;white-space:nowrap"
                 onclick="togglePwCol()" title="비밀번호 열 표시/숨김">
@@ -4526,7 +4526,8 @@ async function openFeatureFlagsAdmin() {
     {key:'schedules',     label:'  매장 스케줄',    desc:'월간 스케줄 편성'},
     {key:'sch_confirm',   label:'  컨펌 대기 목록', desc:'운영팀 컨펌 대기'},
     {key:'attendance',    label:'  근태 마감 현황', desc:'인사팀 근태 확인'},
-    {key:'leave_settings',label:'  휴무 기준 설정', desc:'휴무 일수 기준'}
+    {key:'leave_settings',label:'  휴무 기준 설정', desc:'휴무 일수 기준'},
+    {key:'annual_leave',  label:'  연차 관리',      desc:'연차잔여 표시·연차/반차 입력 (숨기면 스케줄·인원현황에서 연차 관련 숨김)'}
   ];
   // 사용 설명서는 항상 표시 (Feature Flags 대상 아님)
   // 숨겨진 기능의 매뉴얼 내용은 manual_sections에서 자동 필터
@@ -4600,7 +4601,7 @@ async function toggleSection(sectionKey, enabled, checkbox) {
   const sectionMap = {
     'sec_requests':  ['requests','reqarchive','reqstats','reqtypes'],
     'sec_reports':   ['reports','interviews','handover','repairs'],
-    'sec_schedule':  ['schedules','sch_confirm','attendance','leave_settings']
+    'sec_schedule':  ['schedules','sch_confirm','attendance','leave_settings','annual_leave']
   };
   const children = sectionMap[sectionKey] || [];
 
@@ -8723,9 +8724,13 @@ async function renderScheduleEdit(area) {
   // 근무조 코드 옵션 (select용) — 전역 캐시에도 저장
   window.__cachedShiftCodes = shiftCodes;
   window.__cachedLeaveTypes = leaveTypes;
+  // 연차 기능 숨김 시 연차/반차 선택지 제거
+  const annualHidden = !isFeatureEnabled('annual_leave');
+  const ANNUAL_CODES = new Set(['연차','오전반차','오후반차','반차']);
+  const filteredLeaveTypes = annualHidden ? leaveTypes.filter(l => !ANNUAL_CODES.has(l.code)) : leaveTypes;
   const allCodeOptions = [
     ...shiftCodes.map(s=>({value:s.code, label:s.code+(s.label?'('+s.label+')':'')+' '+(s.start_time||'')+'~'+(s.end_time||''), isShift:true})),
-    ...leaveTypes.map(l=>({value:l.code, label:l.code, isShift:false}))
+    ...filteredLeaveTypes.map(l=>({value:l.code, label:l.code, isShift:false}))
   ];
 
   // 날짜 헤더
@@ -8755,7 +8760,7 @@ async function renderScheduleEdit(area) {
     <span style="display:inline-flex;align-items:center;gap:4px;background:var(--cr);border-radius:8px;padding:3px 9px;font-size:11px;margin:2px">
       <strong>${s.code}</strong>${s.label?'('+s.label+')':''} ${s.start_time||''}~${s.end_time||''}
     </span>`).join('');
-  const leaveLegend = leaveTypes.map(l=>`
+  const leaveLegend = filteredLeaveTypes.map(l=>`
     <span style="display:inline-flex;align-items:center;gap:4px;background:${l.color}22;border:0.5px solid ${l.color};border-radius:8px;padding:3px 9px;font-size:11px;margin:2px">
       <span style="width:8px;height:8px;border-radius:50%;background:${l.color}"></span>${l.code}
     </span>`).join('');
@@ -10759,7 +10764,7 @@ async function renderBalancePanel() {
       <th colspan="3" style="${thStyle};background:var(--blb);color:var(--bl)">전월 휴무 (대휴)</th>
       <th colspan="3" style="${thStyle};background:var(--gnb);color:var(--gn)">당월 휴무</th>
       <th colspan="3" style="${thStyle};background:var(--crm);color:var(--brm)">당월 근무</th>
-      <th rowspan="2" style="${thStyle};color:var(--gn)">연차잔여</th>
+      ${isFeatureEnabled('annual_leave') ? '<th rowspan="2" style="' + thStyle + ';color:var(--gn)">연차잔여</th>' : ''}
     </tr>
     <tr style="background:var(--cr);color:var(--th);font-size:10px">
       <th style="${thStyle}">이월</th><th style="${thStyle}">사용</th><th style="${thStyle}">잔여</th>
@@ -10985,9 +10990,13 @@ async function rebuildScheduleCells(editMode) {
   const leaveTypes   = window.__cachedLeaveTypes || [];
   const leaveColorMap = {};
   leaveTypes.forEach(l => leaveColorMap[l.code] = l.color);
+  // 연차 기능 숨김 시 연차/반차 선택지 제거
+  const annualHidden = !isFeatureEnabled('annual_leave');
+  const ANNUAL_CODES = new Set(['연차','오전반차','오후반차','반차']);
+  const filteredLeaveTypes = annualHidden ? leaveTypes.filter(l => !ANNUAL_CODES.has(l.code)) : leaveTypes;
   const allCodeOptions = [
     ...shiftCodes.map(s=>({value:s.code, label:s.code+(s.label?'('+s.label+')':'')+' '+(s.start_time||'')+'~'+(s.end_time||''), isShift:true})),
-    ...leaveTypes.map(l=>({value:l.code, label:l.code, isShift:false}))
+    ...filteredLeaveTypes.map(l=>({value:l.code, label:l.code, isShift:false}))
   ];
 
   const canEditScheduleNow = editMode; // 편집 모드일 때만 편집 가능
