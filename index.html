@@ -4728,9 +4728,13 @@ async function setFeatureFlag(key, enabled, checkbox) {
 // ═══════════════════════════════════════════
 
 async function sendRoleBasedPostNotify(postId, title) {
-  // 공지 게시 → 전 활성 직원에게 알림 (본인 제외)
+  // 권한별 알림 설정 로드
+  const { data: nrs } = await sb.from('notification_role_settings').select('*').eq('event_key','new_post');
+  const roleCheck = {};
+  (nrs||[]).forEach(r => { roleCheck[r.role_key] = !(r.enabled===false||r.enabled==='false'||r.enabled===0||r.enabled===null); });
+
   const { data: allUsers } = await sb.from('users')
-    .select('id,role,store,slack_member_id')
+    .select('id,role,store,slack_member_id,is_master,is_vice_master,part')
     .eq('active', true)
     .neq('id', currentUser.id);
 
@@ -4739,19 +4743,29 @@ async function sendRoleBasedPostNotify(postId, title) {
   const msg = '[새 공지] ' + (title||'새 공지가 등록되었습니다') + ' — 확인해주세요.';
   let sent = 0;
   for (const u of allUsers) {
-    // 앱 알림 생성
+    // 역할 판정
+    let grade = 'staff';
+    if (u.is_master) grade = 'master';
+    else if (u.is_vice_master) grade = 'vice';
+    else if (u.part) grade = 'dept';
+    else if (isManagerRole(u.role)) grade = 'manager';
+
+    // 권한별 알림 설정 체크
+    const shouldSend = roleCheck[grade] !== undefined ? roleCheck[grade]
+      : !!(NOTIF_ROLE_DEFAULTS['new_post']?.[NOTIF_ROLES.findIndex(r=>r.key===grade)]);
+    if (!shouldSend) continue;
+
     await sb.from('notifications').insert({
       user_id: u.id, type: 'new_post', ref_id: postId, ref_type: 'post',
       message: msg, is_read: false, created_at: new Date().toISOString()
     });
-    // 슬랙 DM (멤버 ID 있으면)
     if (u.slack_member_id) {
       const link = 'https://bnzcoffee.github.io/bonanza-ops/?post=' + postId;
       await sendSlackDM(u.slack_member_id, '🔔 ' + msg + '\n' + link);
     }
     sent++;
   }
-  console.log(`공지 알림 ${sent}명 발송 완료`);
+  console.log('[알림] 공지 ' + sent + '명 발송');
 }
 
 // 업무신청 상태 변경 시 관련자 알림
@@ -4935,6 +4949,141 @@ const _origGoPage = typeof goPage === 'function' ? null : null; // 아래서 처
 // 테스트 모드에서 저장 차단
 function isTestMode() { return !!window.__testMode; }
 
+
+// ═══════════════════════════════════════════
+// 권한별 알림 설정 — 이벤트×역할 매트릭스
+// notification_role_settings 테이블에 저장
+// ═══════════════════════════════════════════
+const NOTIF_EVENTS = [
+  {group:'공지 게시판', items:[
+    {key:'new_post',       label:'새 공지 등록'},
+    {key:'post_comment',   label:'공지 댓글 태그'},
+    {key:'post_remind',    label:'미확인 공지 리마인드'},
+  ]},
+  {group:'업무 신청', items:[
+    {key:'req_new',        label:'새 업무 신청 접수'},
+    {key:'req_status',     label:'신청 상태 변경 (처리중/완료/반려)'},
+    {key:'req_comment',    label:'신청 댓글 태그'},
+  ]},
+  {group:'스케줄 관리', items:[
+    {key:'sch_confirm_req',label:'컨펌/재컨펌 요청'},
+    {key:'sch_confirmed',  label:'컨펌 완료 알림'},
+    {key:'sch_feedback',   label:'정정 요청'},
+    {key:'sch_feedback_done',label:'정정 처리 완료'},
+  ]},
+  {group:'인원 관리', items:[
+    {key:'staff_retire',   label:'퇴사 예정 등록'},
+    {key:'staff_new',      label:'신규 직원 등록'},
+  ]},
+];
+
+const NOTIF_ROLES = [
+  {key:'master',  label:'총괄'},
+  {key:'vice',    label:'부총괄'},
+  {key:'dept',    label:'부서담당'},
+  {key:'manager', label:'매니저'},
+  {key:'staff',   label:'매장직원'},
+];
+
+// 기본값: 어떤 역할이 어떤 이벤트를 받는지
+const NOTIF_ROLE_DEFAULTS = {
+  new_post:        [1,1,1,1,1],  // 전 직원
+  post_comment:    [1,1,1,1,1],  // 태그된 본인
+  post_remind:     [0,0,0,1,1],  // 현장 직원
+  req_new:         [1,1,1,0,0],  // 부서담당 이상
+  req_status:      [1,1,1,1,0],  // 매니저 이상 + 작성자
+  req_comment:     [1,1,1,1,1],  // 태그된 본인
+  sch_confirm_req: [1,1,1,0,0],  // 부서담당 이상
+  sch_confirmed:   [0,0,0,1,0],  // 매니저 (작성자)
+  sch_feedback:    [0,0,0,1,0],  // 매니저 (작성자)
+  sch_feedback_done:[1,1,1,0,0], // 부서담당 이상
+  staff_retire:    [1,1,0,0,0],  // 총괄/부총괄
+  staff_new:       [1,1,1,0,0],  // 부서담당 이상
+};
+
+window.__roleNotifSettings = {};
+
+async function renderRoleNotifSettings() {
+  const area = document.getElementById('roleNotifArea');
+  if (!area) return;
+
+  // DB에서 저장된 설정 로드
+  const { data } = await sb.from('notification_role_settings').select('*');
+  window.__roleNotifSettings = {};
+  (data||[]).forEach(r => {
+    if (!window.__roleNotifSettings[r.event_key]) window.__roleNotifSettings[r.event_key] = {};
+    window.__roleNotifSettings[r.event_key][r.role_key] = !(r.enabled === false || r.enabled === 'false' || r.enabled === 0 || r.enabled === null);
+  });
+
+  const headerCols = NOTIF_ROLES.map(r =>
+    `<th style="padding:8px 6px;font-size:11px;text-align:center;min-width:60px;color:var(--tm)">${r.label}</th>`
+  ).join('');
+
+  let html = '';
+  NOTIF_EVENTS.forEach(group => {
+    html += `<tr style="background:var(--crm)"><td colspan="${NOTIF_ROLES.length+1}" style="padding:10px;font-size:12px;font-weight:700;color:var(--br)">${group.group}</td></tr>`;
+    group.items.forEach(ev => {
+      const cols = NOTIF_ROLES.map(role => {
+        const saved = window.__roleNotifSettings[ev.key]?.[role.key];
+        const defaultVal = NOTIF_ROLE_DEFAULTS[ev.key]?.[NOTIF_ROLES.indexOf(role)] ?? 0;
+        const checked = saved !== undefined ? saved : !!defaultVal;
+        return `<td style="padding:6px;text-align:center;border:0.5px solid var(--crd)">
+          <label class="switch" style="transform:scale(.8)">
+            <input type="checkbox" data-event="${ev.key}" data-role="${role.key}" ${checked?'checked':''}/>
+            <span class="slider"></span>
+          </label>
+        </td>`;
+      }).join('');
+      html += `<tr><td style="padding:8px 12px;font-size:12px;border:0.5px solid var(--crd)">${ev.label}</td>${cols}</tr>`;
+    });
+  });
+
+  area.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;border:0.5px solid var(--crd)">
+      <thead><tr style="background:var(--br);color:#fff">
+        <th style="padding:10px 12px;text-align:left;font-size:12px">알림 이벤트</th>${headerCols}
+      </tr></thead>
+      <tbody>${html}</tbody>
+    </table>
+    <div style="font-size:11px;color:var(--th);margin-top:8px;line-height:1.6">
+      💡 "태그된 본인" 이벤트는 태그된 직원에게만 발송됩니다 (역할 무관).<br>
+      💡 변경 후 [알림 설정 저장] 버튼을 눌러야 적용됩니다.
+    </div>
+    <button class="btn-submit" onclick="saveRoleNotifSettings()" style="width:100%;margin-top:12px">
+      <i class="ti ti-device-floppy"></i> 알림 설정 저장
+    </button>`;
+}
+
+async function saveRoleNotifSettings() {
+  const area = document.getElementById('roleNotifArea');
+  if (!area) return;
+  const checkboxes = area.querySelectorAll('input[data-event]');
+  let count = 0;
+  for (const cb of checkboxes) {
+    const eventKey = cb.dataset.event;
+    const roleKey  = cb.dataset.role;
+    const enabled  = cb.checked;
+    // DELETE + INSERT
+    await sb.from('notification_role_settings').delete()
+      .eq('event_key', eventKey).eq('role_key', roleKey);
+    const { error } = await sb.from('notification_role_settings').insert({
+      event_key: eventKey, role_key: roleKey, enabled,
+      updated_at: new Date().toISOString()
+    });
+    if (!error) count++;
+  }
+  alert(`알림 설정 저장 완료! (${count}건)`);
+}
+
+// 알림 발송 시 역할 체크
+async function shouldNotifyRole(eventKey, userGradeStr) {
+  // DB 설정이 있으면 우선, 없으면 기본값
+  const saved = window.__roleNotifSettings?.[eventKey]?.[userGradeStr];
+  if (saved !== undefined) return saved;
+  const idx = NOTIF_ROLES.findIndex(r => r.key === userGradeStr);
+  return !!(NOTIF_ROLE_DEFAULTS[eventKey]?.[idx]);
+}
+
 async function createNotification(userId, type, refId, refType, message) {
   if (!userId) return;
   const { error } = await sb.from('notifications').insert({
@@ -5078,7 +5227,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-07-06';   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-07-07';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
