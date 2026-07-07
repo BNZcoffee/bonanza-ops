@@ -2999,11 +2999,21 @@ async function openEditUser(userId){
           </div>
           <div style="font-size:10px;color:var(--th);margin-top:3px">= 근로+휴게 (근무조 매칭 기준)</div>
         </div>
-        <div><label class="form-label">시급 <span style="font-size:9px;color:var(--th)">(원/h, 참고용)</span></label>
+        <div><label class="form-label">시급 <span style="font-size:9px;color:var(--th)">(원/h)</span></label>
           <div style="display:flex;align-items:center;gap:4px">
             <input class="form-input" type="number" id="eu_pt_wage" value="${u?.pt_hourly_wage||''}" placeholder="예: 10030" min="0" step="10" style="width:100px"/>
             <span style="font-size:12px;color:var(--ts)">원</span>
           </div>
+        </div>
+        <div><label class="form-label">주 근무일수 <span style="color:var(--rd)">*</span></label>
+          <div style="display:flex;align-items:center;gap:4px">
+            <select class="form-input" id="eu_pt_days" style="width:80px">
+              <option value="">선택</option>
+              ${[1,2,3,4,5,6].map(d => '<option value="'+d+'"'+(u?.pt_weekly_days==d?' selected':'')+'>'+d+'일</option>').join('')}
+            </select>
+            <span style="font-size:11px;color:var(--th)">/주</span>
+          </div>
+          <div style="font-size:10px;color:var(--th);margin-top:3px">스케줄 편성 시 초과 근무 방지</div>
         </div>
         <div style="grid-column:1/-1;font-size:11px;color:var(--th)">
           📌 총 체류시간(계약근로+휴게) = 근무조 배정 기준 &nbsp;|&nbsp; 시급 계산 = 계약 근로시간 × 시급 &nbsp;|&nbsp; 시급은 Sheets 동기화되나 스케줄 화면에는 미표시
@@ -3147,7 +3157,9 @@ async function submitEditUser(){
     pt_break_minutes: ptBreakMin,
     pt_hours_per_day: ptNetHours,  // 총 체류시간 → 근무조 매칭 기준
     pt_hourly_wage: employmentType === 'parttime'
-      ? (parseFloat(document.getElementById('eu_pt_wage')?.value||0)||null) : null
+      ? (parseFloat(document.getElementById('eu_pt_wage')?.value||0)||null) : null,
+    pt_weekly_days: employmentType === 'parttime'
+      ? (parseInt(document.getElementById('eu_pt_days')?.value||0)||null) : null
   };
   if(pw) payload.password_hash = pw;
   let error, newCode;
@@ -8644,7 +8656,7 @@ async function renderScheduleEdit(area) {
 
   // 직원, 근무조코드, 휴무유형, 기존 entries, 휴무잔여 병렬 로드
   const [staffRes, shiftRes, leaveRes, entriesRes, balRes] = await Promise.all([
-    sb.from('users').select('id,name,store,role,employment_type,hire_date,retire_date,active,pt_work_hours,pt_hours_per_day').eq('store',store).order('name'),
+    sb.from('users').select('id,name,store,role,employment_type,hire_date,retire_date,active,pt_work_hours,pt_hours_per_day,pt_weekly_days').eq('store',store).order('name'),
     sb.from('store_shift_codes').select('*').eq('store',store).eq('active',true).order('sort_order'),
     sb.from('leave_types').select('*').order('sort_order'),
     curSchedule ? sb.from('schedule_entries').select('*').eq('schedule_id', curSchedule.id) : Promise.resolve({data:[]}),
@@ -8702,7 +8714,7 @@ async function renderScheduleEdit(area) {
   const extraNames = [...new Set(entries.filter(e=>e.extra_name && !e.user_id).map(e=>e.extra_name))];
 
   curScheduleStaff = [
-    ...staffList.map(u=>({id:u.id, name:u.name, isExtra:false, hire_date:u.hire_date, retire_date:u.retire_date, employment_type:u.employment_type, pt_work_hours:u.pt_work_hours||null, pt_hours_per_day:u.pt_hours_per_day||null})),
+    ...staffList.map(u=>({id:u.id, name:u.name, isExtra:false, hire_date:u.hire_date, retire_date:u.retire_date, employment_type:u.employment_type, pt_work_hours:u.pt_work_hours||null, pt_hours_per_day:u.pt_hours_per_day||null, pt_weekly_days:u.pt_weekly_days||null})),
     ...extraStaffData,
     ...extraNames.map(n=>({id:null, extra_name:n, name:n, isExtra:true}))
   ];
@@ -9027,6 +9039,45 @@ function onCellChange(sel) {
   }
 
   // PT 직원 근무조 시간 체크
+  // ── PT 주 근무일수 초과 검증 ──
+  if (val && userId) {
+    const ptStaff = curScheduleStaff.find(s => s.id === userId);
+    if (ptStaff && ptStaff.employment_type === 'parttime' && ptStaff.pt_weekly_days) {
+      const maxDays = ptStaff.pt_weekly_days;
+      // 해당 날짜가 속한 주(월~일) 범위 계산
+      const cellDate = new Date(date);
+      const dayOfWeek = cellDate.getDay(); // 0=일, 1=월...
+      const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+      const weekStart = new Date(cellDate);
+      weekStart.setDate(cellDate.getDate() + mondayOffset);
+
+      // 해당 주에 이미 편성된 근무일 카운트
+      const NON_WORK_CHECK = new Set(['휴무','대휴','결근','']);
+      let weekWorkCount = 0;
+      for (let wd = 0; wd < 7; wd++) {
+        const wDate = new Date(weekStart);
+        wDate.setDate(weekStart.getDate() + wd);
+        const wDateStr = wDate.toISOString().slice(0,10);
+        if (wDateStr === date) continue; // 현재 입력 중인 셀 제외
+        const wKey = userId + '_' + wDateStr;
+        const wSel = tbody?.querySelector(`select[data-staff="${userId}"][data-date="${wDateStr}"]`);
+        const wVal = wSel?.value || curScheduleEntries[wKey]?.shift_code || curScheduleEntries[wKey]?.entry_type || '';
+        if (wVal && !NON_WORK_CHECK.has(wVal)) weekWorkCount++;
+      }
+
+      // 현재 입력값이 근무(휴무/대휴/결근 아님)이면 카운트 +1
+      const isWork = val && !NON_WORK_CHECK.has(val);
+      if (isWork && weekWorkCount >= maxDays) {
+        const prev = curScheduleEntries[key];
+        const prevVal = prev?._rawCode || prev?.entry_type || prev?.shift_code || '';
+        sel.value = prevVal;
+        setTimeout(() => { sel.value = prevVal; }, 0);
+        alert(`⚠ PT 직원 ${ptStaff.name}의 주 근무일수는 ${maxDays}일입니다.\n\n이번 주(${weekStart.toISOString().slice(5,10)}~) 이미 ${weekWorkCount}일 편성되어 있어 추가 근무를 입력할 수 없습니다.\n\n계약 근무일수를 초과하는 편성은 인사팀에 문의하세요.`);
+        return;
+      }
+    }
+  }
+
   // ── 대휴 입력 검증 (전월 이월 잔여 있어야만 입력 가능 — 정규직+지원 모두) ──
   if (val === '대휴' && userId) {
     const staffInfo0 = curScheduleStaff.find(s => s.id === userId);
