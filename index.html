@@ -1115,6 +1115,23 @@ async function loadCats() {
   goPage('all');
   updateNotifDot();
   loadFeatureFlags();
+
+  // 매뉴얼 자동 정비: 부서담당용에서 "비밀번호" 관련 항목 제거
+  if (currentUser.is_master) {
+    const { data: deptSecs } = await sb.from('manual_sections')
+      .select('id,body').eq('audience','dept');
+    for (const s of (deptSecs||[])) {
+      if (s.body && s.body.includes('비밀번호')) {
+        const cleaned = s.body
+          .replace(/[•\-]\s*비밀번호[^<\n]*/g, '')
+          .replace(/비밀번호\s*[：:]\s*[^<\n]*/g, '')
+          .replace(/\n\n\n+/g, '\n\n');
+        if (cleaned !== s.body) {
+          await sb.from('manual_sections').update({body: cleaned}).eq('id', s.id);
+        }
+      }
+    }
+  }
 }
 
 function visibleCats() {
@@ -5130,6 +5147,50 @@ async function deleteRequest(reqId) {
   goPage('requests');
 }
 
+
+// 매뉴얼 백업 다운로드 (JSON)
+async function backupManualSections() {
+  const { data } = await sb.from('manual_sections').select('*').order('audience,sort_order');
+  if (!data?.length) { alert('백업할 매뉴얼 데이터가 없습니다.'); return; }
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], {type:'application/json'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `bonanza_manual_backup_${todayKST()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  alert('매뉴얼 백업 파일이 다운로드되었습니다.\n\n파일: bonanza_manual_backup_' + todayKST() + '.json');
+}
+
+// 매뉴얼 복원 (JSON 업로드)
+async function restoreManualSections() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const text = await file.text();
+    try {
+      const sections = JSON.parse(text);
+      if (!Array.isArray(sections)) throw new Error('배열 형식이 아닙니다');
+      if (!confirm(`${sections.length}개 섹션을 복원하시겠습니까?\n\n기존 매뉴얼 내용이 덮어쓰기됩니다.`)) return;
+      // 기존 삭제 후 삽입
+      await sb.from('manual_sections').delete().neq('id', 0);
+      for (const s of sections) {
+        delete s.id; // 새 id 자동 생성
+        await sb.from('manual_sections').insert(s);
+      }
+      alert('복원 완료! 페이지를 새로고침합니다.');
+      location.reload();
+    } catch(err) {
+      alert('복원 실패: ' + err.message);
+    }
+  };
+  input.click();
+}
+
 async function createNotification(userId, type, refId, refType, message) {
   if (!userId) return;
   const { error } = await sb.from('notifications').insert({
@@ -5876,7 +5937,16 @@ async function renderManualEdit(area) {
     </div>`).join('');
 
   area.innerHTML = `
-    <div class="page-header"><div class="page-title">설명서 편집</div><div class="page-sub">여기서 수정하면 모든 직원이 보는 설명서가 즉시 바뀝니다</div></div>
+    <div class="page-header">
+      <div class="page-title">설명서 편집</div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button class="btn-cancel-sm" onclick="backupManualSections()" style="font-size:11px">
+          <i class="ti ti-download"></i> 백업 다운로드
+        </button>
+        <button class="btn-cancel-sm" onclick="restoreManualSections()" style="font-size:11px">
+          <i class="ti ti-upload"></i> 백업 복원
+        </button>
+      </div><div class="page-sub">여기서 수정하면 모든 직원이 보는 설명서가 즉시 바뀝니다</div></div>
     ${tabBar}
     <div class="blue" style="background:var(--blb);border:0.5px solid var(--bl);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#143a5e">
       <strong>편집 안내:</strong> 제목과 본문을 고친 뒤 <strong>"이 섹션 저장"</strong>을 누르면 반영됩니다. 본문에는 간단한 HTML을 쓸 수 있어요 — 줄바꿈 <b>&lt;br&gt;</b>, 굵게 <b>&lt;b&gt;글자&lt;/b&gt;</b>, 목록 <b>&lt;ul&gt;&lt;li&gt;항목&lt;/li&gt;&lt;/ul&gt;</b>.
