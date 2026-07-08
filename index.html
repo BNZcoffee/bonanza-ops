@@ -3477,15 +3477,20 @@ function verifyAdminPassword(actionDesc){
 }
 
 async function deleteUser(id, name){
-  if(!canEditStaff()){alert('삭제 권한이 없습니다. (운영총괄·인사팀만 가능)');return;}
-  // 1차 확인
-  if(!confirm('['+name+'] 직원을 삭제하시겠습니까?\n\n삭제하면 계정과 모든 기록이 사라지며 복구할 수 없습니다.\n인원현황 시트에서도 자동으로 제거됩니다.')) return;
-  // 2차 확인: 비밀번호 입력
-  if(!verifyAdminPassword('['+name+'] 님의 데이터를 영구 삭제합니다. 되돌릴 수 없습니다.')) return;
-  const {error} = await sb.from('users').delete().eq('id', id);
-  if(error){ alert('삭제 오류: '+error.message); return; }
-  alert('['+name+'] 직원이 삭제되었습니다.');
-  renderStaff(document.getElementById('contentArea'));
+  if (!confirm(`${name} 직원을 삭제하시겠습니까?\n\n⚠ 삭제하면 복구할 수 없습니다.`)) return;
+  const pw = prompt('확인을 위해 비밀번호를 입력해주세요:');
+  if (!pw || pw !== currentUser.password_hash) { alert('비밀번호가 일치하지 않습니다.'); return; }
+  // FK 참조 해제
+  await sb.from('posts').update({author_id:null}).eq('author_id',id);
+  await sb.from('comments').update({author_id:null}).eq('author_id',id);
+  try { await sb.from('request_comments').update({author_id:null}).eq('author_id',id); } catch(e){}
+  try { await sb.from('post_reads').delete().eq('user_id',id); } catch(e){}
+  try { await sb.from('post_favorites').delete().eq('user_id',id); } catch(e){}
+  try { await sb.from('notifications').delete().eq('user_id',id); } catch(e){}
+  const { error } = await sb.from('users').delete().eq('id',id);
+  if (error) { alert('삭제 오류: '+error.message); return; }
+  alert('삭제 완료');
+  goPage('staff');
 }
 
 async function bulkDeleteUsers(){
@@ -5097,6 +5102,34 @@ async function shouldNotifyRole(eventKey, userGradeStr) {
   return !!(NOTIF_ROLE_DEFAULTS[eventKey]?.[idx]);
 }
 
+
+// 업무 신청 삭제
+async function deleteRequest(reqId) {
+  const { data: req } = await sb.from('requests').select('*').eq('id',reqId).single();
+  if (!req) { alert('신청을 찾을 수 없습니다.'); return; }
+
+  const isAuthor = req.author_id === currentUser.id;
+  const isMaster = currentUser.is_master;
+
+  if (!isAuthor && !isMaster) { alert('작성자 또는 총괄만 삭제할 수 있습니다.'); return; }
+  if (isAuthor && !isMaster && req.status !== 'received') {
+    alert('접수됨 상태에서만 삭제할 수 있습니다.\n\n현재 상태: ' + req.status + '\n진행/반려된 건은 삭제할 수 없습니다.');
+    return;
+  }
+
+  const pw = prompt('삭제 확인을 위해 비밀번호를 입력해주세요:');
+  if (!pw || pw !== currentUser.password_hash) { alert('비밀번호가 일치하지 않습니다.'); return; }
+
+  if (!confirm(`"${req.title}" 업무 신청을 삭제하시겠습니까?\n\n삭제하면 복구할 수 없습니다.`)) return;
+
+  try { await sb.from('request_comments').delete().eq('request_id',reqId); } catch(e){}
+  try { await sb.from('request_attachments').delete().eq('request_id',reqId); } catch(e){}
+  const { error } = await sb.from('requests').delete().eq('id',reqId);
+  if (error) { alert('삭제 오류: '+error.message); return; }
+  alert('삭제 완료');
+  goPage('requests');
+}
+
 async function createNotification(userId, type, refId, refType, message) {
   if (!userId) return;
   const { error } = await sb.from('notifications').insert({
@@ -5240,7 +5273,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-07-07';   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-07-09';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -6834,7 +6867,9 @@ async function renderReqNew(area) {
   window.__reqTypes = types || [];
 
   area.innerHTML =
-    '<div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage(\'requests\')"><i class="ti ti-arrow-left"></i> 목록</button></div>' +
+    '<div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage(\'requests\')"><i class="ti ti-arrow-left"></i> 목록</button>' +
+    ((r.author_id===currentUser.id && r.status==='received')||currentUser.is_master ? '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteRequest('+r.id+')"><i class="ti ti-trash"></i> 삭제</button>' : '') +
+    '</div>' +
     '<div class="form-section">' +
       '<div class="page-title" style="margin-bottom:6px">새 업무 신청</div>' +
       '<div class="page-sub" style="margin-bottom:16px">신청 유형을 선택하면 그에 맞는 입력 항목이 나타납니다.</div>' +
@@ -10083,6 +10118,27 @@ async function saveScheduleDraftQuiet() {
 
 async function saveScheduleDraft() {
   if (isTestMode()) { alert('⚠ 테스트 모드에서는 저장할 수 없습니다.'); return; }
+
+  // ── 저장 전 대휴 잔여 검증 ──
+  const _tbody = document.getElementById('schTbody');
+  if (_tbody && window.__leaveBalanceMap) {
+    for (const _st of curScheduleStaff) {
+      if (!_st.id) continue;
+      const _ci = window.__leaveBalanceMap[_st.id]?.carryIn || 0;
+      let _uc = 0;
+      const _y = window.__schYear, _m = window.__schMonth;
+      const _dim = new Date(_y, _m, 0).getDate();
+      for (let _d = 1; _d <= _dim; _d++) {
+        const _ds = `${_y}-${String(_m).padStart(2,'0')}-${String(_d).padStart(2,'0')}`;
+        const _sel = _tbody.querySelector(`select[data-staff="${_st.id}"][data-date="${_ds}"]`);
+        if (_sel?.value === '대휴') _uc++;
+      }
+      if (_uc > _ci) {
+        alert(`⚠ 저장 불가: ${_st.name} 직원의 대휴(${_uc}일)가 전월 이월 잔여(${_ci}일)를 초과합니다.\n\n초과분을 '휴무'로 변경 후 저장해주세요.`);
+        return;
+      }
+    }
+  }
   const store = window.__schStore, year = window.__schYear, month = window.__schMonth;
   const opPlan = document.getElementById('schOpPlan')?.value.trim() || null;
   const notes  = document.getElementById('schNotes')?.value.trim() || null;
@@ -12520,7 +12576,7 @@ async function openScheduleHistoryModal(scheduleId) {
           <span>
             v${h.version} · <span style="color:var(--ts)">${h.note||''}</span>
             ${badge}
-            <span style="font-size:11px;color:var(--th);font-weight:400;margin-left:8px">${h.saved_at?.slice(0,16).replace('T',' ')||''} · ${h.saver?.name||''}</span>
+            <span style="font-size:11px;color:var(--th);font-weight:400;margin-left:8px">${fmtDateTime(h.saved_at)||''} · ${h.saver?.name||''}</span>
           </span>
           <i class="ti ti-chevron-down" style="font-size:12px;color:var(--th)"></i>
         </summary>
@@ -12703,7 +12759,8 @@ async function renderHandoverList(area) {
   let sq = sb.from('users').select('store').eq('active', true).neq('role','admin');
   if (!isAdmin) sq = sq.eq('store', currentUser.store);
   const { data: uStores } = await sq;
-  const stores = [...new Set((uStores||[]).map(u=>u.store).filter(Boolean))].sort();
+  const NON_STORE = new Set(['본사','부서담당','부총괄','총괄','운영팀','인사팀']);
+  const stores = [...new Set((uStores||[]).map(u=>u.store).filter(s => s && !NON_STORE.has(s)))].sort();
 
   // 이미 인수인계 등록된 매장
   const { data: hvList } = await sb.from('store_handover').select('store,updated_at,updated_by,updater:users!store_handover_updated_by_fkey(name)').order('store');
