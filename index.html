@@ -7127,7 +7127,7 @@ async function renderReqNew(area) {
 
   area.innerHTML =
     '<div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage(\'requests\')"><i class="ti ti-arrow-left"></i> 목록</button>' +
-    ((r.author_id===currentUser.id && r.status==='received')||currentUser.is_master ? '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteRequest('+r.id+')"><i class="ti ti-trash"></i> 삭제</button>' : '') +
+    ((r.author_id===currentUser.id && r.status==='received')||currentUser.is_master ? '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteRequest(${r.id})"><i class="ti ti-trash"></i> 삭제</button>' : '') +
     '</div>' +
     '<div class="form-section">' +
       '<div class="page-title" style="margin-bottom:6px">새 업무 신청</div>' +
@@ -7366,7 +7366,7 @@ async function renderReqDetail(area) {
   // 삭제 가능 여부: 작성자=접수됨만, 총괄=전 상태
   const canDelete = (r.author_id === currentUser.id && r.status === 'received') || currentUser.is_master;
   const deleteBtn = canDelete
-    ? '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteRequest('+r.id+')"><i class="ti ti-trash"></i> 삭제</button>'
+    ? '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteRequest(${r.id})"><i class="ti ti-trash"></i> 삭제</button>'
     : '';
 
   area.innerHTML =
@@ -7926,7 +7926,7 @@ async function renderInterviewDetail(area) {
   area.innerHTML = `
     <div style="margin-bottom:10px">
       <button class="btn-cancel-sm" onclick="goPage('interviews')"><i class="ti ti-arrow-left"></i> 목록</button>
-      ${(currentUser.is_master || currentUser.is_vice_master) ? '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteInterview('+r.id+')"><i class="ti ti-trash"></i> 삭제</button>' : ''}
+      ${(currentUser.is_master || currentUser.is_vice_master) ? `<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteInterview(${r.id})"><i class="ti ti-trash"></i> 삭제</button>` : ''}
     </div>
     <div class="post-detail">
       <div class="detail-header">
@@ -8492,7 +8492,7 @@ async function renderRepairDetail(area) {
   area.innerHTML = `
     <div style="margin-bottom:10px;display:flex;align-items:center;justify-content:space-between">
       <button class="btn-cancel-sm" onclick="goPage('repairs')"><i class="ti ti-arrow-left"></i> 목록</button>
-      \${(currentUser.is_master || currentUser.is_vice_master) ? '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteRepair('+r.id+')"><i class="ti ti-trash"></i> 삭제</button>' : ''}
+      ${(currentUser.is_master || currentUser.is_vice_master) ? '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteRepair(' + r.id + ')"><i class="ti ti-trash"></i> 삭제</button>' : ''}
       ${canEdit?`<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openRepairEdit(${r.id})"><i class="ti ti-edit"></i> 수정</button>`:''}
     </div>
     <div class="post-detail">
