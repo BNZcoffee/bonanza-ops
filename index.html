@@ -414,7 +414,7 @@ textarea.form-input{min-height:120px;resize:vertical}
     </div>
     <div class="sidebar-section" id="interviewNav" style="display:none">
       <div class="sidebar-label">업무 보고</div>
-      <button class="nav-btn" onclick="goPage('interviews')" id="nav-interviews"><i class="ti ti-message-report"></i> 직원 면담</button>
+      <button class="nav-btn" onclick="requirePasswordForMenu('interviews', ()=>goPage('interviews'))" id="nav-interviews"><i class="ti ti-message-report"></i> 직원 면담</button>
       <button class="nav-btn" onclick="goPage('handover')" id="nav-handover"><i class="ti ti-building-store"></i> 매장 인수인계</button>
       <button class="nav-btn" onclick="goPage('repairs')" id="nav-repairs" style="display:none"><i class="ti ti-hammer"></i> 보수 내역</button>
     </div>
@@ -1016,6 +1016,7 @@ async function loginAs(user) {
   applyMenuPermissions();
   document.getElementById('sidebarInfoTxt').textContent = user.store + ' · ' + user.name;
   loadAppSettings();
+  loadSecureMenuSettings();
   loadCats();
   setInterval(checkScheduled, 60000);
 
@@ -5168,6 +5169,87 @@ async function restoreManualSections() {
   input.click();
 }
 
+
+async function openSecureMenuSettings() {
+  await loadSecureMenuSettings();
+  const menus = [
+    {key:'interviews', label:'직원 면담', desc:'면담 기록 열람/작성'},
+    {key:'handover',   label:'매장 인수인계', desc:'인수인계 문서'},
+    {key:'repairs',    label:'보수 내역', desc:'매장 보수 이력'},
+    {key:'staff',      label:'인원 현황', desc:'직원 정보 조회'},
+  ];
+  const old = document.getElementById('secureMenuModal');
+  if (old) old.remove();
+  const m = document.createElement('div');
+  m.id = 'secureMenuModal';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:300;display:flex;align-items:center;justify-content:center';
+  m.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:22px;width:min(95vw,460px)">
+      <div style="font-size:15px;font-weight:600;color:var(--tm);margin-bottom:6px">
+        <i class="ti ti-lock"></i> 2차 보안 설정
+      </div>
+      <div style="font-size:11px;color:var(--th);margin-bottom:14px;line-height:1.6">
+        ON으로 설정하면 매니저 이하 직원이 해당 메뉴 진입 시 비밀번호를 입력해야 합니다.<br>
+        총괄·부총괄·운영팀은 비밀번호 없이 바로 진입합니다.
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        ${menus.map(m => {
+          const on = !!window.__secureMenus[m.key];
+          return '<tr style="border-bottom:0.5px solid var(--crd)"><td style="padding:10px;font-size:13px;font-weight:600">' + m.label + '<div style="font-size:10px;color:var(--th);font-weight:400">' + m.desc + '</div></td><td style="text-align:right;padding:10px"><label class="switch"><input type="checkbox" data-seckey="' + m.key + '" ' + (on?'checked':'') + '/><span class="slider"></span></label></td></tr>';
+        }).join('')}
+      </table>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn-cancel-sm" onclick="document.getElementById('secureMenuModal').remove()">취소</button>
+        <button class="btn-submit" onclick="saveSecureMenuSettings()"><i class="ti ti-device-floppy"></i> 저장</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+}
+
+async function saveSecureMenuSettings() {
+  const modal = document.getElementById('secureMenuModal');
+  if (!modal) return;
+  const result = {};
+  modal.querySelectorAll('input[data-seckey]').forEach(cb => {
+    result[cb.dataset.seckey] = cb.checked;
+  });
+  await sb.from('app_settings').upsert({key:'secure_menus', value: JSON.stringify(result)}, {onConflict:'key'});
+  window.__secureMenus = result;
+  modal.remove();
+  alert('2차 보안 설정이 저장되었습니다.');
+}
+
+
+// 면담 삭제 (총괄/부총괄만)
+async function deleteInterview(id) {
+  if (!currentUser.is_master && !currentUser.is_vice_master) {
+    alert('총괄 또는 부총괄만 삭제할 수 있습니다.');
+    return;
+  }
+  const pw = prompt('삭제 확인을 위해 비밀번호를 입력해주세요:');
+  if (!pw || pw !== currentUser.password_hash) { alert('비밀번호가 일치하지 않습니다.'); return; }
+  if (!confirm('이 면담 기록을 삭제하시겠습니까? 복구할 수 없습니다.')) return;
+  const { error } = await sb.from('interviews').delete().eq('id', id);
+  if (error) { alert('삭제 오류: ' + error.message); return; }
+  alert('삭제 완료');
+  goPage('interviews');
+}
+
+// 보수 내역 삭제 (총괄/부총괄만)
+async function deleteRepair(id) {
+  if (!currentUser.is_master && !currentUser.is_vice_master) {
+    alert('총괄 또는 부총괄만 삭제할 수 있습니다.');
+    return;
+  }
+  const pw = prompt('삭제 확인을 위해 비밀번호를 입력해주세요:');
+  if (!pw || pw !== currentUser.password_hash) { alert('비밀번호가 일치하지 않습니다.'); return; }
+  if (!confirm('이 보수 내역을 삭제하시겠습니까? 복구할 수 없습니다.')) return;
+  const { error } = await sb.from('repairs').delete().eq('id', id);
+  if (error) { alert('삭제 오류: ' + error.message); return; }
+  alert('삭제 완료');
+  goPage('repairs');
+}
+
 async function createNotification(userId, type, refId, refType, message) {
   if (!userId) return;
   const { error } = await sb.from('notifications').insert({
@@ -5967,6 +6049,57 @@ async function moveManualSec(id, dir) {
 // 등급: master(총괄) > vice(부총괄) > dept(부서담당) > manager(매니저) > staff(매장직원)
 const GRADES = ['master','vice','dept','manager','staff'];
 const GRADE_LABEL = {master:'총괄', vice:'부총괄', dept:'부서담당', manager:'매니저', staff:'매장직원'};
+
+
+// ═══════════════════════════════════════════
+// 자동 로그아웃 (30분 비활동 시)
+// ═══════════════════════════════════════════
+let __lastActivity = Date.now();
+const AUTO_LOGOUT_MS = 30 * 60 * 1000; // 30분
+
+document.addEventListener('click',  () => { __lastActivity = Date.now(); });
+document.addEventListener('keydown', () => { __lastActivity = Date.now(); });
+document.addEventListener('scroll', () => { __lastActivity = Date.now(); });
+
+setInterval(() => {
+  if (!currentUser) return;
+  if (Date.now() - __lastActivity > AUTO_LOGOUT_MS) {
+    alert('30분 이상 활동이 없어 자동 로그아웃됩니다.');
+    location.reload();
+  }
+}, 60000); // 1분마다 체크
+
+
+// ═══════════════════════════════════════════
+// 2차 보안 — 특정 메뉴 진입 시 비밀번호 확인
+// 앱 관리에서 설정 가능
+// ═══════════════════════════════════════════
+window.__secureMenus = {}; // {interviews: true, ...}
+
+async function loadSecureMenuSettings() {
+  const { data } = await sb.from('app_settings').select('value').eq('key','secure_menus').maybeSingle();
+  window.__secureMenus = data?.value ? JSON.parse(data.value) : {interviews: true};
+}
+
+function requirePasswordForMenu(menuKey, callback) {
+  // 관리자(총괄/부총괄/운영팀)는 바로 진입
+  if (currentUser.is_master || currentUser.is_vice_master || currentUser.role === 'admin') {
+    callback();
+    return;
+  }
+  // 2차 보안 설정 확인
+  if (!window.__secureMenus[menuKey]) {
+    callback();
+    return;
+  }
+  const pw = prompt('보안이 설정된 메뉴입니다.\n비밀번호를 입력해주세요:');
+  if (!pw) return;
+  if (pw !== currentUser.password_hash) {
+    alert('비밀번호가 일치하지 않습니다.');
+    return;
+  }
+  callback();
+}
 
 // 기능 키 정의 (권한 설정창의 행) — 실제 메뉴 구조와 1:1 매핑
 const PERM_DEFS = [
