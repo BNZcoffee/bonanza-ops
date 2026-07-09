@@ -5469,6 +5469,13 @@ async function renderAppSettings(area){
       <div class="setting-row"><div><div class="setting-title">마지막 업데이트</div><div class="setting-sub">${APP_UPDATED_AT?fmtDateTime(APP_UPDATED_AT):'-'}</div></div></div>
       <div class="setting-row"><div><div class="setting-title">데이터베이스</div><div class="setting-sub">Supabase (한국 리전)</div></div></div>
       ${currentUser.is_master ? `
+      <div class="setting-row" onclick="openSecureMenuSettings()" style="cursor:pointer">
+        <div>
+          <div class="setting-title"><i class="ti ti-lock"></i> 2차 보안 설정</div>
+          <div class="setting-sub">특정 메뉴 진입 시 비밀번호 확인 (매니저 이하 적용)</div>
+        </div>
+        <div style="color:var(--br)"><i class="ti ti-chevron-right"></i></div>
+      </div>
       <div class="setting-row" onclick="openFeatureFlagsAdmin()" style="cursor:pointer">
         <div>
           <div class="setting-title"><i class="ti ti-eye-off"></i> 메뉴 표시 관리</div>
@@ -7847,6 +7854,7 @@ async function renderInterviewDetail(area) {
   area.innerHTML = `
     <div style="margin-bottom:10px">
       <button class="btn-cancel-sm" onclick="goPage('interviews')"><i class="ti ti-arrow-left"></i> 목록</button>
+      ${(currentUser.is_master || currentUser.is_vice_master) ? '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteInterview('+r.id+')"><i class="ti ti-trash"></i> 삭제</button>' : ''}
     </div>
     <div class="post-detail">
       <div class="detail-header">
@@ -8412,6 +8420,7 @@ async function renderRepairDetail(area) {
   area.innerHTML = `
     <div style="margin-bottom:10px;display:flex;align-items:center;justify-content:space-between">
       <button class="btn-cancel-sm" onclick="goPage('repairs')"><i class="ti ti-arrow-left"></i> 목록</button>
+      \${(currentUser.is_master || currentUser.is_vice_master) ? '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteRepair('+r.id+')"><i class="ti ti-trash"></i> 삭제</button>' : ''}
       ${canEdit?`<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openRepairEdit(${r.id})"><i class="ti ti-edit"></i> 수정</button>`:''}
     </div>
     <div class="post-detail">
