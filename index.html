@@ -7142,6 +7142,10 @@ function selectReqType(typeId) {
     } else if (f.type === 'date') {
       fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
         '<input type="date" class="form-input" id="rf-' + i + '"/></div>';
+    } else if (f.type === 'select' && f.options?.length) {
+      const opts = f.options.map(o => '<option value="' + o + '">' + o + '</option>').join('');
+      fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
+        '<select class="form-input" id="rf-' + i + '"><option value="">선택해주세요</option>' + opts + '</select></div>';
     } else {
       fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
         '<input class="form-input" id="rf-' + i + '"/></div>';
@@ -7149,7 +7153,7 @@ function selectReqType(typeId) {
   });
 
   const guideHtml = t.guide ?
-    '<div class="note" style="margin-bottom:14px"><strong>신청 방법 안내</strong><br>' + t.guide + '</div>' : '';
+    '<div class="note" style="margin-bottom:14px;white-space:pre-line"><strong>신청 방법 안내</strong><br>' + t.guide.replace(/\n/g,'<br>') + '</div>' : '';
 
   document.getElementById('reqFormArea').innerHTML =
     guideHtml +
@@ -14160,19 +14164,28 @@ function editReqType(typeId) {
 function renderFieldEditor() {
   const box = document.getElementById('fieldEditor');
   if (!box) return;
-  box.innerHTML = editingFields.map((f, i) =>
-    '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">' +
+  box.innerHTML = editingFields.map((f, i) => {
+    const optionsRow = f.type === 'select'
+      ? '<div style="margin:4px 0 8px 0;padding:6px 10px;background:var(--crm);border-radius:6px">' +
+          '<div style="font-size:10px;color:var(--th);margin-bottom:4px">선택지 (쉼표로 구분)</div>' +
+          '<input class="form-input" style="padding:6px 10px;font-size:12px" value="' + (f.options||[]).join(', ') + '" ' +
+            'placeholder="예: 전구 교체, 수도 수리, 기타" ' +
+            'onchange="editingFields[' + i + '].options=this.value.split(\',\').map(s=>s.trim()).filter(Boolean);"/>' +
+        '</div>'
+      : '';
+    return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:2px">' +
       '<input class="form-input" style="flex:1;padding:6px 10px" value="' + (f.label||'') + '" placeholder="항목 이름" onchange="editingFields[' + i + '].label=this.value"/>' +
-      '<select class="form-input" style="width:90px;padding:6px" onchange="editingFields[' + i + '].type=this.value">' +
+      '<select class="form-input" style="width:90px;padding:6px" onchange="editingFields[' + i + '].type=this.value;renderFieldEditor()">' +
         '<option value="text"' + (f.type==='text'?' selected':'') + '>한 줄</option>' +
         '<option value="textarea"' + (f.type==='textarea'?' selected':'') + '>여러 줄</option>' +
         '<option value="date"' + (f.type==='date'?' selected':'') + '>날짜</option>' +
+        '<option value="select"' + (f.type==='select'?' selected':'') + '>드롭다운</option>' +
       '</select>' +
       '<label style="font-size:11px;color:var(--ts);display:flex;align-items:center;gap:3px;white-space:nowrap">' +
         '<input type="checkbox"' + (f.required?' checked':'') + ' onchange="editingFields[' + i + '].required=this.checked" style="width:auto"/>필수</label>' +
       '<button onclick="editingFields.splice(' + i + ',1);renderFieldEditor()" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-x"></i></button>' +
-    '</div>'
-  ).join('') || '<div style="font-size:12px;color:var(--th);padding:6px 0">입력 항목을 추가하세요.</div>';
+    '</div>' + optionsRow;
+  }).join('') || '<div style="font-size:12px;color:var(--th);padding:6px 0">입력 항목을 추가하세요.</div>';
 }
 function addField() {
   editingFields.push({label:'', type:'text', required:false});
