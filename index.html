@@ -3172,7 +3172,8 @@ async function submitEditUser(){
     pt_hourly_wage: employmentType === 'parttime'
       ? (parseFloat(document.getElementById('eu_pt_wage')?.value||0)||null) : null,
     pt_weekly_days: employmentType === 'parttime'
-      ? (parseInt(document.getElementById('eu_pt_days')?.value||0)||null) : null
+      ? (parseInt(document.getElementById('eu_pt_days')?.value||0)||null) : null,
+    sub_stores: window.__tempSubStores?.length ? window.__tempSubStores : null
   };
   if(pw) payload.password_hash = pw;
   let error, newCode;
@@ -3493,13 +3494,22 @@ async function deleteUser(id, name){
   if (!confirm(`${name} 직원을 삭제하시겠습니까?\n\n⚠ 삭제하면 복구할 수 없습니다.`)) return;
   const pw = prompt('확인을 위해 비밀번호를 입력해주세요:');
   if (!pw || pw !== currentUser.password_hash) { alert('비밀번호가 일치하지 않습니다.'); return; }
-  // FK 참조 해제
+  // FK 참조 해제 — 모든 관련 테이블
   await sb.from('posts').update({author_id:null}).eq('author_id',id);
   await sb.from('comments').update({author_id:null}).eq('author_id',id);
   try { await sb.from('request_comments').update({author_id:null}).eq('author_id',id); } catch(e){}
+  try { await sb.from('requests').update({author_id:null}).eq('author_id',id); } catch(e){}
+  try { await sb.from('requests').update({assignee_id:null}).eq('assignee_id',id); } catch(e){}
+  try { await sb.from('interviews').update({author_id:null}).eq('author_id',id); } catch(e){}
+  try { await sb.from('interviews').update({staff_id:null}).eq('staff_id',id); } catch(e){}
+  try { await sb.from('interviews').update({feedback_by:null}).eq('feedback_by',id); } catch(e){}
+  try { await sb.from('repair_records').update({author_id:null}).eq('author_id',id); } catch(e){}
+  try { await sb.from('store_handovers').update({author_id:null}).eq('author_id',id); } catch(e){}
+  try { await sb.from('schedule_entries').update({user_id:null}).eq('user_id',id); } catch(e){}
   try { await sb.from('post_reads').delete().eq('user_id',id); } catch(e){}
   try { await sb.from('post_favorites').delete().eq('user_id',id); } catch(e){}
   try { await sb.from('notifications').delete().eq('user_id',id); } catch(e){}
+  try { await sb.from('user_permissions').delete().eq('user_id',id); } catch(e){}
   const { error } = await sb.from('users').delete().eq('id',id);
   if (error) { alert('삭제 오류: '+error.message); return; }
   alert('삭제 완료');
@@ -5229,6 +5239,9 @@ async function deleteInterview(id) {
   const pw = prompt('삭제 확인을 위해 비밀번호를 입력해주세요:');
   if (!pw || pw !== currentUser.password_hash) { alert('비밀번호가 일치하지 않습니다.'); return; }
   if (!confirm('이 면담 기록을 삭제하시겠습니까? 복구할 수 없습니다.')) return;
+  // 하위 참조 데이터 정리
+  try { await sb.from('interview_actions').delete().eq('interview_id', id); } catch(e){}
+  try { await sb.from('interview_comments').delete().eq('interview_id', id); } catch(e){}
   const { error } = await sb.from('interviews').delete().eq('id', id);
   if (error) { alert('삭제 오류: ' + error.message); return; }
   alert('삭제 완료');
@@ -5257,6 +5270,39 @@ async function deleteRepair(id) {
 
   alert('삭제 완료');
   goPage('repairs');
+}
+
+
+// 겸직 매니저 — 추가 관할 매장
+window.__tempSubStores = [];
+
+function initSubStores(existing) {
+  window.__tempSubStores = existing || [];
+}
+
+function addSubStore() {
+  const sel = document.getElementById('eu_sub_store_sel');
+  const val = sel?.value;
+  if (!val) return;
+  const mainStore = document.getElementById('eu_store')?.value;
+  if (val === mainStore) { alert('소속 매장과 동일합니다.'); return; }
+  if (window.__tempSubStores.includes(val)) { alert('이미 추가된 매장입니다.'); return; }
+  window.__tempSubStores.push(val);
+  renderSubStoreTags();
+  sel.value = '';
+}
+
+function removeSubStore(btn, store) {
+  window.__tempSubStores = window.__tempSubStores.filter(s => s !== store);
+  renderSubStoreTags();
+}
+
+function renderSubStoreTags() {
+  const wrap = document.getElementById('eu_sub_stores_wrap');
+  if (!wrap) return;
+  wrap.innerHTML = window.__tempSubStores.map(s =>
+    `<span style="background:var(--crm);border-radius:12px;padding:2px 10px;font-size:11px;display:flex;align-items:center;gap:4px">${s} <button onclick="removeSubStore(this,'${s}')" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:11px;padding:0">✕</button></span>`
+  ).join('');
 }
 
 async function createNotification(userId, type, refId, refType, message) {
@@ -6715,7 +6761,7 @@ function canSeeReq(r) {
   if (currentUser.is_master) return true;            // 마스터: 전체
   if (currentUser.role === 'admin') return true;     // 운영팀(관리자): 전체
   // 매장 매니저: 자기 매장 신청 전부
-  if (isManagerRole(currentUser.role) && r.store === currentUser.store) return true;
+  if (isManagerRole(currentUser.role) && (r.store === currentUser.store || (currentUser.sub_stores||[]).includes(r.store))) return true;
   // 본사 담당자: 자기 파트 신청 전부
   if (currentUser.part && r.part_name === currentUser.part) return true;
   // 공동 진행 파트: 신청 유형에 공동 파트로 지정된 파트의 담당자도 열람·처리
