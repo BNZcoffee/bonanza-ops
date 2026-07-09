@@ -2738,6 +2738,7 @@ async function renderStaff(area) {
         <button class="btn-new" style="background:#4A6FA5" onclick="openBulkAddUser()"><i class="ti ti-users-plus"></i> 일괄 등록</button>
         <button class="btn-new" style="background:var(--gn)" onclick="openStoreManager()"><i class="ti ti-building"></i> 매장 관리</button>
         <button class="btn-new" style="background:var(--brm)" onclick="openRoleManager()"><i class="ti ti-id-badge-2"></i> 직위 관리</button>
+        <button class="btn-new" style="background:#5F7A6A" onclick="openPartsAdmin()"><i class="ti ti-building-community"></i> 파트 관리</button>
         <button class="btn-new" onclick="openBulkImport()"><i class="ti ti-table-import"></i> 일괄 등록</button>
         ` : '<span style="font-size:12px;color:var(--th);align-self:center">조회 전용 (수정 권한: 운영총괄·인사팀)</span>'}
       </div>
@@ -5339,6 +5340,104 @@ function renderSubStoreTags() {
   ).join('');
 }
 
+
+// ═══════════════════════════════════════════
+// 파트 관리 — 추가/수정/삭제 + 권한 설정
+// ═══════════════════════════════════════════
+async function openPartsAdmin() {
+  if (!isTopAdmin()) { alert('총괄/부총괄만 접근 가능합니다.'); return; }
+  const { data: parts } = await sb.from('parts').select('*').order('sort_order');
+  const old = document.getElementById('partsAdminModal');
+  if (old) old.remove();
+
+  const m = document.createElement('div');
+  m.id = 'partsAdminModal';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:300;display:flex;align-items:center;justify-content:center';
+  m.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:22px;width:min(95vw,520px);max-height:85vh;overflow-y:auto">
+      <div style="font-size:15px;font-weight:600;color:var(--tm);margin-bottom:6px">
+        <i class="ti ti-building-community"></i> 파트(부서) 관리
+      </div>
+      <div style="font-size:11px;color:var(--th);margin-bottom:14px;line-height:1.6">
+        부서(파트)를 추가/수정/삭제합니다. 파트명은 인원 정보에도 자동 반영됩니다.
+      </div>
+      <div id="partsListArea"></div>
+      <div style="display:flex;gap:6px;margin-top:12px">
+        <input class="form-input" id="newPartName" placeholder="새 파트명 (예: 마케팅팀)" style="flex:1;padding:8px 12px"/>
+        <button class="btn-submit" onclick="addPart()"><i class="ti ti-plus"></i> 추가</button>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button class="btn-cancel-sm" onclick="document.getElementById('partsAdminModal').remove()">닫기</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+  renderPartsList(parts||[]);
+}
+
+function renderPartsList(parts) {
+  const area = document.getElementById('partsListArea');
+  if (!area) return;
+  if (!parts.length) {
+    area.innerHTML = '<div style="font-size:12px;color:var(--th);padding:20px;text-align:center">파트가 없습니다. 아래에서 추가하세요.</div>';
+    return;
+  }
+  area.innerHTML = parts.map((p, i) =>
+    `<div id="part-row-${p.id}" style="display:flex;align-items:center;gap:8px;padding:10px;border-bottom:0.5px solid var(--crd)">
+      <span style="font-size:11px;color:var(--th);width:20px">${i+1}</span>
+      <input class="form-input" id="part-name-${p.id}" value="${p.name}" style="flex:1;padding:6px 10px;font-size:13px"/>
+      <button class="btn-cancel-sm" onclick="savePartName(${p.id})" style="font-size:11px;padding:4px 10px"><i class="ti ti-check"></i> 저장</button>
+      <button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);font-size:11px;padding:4px 8px" onclick="deletePart(${p.id},'${p.name}')"><i class="ti ti-trash"></i></button>
+    </div>`
+  ).join('');
+}
+
+async function addPart() {
+  const name = document.getElementById('newPartName')?.value.trim();
+  if (!name) { alert('파트명을 입력해주세요.'); return; }
+  const { data: existing } = await sb.from('parts').select('id').eq('name', name).maybeSingle();
+  if (existing) { alert('이미 존재하는 파트입니다.'); return; }
+  const { data: maxSort } = await sb.from('parts').select('sort_order').order('sort_order',{ascending:false}).limit(1);
+  const nextSort = ((maxSort?.[0]?.sort_order)||0) + 1;
+  const { error } = await sb.from('parts').insert({name, sort_order: nextSort});
+  if (error) { alert('추가 오류: ' + error.message); return; }
+  document.getElementById('newPartName').value = '';
+  openPartsAdmin(); // 새로고침
+}
+
+async function savePartName(id) {
+  const newName = document.getElementById(`part-name-${id}`)?.value.trim();
+  if (!newName) { alert('파트명을 입력해주세요.'); return; }
+  // 기존 파트명 조회
+  const { data: oldPart } = await sb.from('parts').select('name').eq('id', id).single();
+  const oldName = oldPart?.name;
+  if (oldName === newName) { alert('변경 사항이 없습니다.'); return; }
+
+  // parts 테이블 업데이트
+  const { error } = await sb.from('parts').update({name: newName}).eq('id', id);
+  if (error) { alert('수정 오류: ' + error.message); return; }
+
+  // users 테이블의 part 필드도 자동 반영 (핵심!)
+  await sb.from('users').update({part: newName}).eq('part', oldName);
+
+  alert(`파트명 변경 완료: "${oldName}" → "${newName}"\n\n해당 부서 직원들의 파트 정보도 자동 업데이트되었습니다.`);
+  openPartsAdmin();
+}
+
+async function deletePart(id, name) {
+  // 해당 파트를 사용하는 직원 확인
+  const { data: users } = await sb.from('users').select('id,name').eq('part', name).eq('active', true);
+  if (users?.length) {
+    if (!confirm(`⚠ "${name}" 파트를 사용 중인 직원이 ${users.length}명 있습니다.\n(${users.slice(0,5).map(u=>u.name).join(', ')}${users.length>5?' 외':''})\n\n삭제하면 해당 직원의 파트 정보가 비워집니다. 계속하시겠습니까?`)) return;
+  } else {
+    if (!confirm(`"${name}" 파트를 삭제하시겠습니까?`)) return;
+  }
+  // users의 part 정보 null 처리
+  await sb.from('users').update({part: null}).eq('part', name);
+  const { error } = await sb.from('parts').delete().eq('id', id);
+  if (error) { alert('삭제 오류: ' + error.message); return; }
+  openPartsAdmin();
+}
+
 async function createNotification(userId, type, refId, refType, message) {
   if (!userId) return;
   const { error } = await sb.from('notifications').insert({
@@ -5856,8 +5955,13 @@ function canSeeAdminManual() {
 function canSeeManual(aud) {
   if (!currentUser) return false;
   const grade = userGrade(currentUser);
-  if (aud === 'user') return true;
+  // 모든 사람은 팀원용 열람 가능
+  if (aud === 'member' || aud === 'user') return true;
+  // 매니저용: 매니저 이상
+  if (aud === 'manager') return ['manager','dept','vice','master'].includes(grade);
+  // 부서담당용: 부서담당 이상
   if (aud === 'dept') return ['dept','vice','master'].includes(grade);
+  // 총괄용: 총괄/부총괄만
   if (aud === 'admin') return ['vice','master'].includes(grade);
   return false;
 }
@@ -5867,13 +5971,22 @@ function availableManualAudiences() {
 }
 
 // 현재 보고 있는 매뉴얼 대상 (user/admin)
-let manualAudience = 'user';
+let manualAudience = 'member';
 
 async function renderManual(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
   // 열람 가능한 파트 목록 (권한별)
   const auds = availableManualAudiences();
   // 현재 선택된 파트가 열람 불가하면 첫 파트로
+  // 접속한 사용자의 역할에 맞는 오디언스 자동 선택 (첫 진입 시)
+  if (!window.__manualAudienceSet) {
+    const grade = userGrade();
+    if (grade === 'master' || grade === 'vice') manualAudience = 'admin';
+    else if (grade === 'dept') manualAudience = 'dept';
+    else if (grade === 'manager') manualAudience = 'manager';
+    else manualAudience = 'member';
+    window.__manualAudienceSet = true;
+  }
   if (!auds.find(([a]) => a === manualAudience)) manualAudience = auds[0][0];
 
   const { data: allSections } = await sb.from('manual_sections')
@@ -6372,13 +6485,66 @@ function applyMenuPermissions() {
 }
 
 // 사용자 → 등급
+
+// ═══════════════════════════════════════════
+// 파트 기반 관리자 판정 (하위 호환 포함)
+// 운영팀·인사팀 등은 part로 구분
+// ═══════════════════════════════════════════
+function isOperationsPart(u) {
+  u = u || currentUser;
+  if (!u) return false;
+  return u.part === '운영팀' || u.role === 'admin'; // 하위 호환
+}
+function isHrPart(u) {
+  u = u || currentUser;
+  if (!u) return false;
+  return u.part === '인사팀' || u.role === 'hr'; // 하위 호환
+}
+function isDeptRole(u) {
+  u = u || currentUser;
+  if (!u) return false;
+  return u.role === 'dept' || !!u.part;
+}
+function isMemberRole(u) {
+  u = u || currentUser;
+  if (!u) return false;
+  return u.role === 'member' || u.role === 'barista' || u.role === 'pastry';
+}
+// 최고 관리자 (CEO/이사/총괄/부총괄)
+function isTopAdmin(u) {
+  u = u || currentUser;
+  if (!u) return false;
+  return u.is_master || u.is_vice_master || u.role === 'ceo' || u.role === 'executive_director';
+}
+
+
+// 새 직위 체계 기본 옵션
+const ROLE_LABELS = {
+  ceo: '대표',
+  executive_director: '이사',
+  dept: '부서담당',
+  manager: '매니저',
+  member: '팀원',
+  // 하위 호환
+  admin: '운영팀',
+  hr: '인사팀',
+  barista: '바리스타',
+  pastry: '파티쉐',
+  parttime: 'PT'
+};
+function getRoleLabel(role) {
+  return ROLE_LABELS[role] || role || '';
+}
+
 function userGrade(u) {
   u = u || currentUser;
   if (!u) return 'staff';
   if (u.is_master) return 'master';
   if (u.is_vice_master) return 'vice';
-  if (u.part) return 'dept';
-  if (isManagerRole(u.role)) return 'manager';
+  // dept 직위 또는 part 있으면 부서담당
+  if (u.role === 'dept' || u.part) return 'dept';
+  if (u.role === 'manager' || isManagerRole(u.role)) return 'manager';
+  // member/barista/pastry 모두 팀원
   return 'staff';
 }
 
