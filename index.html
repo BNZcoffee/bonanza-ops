@@ -2399,13 +2399,8 @@ async function nDelExistAtt(id){
   document.getElementById('eatt-'+id)?.remove();
 }
 
-async function openEditPost(id){
-  const {data} = await sb.from('posts').select('*').eq('id',id).single();
-  if(!data) return;
-  currentPost = data;
-  currentCatId = data.category_id;
-  goPage('editpost');
-}
+// (중복 제거됨)
+
 
 // ── 참조문서 ──────────────────────────────────────
 function renderRefDocs() {
@@ -3586,26 +3581,8 @@ async function openBulkImport(){
 }
 
 let bulkRowCnt=0;
-function addBulkRow(){
-  const tbody=document.getElementById('bulkTbody');if(!tbody)return;
-  const i=bulkRowCnt++;
-  const cs='border:none;padding:7px 8px;font-size:13px;width:100%;background:transparent;outline:none;font-family:inherit';
-  const tr=document.createElement('tr');
-  tr.innerHTML=`
-    <td style="border-right:0.5px solid var(--crd);border-bottom:0.5px solid var(--crd)"><input class="bcell" data-col="name" data-row="${i}" style="${cs}" placeholder="홍길동" onpaste="handleBulkPaste(event,${i},'name')"/></td>
-    <td style="border-right:0.5px solid var(--crd);border-bottom:0.5px solid var(--crd)"><input class="bcell" data-col="store" data-row="${i}" style="${cs}" placeholder="강남점"/></td>
-    <td style="border-right:0.5px solid var(--crd);border-bottom:0.5px solid var(--crd)">
-      <select class="bcell" data-col="role" data-row="${i}" style="${cs};cursor:pointer">
-        <option value="">선택</option>
-        <option>매니저</option><option>바리스타</option><option>파티쉐</option>
-        <option>구매팀</option><option>인사팀</option>
-      </select>
-    </td>
-    <td style="border-right:0.5px solid var(--crd);border-bottom:0.5px solid var(--crd)"><input class="bcell" data-col="hire" data-row="${i}" style="${cs}" placeholder="2024-01-01"/></td>
-    <td style="border-bottom:0.5px solid var(--crd)"><input class="bcell" data-col="retire" data-row="${i}" style="${cs}" placeholder="(없으면 빈칸)"/></td>
-    <td style="border-bottom:0.5px solid var(--crd);text-align:center"><button onclick="this.closest('tr').remove()" style="background:none;border:none;color:var(--th);cursor:pointer"><i class="ti ti-x"></i></button></td>`;
-  tbody.appendChild(tr);
-}
+// (중복 제거됨)
+
 
 function handleBulkPaste(e,startRow,startCol){
   const text=e.clipboardData?.getData('text');
@@ -4222,7 +4199,7 @@ async function loadNotifPanel() {
           <div class="notif-item-title" style="color:var(--ts)">
             <i class="ti ${icon}" style="color:var(--th);margin-right:5px;font-size:12px"></i>${n.message}
           </div>
-          <div class="notif-item-meta">${n.created_at?.slice(0,16).replace('T',' ')||''} · 확인 완료</div>
+          <div class="notif-item-meta">${fmtDateTime(n.created_at)||''} · 확인 완료</div>
         </div>`;
       }).join('');
     } else {
@@ -4277,7 +4254,7 @@ async function loadNotifPanel() {
         <div class="notif-item-title">
           <i class="ti ${icon}" style="color:${color};margin-right:5px;font-size:13px"></i>${n.message}
         </div>
-        <div class="notif-item-meta">${n.created_at?.slice(0,16).replace('T',' ')||''}</div>
+        <div class="notif-item-meta">${fmtDateTime(n.created_at)||''}</div>
       </div>`;
     }).join('');
     html += `<button onclick="markAllNotifsRead()" style="width:100%;background:none;border:0.5px solid var(--crd);border-radius:6px;padding:6px;font-size:11px;color:var(--th);cursor:pointer;margin:4px 0 8px">모두 읽음 처리 → 확인한 알림으로 이동</button>`;
@@ -12849,7 +12826,7 @@ async function renderHandoverList(area) {
         </div>
         <div class="post-meta">
           ${hasData
-            ? `<span>최종 수정: ${hv.updated_at?.slice(0,16).replace('T',' ')||''}</span><span>${hv.updater?.name||''}</span>`
+            ? `<span>최종 수정: ${fmtDateTime(hv.updated_at)||''}</span><span>${hv.updater?.name||''}</span>`
             : '<span style="color:var(--th)">아직 인수인계 자료가 없습니다</span>'}
         </div>
       </div>
@@ -12988,7 +12965,7 @@ async function renderHandoverDetail(area) {
           <span style="font-size:11px;background:var(--gnb);color:var(--gn);border-radius:10px;padding:2px 8px;font-weight:600">총괄·부총괄</span>
         </div>
         <div class="detail-meta">
-          ${hv ? `<span>최종 수정: ${hv.updated_at?.slice(0,16).replace('T',' ')||''}</span><span>${hv.updater?.name||''}</span>` : '<span style="color:var(--th)">아직 등록된 자료가 없습니다</span>'}
+          ${hv ? `<span>최종 수정: ${fmtDateTime(hv.updated_at)||''}</span><span>${hv.updater?.name||''}</span>` : '<span style="color:var(--th)">아직 등록된 자료가 없습니다</span>'}
         </div>
       </div>
       ${cfg.map(f => renderField(f)).join('')}
