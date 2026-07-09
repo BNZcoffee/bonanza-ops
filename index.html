@@ -7151,8 +7151,14 @@ async function renderReqDetail(area) {
   const authorName = r.author ? (r.author.name + (r.author.store ? ' ('+r.author.store+')' : '')) : '-';
   const assigneeName = r.assignee ? r.assignee.name : '(배정 대기)';
 
+  // 삭제 가능 여부: 작성자=접수됨만, 총괄=전 상태
+  const canDelete = (r.author_id === currentUser.id && r.status === 'received') || currentUser.is_master;
+  const deleteBtn = canDelete
+    ? '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteRequest('+r.id+')"><i class="ti ti-trash"></i> 삭제</button>'
+    : '';
+
   area.innerHTML =
-    '<div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage(\'requests\')"><i class="ti ti-arrow-left"></i> 목록</button></div>' +
+    '<div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage(\'requests\')"><i class="ti ti-arrow-left"></i> 목록</button>' + deleteBtn + '</div>' +
     '<div class="post-detail">' +
       '<div style="display:flex;gap:8px;margin-bottom:8px">' +
         '<span style="font-size:10px;font-weight:700;border-radius:8px;padding:3px 10px;background:#EAF0FA;color:#1A4B7A">' + typeName + '</span>' +
