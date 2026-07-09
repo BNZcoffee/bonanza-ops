@@ -7127,7 +7127,6 @@ async function renderReqNew(area) {
 
   area.innerHTML =
     '<div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage(\'requests\')"><i class="ti ti-arrow-left"></i> 목록</button>' +
-    ((r.author_id===currentUser.id && r.status==='received')||currentUser.is_master ? '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteRequest('+r.id+')"><i class="ti ti-trash"></i> 삭제</button>' : '') +
     '</div>' +
     '<div class="form-section">' +
       '<div class="page-title" style="margin-bottom:6px">새 업무 신청</div>' +
