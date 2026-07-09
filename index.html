@@ -5244,8 +5244,17 @@ async function deleteRepair(id) {
   const pw = prompt('삭제 확인을 위해 비밀번호를 입력해주세요:');
   if (!pw || pw !== currentUser.password_hash) { alert('비밀번호가 일치하지 않습니다.'); return; }
   if (!confirm('이 보수 내역을 삭제하시겠습니까? 복구할 수 없습니다.')) return;
-  const { error } = await sb.from('repairs').delete().eq('id', id);
+
+  // repair_records 테이블에서 삭제
+  const { data: rec } = await sb.from('repair_records').select('request_id').eq('id', id).maybeSingle();
+  const { error } = await sb.from('repair_records').delete().eq('id', id);
   if (error) { alert('삭제 오류: ' + error.message); return; }
+
+  // 업무 신청에서 동기화된 건이면 완료 내역에서도 연결 해제
+  if (rec?.request_id) {
+    await sb.from('requests').update({repair_record_id: null}).eq('id', rec.request_id);
+  }
+
   alert('삭제 완료');
   goPage('repairs');
 }
