@@ -547,7 +547,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let roleLbl = {ceo:'대표',executive_director:'이사',admin:'운영팀',dept:'부서담당',manager:'매니저',member:'팀원',barista:'바리스타',pastry:'파티쉐',purchase:'구매팀',hr:'인사팀'};
 let roleCls = {ceo:'role-admin',executive_director:'role-admin',admin:'role-admin',dept:'role-purchase',manager:'role-manager',member:'role-barista',barista:'role-barista',pastry:'role-pastry',purchase:'role-purchase',hr:'role-hr'};
 // 권한 시스템 핵심 직위(코드값 고정, 삭제 불가)
-const CORE_ROLES = ['admin','manager'];
+const CORE_ROLES = ['ceo','executive_director','dept','manager','member'];
 // 매니저급으로 취급할 직위 키 (매니저B 등 추가 시 여기에 포함). manager_로 시작하면 자동 매니저급
 function isManagerRole(role) {
   if (!role) return false;
@@ -4834,7 +4834,7 @@ function openTestModeSelector() {
     {role:'manager_a',label:'부서담당',                   store:'부서담당'},
     {role:'admin',    label:'운영팀',                    store:'본사'},
     {role:'hr',       label:'인사팀',                    store:'본사'},
-    {role:'vice',     label:'부총괄',                    store:'부총괄'}
+    {role:'sub_master', label:'부총괄',                    store:'부총괄'}
   ];
 
   const m = document.createElement('div');
@@ -5002,11 +5002,11 @@ const NOTIF_EVENTS = [
 ];
 
 const NOTIF_ROLES = [
-  {key:'master',  label:'총괄'},
-  {key:'vice',    label:'부총괄'},
-  {key:'dept',    label:'부서담당'},
-  {key:'manager', label:'매니저'},
-  {key:'staff',   label:'매장직원'},
+  {key:'master',     label:'총괄'},
+  {key:'sub_master', label:'부총괄'},
+  {key:'dept',       label:'부서담당'},
+  {key:'manager',    label:'매니저'},
+  {key:'staff',      label:'매장직원'},
 ];
 
 // 기본값: 어떤 역할이 어떤 이벤트를 받는지
@@ -5581,7 +5581,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-07-10';   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-07-11';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -5955,23 +5955,24 @@ function canSeeAdminManual() {
 function canSeeManual(aud) {
   if (!currentUser) return false;
   const grade = userGrade(currentUser);
-  // 모든 사람은 팀원용 열람 가능
-  if (aud === 'member' || aud === 'user') return true;
-  // 매니저용: 매니저 이상
-  if (aud === 'manager') return ['manager','dept','vice','master'].includes(grade);
-  // 부서담당용: 부서담당 이상
-  if (aud === 'dept') return ['dept','vice','master'].includes(grade);
-  // 총괄용: 총괄/부총괄만
-  if (aud === 'admin') return ['vice','master'].includes(grade);
+  if (aud === 'user' || aud === 'member') return true;
+  if (aud === 'manager') return ['manager','dept','sub_master','master'].includes(grade);
+  if (aud === 'dept') return ['dept','sub_master','master'].includes(grade);
+  if (aud === 'admin') return ['sub_master','master'].includes(grade);
   return false;
 }
 // 열람 가능한 매뉴얼 파트 목록
 function availableManualAudiences() {
-  return [['user','매장 직원용'],['dept','부서담당용'],['admin','총괄·부총괄용']].filter(([a]) => canSeeManual(a));
+  return [
+    ['user','팀원(매장)용'],
+    ['manager','매니저용'],
+    ['dept','부서담당용'],
+    ['admin','총괄·부총괄용']
+  ].filter(([a]) => canSeeManual(a));
 }
 
 // 현재 보고 있는 매뉴얼 대상 (user/admin)
-let manualAudience = 'member';
+let manualAudience = 'user';
 
 async function renderManual(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
@@ -5981,10 +5982,10 @@ async function renderManual(area) {
   // 접속한 사용자의 역할에 맞는 오디언스 자동 선택 (첫 진입 시)
   if (!window.__manualAudienceSet) {
     const grade = userGrade();
-    if (grade === 'master' || grade === 'vice') manualAudience = 'admin';
+    if (grade === 'master' || grade === 'sub_master') manualAudience = 'admin';
     else if (grade === 'dept') manualAudience = 'dept';
     else if (grade === 'manager') manualAudience = 'manager';
-    else manualAudience = 'member';
+    else manualAudience = 'user';
     window.__manualAudienceSet = true;
   }
   if (!auds.find(([a]) => a === manualAudience)) manualAudience = auds[0][0];
@@ -6184,7 +6185,7 @@ async function renderManualEdit(area) {
   const { data: sections } = await sb.from('manual_sections')
     .select('*').eq('audience', manualEditAudience).order('sort_order');
 
-  const editParts = [['user','매장 직원용'],['dept','부서담당용'],['admin','총괄·부총괄용']];
+  const editParts = [['user','팀원(매장)용'],['manager','매니저용'],['dept','부서담당용'],['admin','총괄·부총괄용']];
   const tabBar = `<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
     ${editParts.map(([a,label]) => `<button class="tab-btn${manualEditAudience===a?' active':''}" onclick="manualEditAudience='${a}';renderManualEdit(document.getElementById('contentArea'))">${label}</button>`).join('')}
   </div>`;
@@ -6256,7 +6257,7 @@ async function moveManualSec(id, dir) {
 // 권한 시스템 (등급 × 기능 키)
 // ════════════════════════════════════════════════
 // 등급: master(총괄) > vice(부총괄) > dept(부서담당) > manager(매니저) > staff(매장직원)
-const GRADES = ['master','vice','dept','manager','staff'];
+const GRADES = ['master','sub_master','dept','manager','staff'];
 const GRADE_LABEL = {master:'총괄', vice:'부총괄', dept:'부서담당', manager:'매니저', staff:'매장직원'};
 
 
@@ -6540,11 +6541,11 @@ function userGrade(u) {
   u = u || currentUser;
   if (!u) return 'staff';
   if (u.is_master) return 'master';
-  if (u.is_vice_master) return 'vice';
-  // dept 직위 또는 part 있으면 부서담당
-  if (u.role === 'dept' || u.part) return 'dept';
+  // 부총괄(sub_master): 임원 포함 — vice_master, ceo, executive_director
+  if (u.is_vice_master || u.role === 'ceo' || u.role === 'executive_director') return 'sub_master';
+  // 부서담당: part 있거나 role이 dept/admin
+  if (u.part || u.role === 'dept' || u.role === 'admin') return 'dept';
   if (u.role === 'manager' || isManagerRole(u.role)) return 'manager';
-  // member/barista/pastry 모두 팀원
   return 'staff';
 }
 
@@ -6578,15 +6579,21 @@ async function loadPermMap() {
 
 // 권한 판단 (총괄은 항상 true, 개인 예외가 등급 기본값보다 우선)
 function hasPerm(permKey, u) {
+  u = u || currentUser;
   const grade = userGrade(u);
 
-  // 테스트 모드: PERM_DEFAULT 기준으로만 판단 (총괄 우회 X, PERM_MAP 무시)
+  // 테스트 모드: PERM_DEFAULT 기준으로만 판단
   if (window.__testMode) {
     const idx = GRADES.indexOf(grade);
     return PERM_DEFAULT[permKey] ? !!PERM_DEFAULT[permKey][idx] : false;
   }
 
   if (grade === 'master') return true;  // 총괄은 모든 권한
+
+  // 운영팀 파트 예외: 직위가 낮아도 파트가 운영팀이면 핵심 관리 기능 허용
+  const OPS_PERMS = ['cat_manage_full','app_manage','notice_stats','req_type_manage','staff_edit','staff_delete'];
+  if (isOperationsPart(u) && OPS_PERMS.includes(permKey)) return true;
+
   // 개인 예외 권한
   if ((!u || u === currentUser) && MY_PERM_OVERRIDE && Object.prototype.hasOwnProperty.call(MY_PERM_OVERRIDE, permKey)) {
     return MY_PERM_OVERRIDE[permKey];

@@ -90,17 +90,26 @@ let curAud='user';
 function userGrade(u){
   if(!u) return 'staff';
   if(u.is_master) return 'master';
-  if(u.is_vice_master) return 'vice';
-  if(u.part) return 'dept';
-  if(u.role==='manager') return 'manager';
+  // 부총괄(sub_master): vice_master + ceo + executive_director
+  if(u.is_vice_master || u.role==='ceo' || u.role==='executive_director') return 'sub_master';
+  // 부서담당: part 있거나 dept/admin
+  if(u.part || u.role==='dept' || u.role==='admin') return 'dept';
+  if(u.role==='manager' || (u.role && u.role.indexOf('manager')===0)) return 'manager';
   return 'staff';
 }
 function availAuds(u){
   const g=userGrade(u);
-  return [['user','매장 직원용'],['dept','부서담당용'],['admin','총괄·부총괄용']].filter(([a])=>{
+  return [
+    ['user','팀원(매장)용'],
+    ['manager','매니저용'],
+    ['dept','부서담당용'],
+    ['admin','총괄·부총괄용']
+  ].filter(([a])=>{
     if(a==='user') return true;
-    if(a==='dept') return ['dept','vice','master'].includes(g);
-    if(a==='admin') return ['vice','master'].includes(g);
+    if(a==='manager') return ['manager','dept','sub_master','master'].includes(g);
+    if(a==='dept') return ['dept','sub_master','master'].includes(g);
+    if(a==='admin') return ['sub_master','master'].includes(g);
+    return false;
   });
 }
 
