@@ -5599,8 +5599,42 @@ async function doSearchAll(){
   }).join('') || '<div style="text-align:center;padding:40px;color:var(--th)">검색 결과가 없습니다.</div>';
 }
 
+// ── 임시저장 자동 만료 스윕 (공지 30일 / 스케줄 7일) — 스토리지→첨부→본문 순 삭제 ──
+let __draftSweepDone = false;
+async function sweepExpiredDrafts(){
+  if (__draftSweepDone) return;
+  __draftSweepDone = true;
+  try {
+    const now = Date.now();
+    // 공지(posts) draft 30일
+    const cut30 = new Date(now - 30*864e5).toISOString();
+    const { data: oldPosts } = await sb.from('posts').select('id').eq('status','draft').lt('updated_at', cut30);
+    for (const pp of (oldPosts||[])) {
+      const { data: atts } = await sb.from('attachments').select('id, file_url').eq('post_id', pp.id);
+      const paths = (atts||[]).map(a => (a.file_url||'').split('/attachments/')[1]).filter(Boolean);
+      if (paths.length) { try { await sb.storage.from('attachments').remove(paths); } catch(e){} }
+      await sb.from('attachments').delete().eq('post_id', pp.id);
+      await sb.from('posts').delete().eq('id', pp.id);
+    }
+    // 스케줄 draft 7일 (자식행 먼저 정리)
+    const cut7 = new Date(now - 7*864e5).toISOString();
+    const { data: oldSch } = await sb.from('schedules').select('id').eq('status','draft').lt('updated_at', cut7);
+    for (const ss of (oldSch||[])) {
+      await sb.from('schedule_entries').delete().eq('schedule_id', ss.id);
+      try { await sb.from('schedule_leave_balance').delete().eq('schedule_id', ss.id); } catch(e){}
+      try { await sb.from('schedule_admin_notes').delete().eq('schedule_id', ss.id); } catch(e){}
+      await sb.from('schedules').delete().eq('id', ss.id);
+    }
+  } catch(e) { console.warn('임시저장 만료 스윕 오류:', e); }
+}
+function draftDaysLeft(updatedAt, ttlDays){
+  const dl = Math.ceil((new Date(updatedAt).getTime() + ttlDays*864e5 - Date.now())/864e5);
+  return `<span style="color:${dl<=3?'var(--rd)':'var(--th)'};font-weight:${dl<=3?'700':'400'}">· ${dl>0?dl+'일 후 자동 삭제':'곧 자동 삭제'}</span>`;
+}
+
 // ── 임시저장 목록 ─────────────────────────────────────────────────
 async function renderDrafts(area){
+  await sweepExpiredDrafts();
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
   const {data} = await sb.from('posts').select('*,categories(name)').in('status',['draft','scheduled']).eq('author_id',currentUser.id).order('updated_at',{ascending:false});
   const html = (data||[]).length ? (data||[]).map(p => `<div class="post-card">
@@ -5609,7 +5643,7 @@ async function renderDrafts(area){
       <span style="background:var(--crm);color:var(--ts);font-size:9px;font-weight:700;border-radius:10px;padding:2px 6px">${p.status==='scheduled'?'예약':'임시저장'}</span>
       <span class="badge-new" style="background:var(--crm);color:var(--ts)">${p.categories?.name||''}</span>
     </div>
-    <div class="post-meta"><span>수정: ${fmtDateTime(p.updated_at)}</span></div>
+    <div class="post-meta"><span>수정: ${fmtDateTime(p.updated_at)}</span> ${draftDaysLeft(p.updated_at, 30)}</div>
     <div style="display:flex;gap:8px;margin-top:10px">
       <button class="btn-cancel-sm" style="font-size:12px;padding:5px 12px" onclick="openEditPost(${p.id})"><i class="ti ti-edit"></i> 이어서 작성</button>
       <button class="btn-cancel-sm" style="font-size:12px;padding:5px 12px;color:var(--rd);border-color:var(--rd)" onclick="deleteDraft(${p.id})"><i class="ti ti-trash"></i> 삭제</button>
@@ -9103,6 +9137,7 @@ async function renderSchedules(area) {
   const monthOpts = Array.from({length:12},(_,i)=>i+1)
     .map(m=>`<option value="${m}"${m===defMonth?' selected':''}>${m}월</option>`).join('');
 
+  sweepExpiredDrafts();
   const cards = schList.map(s => {
     // ── 삭제 권한 ──
     const isMaster    = currentUser.is_master;
@@ -9137,12 +9172,14 @@ async function renderSchedules(area) {
         <div class="post-card-top">
           <span class="post-title-txt"><i class="ti ti-calendar-event" style="color:var(--brm);margin-right:5px"></i>${s.store} ${s.year}년 ${s.month}월</span>
           <span class="badge-access" style="${STATUS_COLOR[s.status]||''}">${STATUS_LABEL[s.status]||s.status}</span>
+          ${s.temp_closed_at && !s.closed_at ?'<span class="badge-access" style="background:#FFF3CD;color:#8A6D00">임시 마감</span>':''}
           ${s.closed_at?'<span class="badge-access all">마감완료</span>':''}
           ${s.hr_checked_at?'<span class="badge-access" style="background:var(--pub);color:var(--pu)">인사팀 점검완료</span>':''}
         </div>
         <div class="post-meta">
           <span>작성: ${s.creator?.name||''}</span>
           ${s.requested_at?`<span>요청: ${fmtDate(s.requested_at)}</span>`:''}
+          ${s.status==='draft'?draftDaysLeft(s.updated_at||s.created_at, 7):''}
           ${s.confirmed_at?`<span style="color:var(--gn)">확정: ${fmtDate(s.confirmed_at)}</span>`:''}
         </div>
       </div>
@@ -9441,6 +9478,8 @@ async function renderScheduleEdit(area) {
           <button class="btn-cancel-sm" onclick="confirmScheduleApprove()" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-check"></i> 컨펌 완료</button>
           <button class="btn-cancel-sm" onclick="confirmScheduleReject()" style="font-size:12px;color:var(--rd);border-color:var(--rd)"><i class="ti ti-x"></i> 반려</button>
         ` : ''}
+        ${curSchedule && curSchedule.status==='requested' && !curSchedule.temp_closed_at && !curSchedule.closed_at && (isScheduleAdmin()||canEditSchedule(curSchedule)) ? `<button class="btn-cancel-sm" onclick="tempCloseSchedule()" style="font-size:12px;color:#8A6D00;border-color:#E8C07A"><i class="ti ti-clock-pause"></i> 임시 마감(예외)</button>` : ''}
+        ${curSchedule && curSchedule.temp_closed_at && !curSchedule.closed_at && (isScheduleAdmin()||canEditSchedule(curSchedule)) ? `<button class="btn-cancel-sm" onclick="finalizeSchedule()" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-check"></i> 최종 마감 완료</button>` : ''}
         ${curSchedule && curSchedule.status==='confirmed' && !curSchedule.hr_checked_at ? `<button class="btn-cancel-sm" onclick="openCloseModal()" style="font-size:12px;color:var(--gn);border-color:var(--gn)"><i class="ti ti-checklist"></i> 근태 마감 관리</button>` : ''}
         ${curSchedule && curSchedule.closed_at && (isScheduleHr()||isScheduleAdmin()) && !curSchedule.hr_checked_at ? `<button class="btn-cancel-sm" onclick="hrCheckScheduleGuard()" style="font-size:12px;color:var(--pu);border-color:var(--pu)"><i class="ti ti-user-check"></i> 인사팀 점검완료</button>` : ''}
         ${curSchedule?.hr_checked_at && isScheduleAdmin() ? `<button class="btn-cancel-sm" onclick="cancelHrCheck()" style="font-size:12px;color:var(--th);border-color:var(--crd)"><i class="ti ti-rotate-left"></i> 인사점검 취소</button>` : ''}
@@ -9450,7 +9489,7 @@ async function renderScheduleEdit(area) {
     <div class="post-detail" style="margin-bottom:14px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
         <span style="font-size:17px;font-weight:600">${store} ${year}년 ${month}월 스케줄</span>
-        ${statusBadge}
+        ${statusBadge}${curSchedule?.temp_closed_at && !curSchedule?.closed_at ? '<span class="badge-access" style="background:#FFF3CD;color:#8A6D00">임시 마감(행정 대기)</span>' : ''}
         ${(()=>{
           const cd = curSchedule?.close_days;
           if (!cd || (Array.isArray(cd)&&cd.length===0)) return '';
@@ -11981,7 +12020,7 @@ async function loadOtherStoreSchedule() {
 
   cont.innerHTML = `
     <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      ${statusBadge}
+      ${statusBadge}${curSchedule?.temp_closed_at && !curSchedule?.closed_at ? '<span class="badge-access" style="background:#FFF3CD;color:#8A6D00">임시 마감(행정 대기)</span>' : ''}
       <span style="font-size:12px;color:var(--ts)">${store} ${year}년 ${month}월</span>
       ${schList.closed_at ? '<span style="font-size:11px;color:var(--gn)">근태마감 완료</span>' : ''}
     </div>
@@ -12387,6 +12426,32 @@ async function renderScheduleConfirmList(area) {
   area.innerHTML = `
     <div class="page-header"><div class="page-title">컨펌 대기 목록</div><div class="page-sub">매장에서 요청한 스케줄을 검토합니다 (${(list||[]).length}건)</div></div>
     <div class="post-list">${cards || '<div style="text-align:center;padding:40px;color:var(--th)">대기 중인 요청이 없습니다.</div>'}</div>`;
+}
+
+async function tempCloseSchedule() {
+  if (!curSchedule?.id) return;
+  const reason = prompt('임시 마감 사유를 입력하세요.\n(예: 퇴사 협의중 · 사직서/연차 상신 대기 등)');
+  if (reason === null) return;
+  const now = new Date().toISOString();
+  const { error } = await sb.from('schedules').update({
+    temp_closed_at: now, temp_close_reason: reason||null, temp_closed_by: currentUser.id, updated_at: now
+  }).eq('id', curSchedule.id);
+  if (error) { alert('임시 마감 오류: ' + error.message); return; }
+  curSchedule.temp_closed_at = now;
+  alert('임시 마감 처리되었습니다.\n행정 처리 완료 후 [최종 마감 완료]로 확정하세요.');
+  renderScheduleEdit(document.getElementById('contentArea'));
+}
+async function finalizeSchedule() {
+  if (!curSchedule?.id) return;
+  if (!confirm('이 스케줄을 최종 마감 완료(확정)로 전환할까요?')) return;
+  const now = new Date().toISOString();
+  const { error } = await sb.from('schedules').update({
+    status: 'confirmed', closed_at: now, temp_closed_at: null, updated_at: now
+  }).eq('id', curSchedule.id);
+  if (error) { alert('최종 마감 오류: ' + error.message); return; }
+  curSchedule.status = 'confirmed'; curSchedule.closed_at = now; curSchedule.temp_closed_at = null;
+  alert('최종 마감 완료로 확정되었습니다.');
+  renderScheduleEdit(document.getElementById('contentArea'));
 }
 
 async function confirmScheduleApprove() {
@@ -13973,9 +14038,12 @@ async function loadMyLeaveInfo() {
   const { data: unpaidEnt } = await sb.from('schedule_entries')
     .select('date, entry_type, note').eq('user_id', currentUser.id)
     .in('entry_type', ['무급휴가','결근']).order('date');
-  const excludeDays2   = (unpaidEnt||[]).length;
-  const excludeMonths2 = Math.floor(excludeDays2 / 30);
-  const { days: autoDays, desc: autoDesc } = calcAnnualLeave(hireDate, null, excludeDays2);
+  const unpaidDates2   = (unpaidEnt||[]).map(e=>e.date).filter(Boolean);
+  const excludeDays2   = unpaidDates2.length;
+  const { data: __hol2 } = await sb.from('holidays').select('date').gte('date', `${new Date().getFullYear()-2}-01-01`);
+  const holidaySet2 = new Set((__hol2||[]).map(h=>h.date));
+  const { days: autoDays, desc: autoDesc, excludedMonths: exMonths2 } = calcAnnualLeave(hireDate, null, unpaidDates2, holidaySet2);
+  const excludeMonths2 = (exMonths2||[]).length;
   const initAdjust  = bal?.adjust    || 0;
   const initUsed    = bal?.init_used || 0;
   const expireUsed  = bal?.expire_used || 0;
@@ -14058,37 +14126,69 @@ async function loadMyLeaveInfo() {
  * @param {string} baseDateStr  기준일
  * @param {number} excludeDays  무급휴가+결근 누적일수 (연속 30일 이상 시 비례 감산)
  */
-function calcAnnualLeave(hireDateStr, baseDateStr, excludeDays = 0) {
+function calcAnnualLeave(hireDateStr, baseDateStr, absenceDates, holidaySet) {
+  // absenceDates: 결근+무급휴가 날짜배열('YYYY-MM-DD'). holidaySet: 소정근로일 산출용 공휴일 Set.
   if (!hireDateStr) return { days: 0, desc: '입사일 없음' };
   const hire = new Date(hireDateStr);
   const base = baseDateStr ? new Date(baseDateStr) : new Date();
   if (isNaN(hire) || hire > base) return { days: 0, desc: '입사 전' };
+  const absent = Array.isArray(absenceDates) ? absenceDates.filter(Boolean) : [];
 
-  // 근로기준법: 무급휴가/결근이 30일 이상 연속되면 비례 감산
-  // 여기서는 단순하게 총 제외일수를 월수로 환산해 차감
-  const excludeMonths = Math.floor((excludeDays || 0) / 30);
-
-  let months = (base.getFullYear() - hire.getFullYear()) * 12
-             + (base.getMonth() - hire.getMonth());
+  let months = (base.getFullYear() - hire.getFullYear()) * 12 + (base.getMonth() - hire.getMonth());
   if (base.getDate() < hire.getDate()) months -= 1;
-  months = Math.max(0, months - excludeMonths); // 제외 기간 반영
-
+  months = Math.max(0, months);
   const years = Math.floor(months / 12);
 
-  if (months < 1) return { days: 0, desc: '입사 1개월 미만' + (excludeDays ? ` (무급/결근 ${excludeDays}일 제외)` : '') };
+  // 결근/무급 날짜 → 입사 기준 몇 번째 1개월 구간(k)
+  const monthIndexOf = (dstr) => {
+    const d = new Date(dstr); if (isNaN(d)) return -1;
+    let m = (d.getFullYear() - hire.getFullYear()) * 12 + (d.getMonth() - hire.getMonth());
+    if (d.getDate() < hire.getDate()) m -= 1;
+    return m;
+  };
+  const excluded = new Set();
+  absent.forEach(ds => { const k = monthIndexOf(ds); if (k >= 0) excluded.add(k); });
 
-  let days, desc;
+  if (months < 1) return { days: 0, desc: '입사 1개월 미만' };
+
   if (years < 1) {
-    days = Math.min(months, 11);
-    desc = `입사 ${months}개월 → ${days}일`;
-  } else {
-    const extra = Math.floor((years - 1) / 2);
-    days  = Math.min(15 + extra, 25);
-    const rem = months % 12;
-    desc  = `입사 ${years}년 ${rem}개월 → ${days}일`;
+    // 1년 미만: 결근/무급 있는 '달'만 미발생 (최대 11)
+    let ex = 0; excluded.forEach(k => { if (k >= 0 && k < months) ex++; });
+    const days = Math.max(0, Math.min(11, months - ex));
+    const exMonths = [...excluded].filter(k=>k>=0&&k<months).sort((a,b)=>a-b).map(k => {
+      const d = new Date(hire); d.setMonth(hire.getMonth()+k);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    });
+    return { days, desc: `입사 ${months}개월 · 미발생 ${ex}개월 → ${days}일`, excludedMonths: exMonths };
   }
-  if (excludeDays) desc += ` (무급/결근 ${excludeDays}일 제외)`;
-  return { days, desc };
+
+  // 1년 이상: 기본 15 + 근속 가산
+  const extra = Math.floor((years - 1) / 2);
+  const base15 = Math.min(15 + extra, 25);
+  // 직전 1년 소정근로일 = 총일 - 주말 - 공휴일 (holidaySet 있을 때만 정확 산출)
+  const yStart = new Date(base); yStart.setFullYear(base.getFullYear() - 1);
+  let workdays = 0;
+  if (holidaySet) {
+    for (let d = new Date(yStart); d < base; d.setDate(d.getDate()+1)) {
+      const dow = d.getDay();
+      const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      if (dow !== 0 && dow !== 6 && !holidaySet.has(ds)) workdays++;
+    }
+  }
+  const absLastYear = absent.filter(ds => { const d = new Date(ds); return d >= yStart && d < base; });
+  const ratio = workdays > 0 ? absLastYear.length / workdays : 0;
+  if (workdays > 0 && ratio > 0.20) {
+    // 출근율 80% 미만 → 직전 1년 개근(결근/무급 없는) 월수만큼만
+    let fullMonths = 0;
+    for (let mm = 0; mm < 12; mm++) {
+      const md = new Date(yStart); md.setMonth(yStart.getMonth()+mm);
+      const key = `${md.getFullYear()}-${String(md.getMonth()+1).padStart(2,'0')}`;
+      if (!absLastYear.some(ds => ds.slice(0,7) === key)) fullMonths++;
+    }
+    const days = Math.min(fullMonths, base15);
+    return { days, desc: `직전1년 출근율 ${Math.round((1-ratio)*100)}%(<80%) → 개근 ${fullMonths}개월 = ${days}일`, lowAttendance: true };
+  }
+  return { days: base15, desc: `입사 ${years}년 → ${base15}일` };
 }
 
 /**
@@ -14142,11 +14242,19 @@ async function loadStaffLeaveBalance(userList) {
     usedMap[e.user_id] = (usedMap[e.user_id]||0) + (e.entry_type==='연차' ? 1 : 0.5);
   });
 
+  // 결근/무급(연차 발생 역산) + 공휴일 배치 로드 (직원별 반복쿼리 대신 1회)
+  const { data: absEnt } = await sb.from('schedule_entries')
+    .select('user_id, date').in('user_id', ids).in('entry_type', ['결근','무급휴가']);
+  const absMap = {};
+  (absEnt||[]).forEach(e => { (absMap[e.user_id] = absMap[e.user_id] || []).push(e.date); });
+  const { data: holS } = await sb.from('holidays').select('date').gte('date', `${new Date().getFullYear()-2}-01-01`);
+  const holidaySetS = new Set((holS||[]).map(h=>h.date));
+
   // 셀에 반영
   userList.filter(u=>u.id).forEach(u => {
     const cell = document.getElementById('alb-cell-'+u.id);
     if (!cell) return;
-    const { days, desc } = calcAnnualLeave(u.hire_date, today);
+    const { days, desc } = calcAnnualLeave(u.hire_date, today, absMap[u.id]||[], holidaySetS);
     const alb = albMap[u.id] || {};
     const total  = days + (alb.adjust||0);
     const used   = (alb.init_used||0) + (alb.expire_used||0) + (usedMap[u.id]||0);
