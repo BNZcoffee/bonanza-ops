@@ -12,7 +12,6 @@
 <link rel="apple-touch-icon" id="appleTouchIcon" href="">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <link href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.snow.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.js"></script>
 <style>
@@ -342,24 +341,22 @@ textarea.form-input{min-height:120px;resize:vertical}
   </div>
 </div>
 
-<!-- 최초 비밀번호 설정 (이메일 인증 포함 3단계) -->
+<!-- 최초 비밀번호 설정 (슬랙 DM 인증 3단계) -->
 <div id="pwSetScreen" style="display:none;position:fixed;inset:0;background:var(--cr);z-index:120;align-items:center;justify-content:center">
   <div class="login-card" style="width:380px">
     <div class="login-logo">Bonanza Coffee Korea</div>
 
-    <!-- STEP 1: 이메일 확인 + 발송 -->
+    <!-- STEP 1: 슬랙 멤버 ID 확인 + 인증번호 발송 -->
     <div id="pwStep1">
-      <div class="login-sub" style="margin-bottom:14px">이메일 인증</div>
+      <div class="login-sub" style="margin-bottom:14px">슬랙 인증</div>
       <div id="pwSetWelcome" style="font-size:13px;color:var(--ts);margin-bottom:14px;line-height:1.6;text-align:left"></div>
-      <div style="font-size:12px;color:var(--ts);margin-bottom:6px;text-align:left;font-weight:600">인증 이메일 주소</div>
-      <div style="display:flex;gap:6px;margin-bottom:10px">
-        <input type="email" id="pwEmailInput" placeholder="이메일 주소" style="flex:1" />
-        <button class="btn-sm ghost" onclick="toggleEmailEdit()" id="emailEditBtn" style="white-space:nowrap;font-size:12px;padding:8px 10px">변경</button>
-      </div>
-      <div id="emailEditRow" style="display:none;margin-bottom:10px">
-        <div style="font-size:11px;color:var(--th);margin-bottom:6px;line-height:1.5">변경할 이메일 주소를 입력하세요. 인증 후 DB에 반영됩니다.</div>
-        <input type="email" id="pwEmailNew" placeholder="새 이메일 주소" />
-        <button class="btn-login" style="margin-top:6px;padding:9px" onclick="applyEmailChange()">이메일 변경 저장</button>
+      <div style="font-size:12px;color:var(--ts);margin-bottom:6px;text-align:left;font-weight:600">슬랙 멤버 ID</div>
+      <input type="text" id="pwSlackId" placeholder="예: U012AB3CD" autocomplete="off"
+        oninput="this.value=this.value.replace(/\s/g,'').toUpperCase()" style="text-align:center;letter-spacing:1px;font-weight:600" />
+      <div style="font-size:11px;color:var(--ts);margin:8px 0 12px;line-height:1.75;text-align:left;background:var(--crm);border-radius:8px;padding:10px 12px">
+        <b>📋 멤버 ID 확인 방법</b><br>
+        슬랙 앱 → 본인 프로필 → 점 세개(<b>⋯ 더보기</b>) → <b>멤버 ID 복사</b><br>
+        <span style="color:var(--th)">(U로 시작하는 8~11자리 영문·숫자)</span>
       </div>
       <button class="btn-login" onclick="sendOtp()">인증번호 발송</button>
       <div class="login-err" id="pwStep1Err"></div>
@@ -374,13 +371,13 @@ textarea.form-input{min-height:120px;resize:vertical}
         oninput="this.value=this.value.replace(/[^0-9]/g,'')" />
       <button class="btn-login" style="margin-top:10px" onclick="verifyOtp()">확인</button>
       <div class="login-err" id="pwStep2Err"></div>
-      <button onclick="goBackToStep1()" style="background:none;border:none;color:var(--th);font-size:12px;cursor:pointer;margin-top:10px;text-decoration:underline">← 이메일 다시 확인</button>
+      <button onclick="goBackToStep1()" style="background:none;border:none;color:var(--th);font-size:12px;cursor:pointer;margin-top:10px;text-decoration:underline">← 슬랙 ID 다시 입력</button>
     </div>
 
     <!-- STEP 3: 새 비밀번호 설정 -->
     <div id="pwStep3" style="display:none">
       <div class="login-sub" style="margin-bottom:14px">비밀번호 설정</div>
-      <div style="font-size:13px;color:var(--gn);margin-bottom:14px;text-align:left">✓ 이메일 인증 완료</div>
+      <div style="font-size:13px;color:var(--gn);margin-bottom:14px;text-align:left">✓ 슬랙 인증 완료</div>
       <input type="password" id="pwSet1" placeholder="새 비밀번호 (4자 이상)" />
       <input type="password" id="pwSet2" placeholder="새 비밀번호 다시 입력" />
       <button class="btn-login" onclick="doSetPassword()">비밀번호 설정 완료</button>
@@ -704,7 +701,23 @@ function todayKST(){return toKST(new Date().toISOString()).slice(0,10);}
 function daysAgo(s){return Math.floor((new Date()-new Date(s))/864e5);}
 
 // ── AUTH ──────────────────────────────────────────
-const INIT_PW = 'bnz1234'; // 공통 초기 비밀번호
+const INIT_PW = 'bnz1234'; // (안내용) 공통 초기 비밀번호
+
+// 민감작업 재인증 — 서버 RPC(verify_password)로만 검증 (평문 클라이언트 비교 폐기)
+async function reauth(pw) {
+  if (!pw || !currentUser) return false;
+  const { data, error } = await sb.rpc('verify_password', { p_user_id: currentUser.id, p_password: pw });
+  return !error && data === true;
+}
+
+// 관리자용 비밀번호 초기화 (관리자 본인 인증 후 대상 직원을 bnz+코드로 리셋)
+async function adminResetPw(userId, name) {
+  const adminPw = prompt('관리자 본인 비밀번호를 입력하세요. (' + (currentUser?.name||'') + ' 인증)');
+  if (!adminPw) return;
+  const { data, error } = await sb.rpc('admin_reset_password', { p_admin_id: currentUser.id, p_admin_password: adminPw, p_target_id: userId });
+  if (error) { alert('초기화 실패: ' + error.message); return; }
+  alert((name||'해당 직원') + ' 님의 초기 비밀번호는\n\n    ' + data + '\n\n입니다. 직원에게 전달해 주세요.\n(첫 로그인 시 슬랙 인증 후 새 비밀번호를 재설정합니다.)');
+}
 
 async function doLogin() {
   const name = (document.getElementById('loginName')?.value||'').trim();
@@ -766,36 +779,36 @@ async function doLogin() {
     err.textContent = '입사일(' + data.hire_date + ')부터 로그인할 수 있습니다.'; return;
   }
 
-  // 최초 비밀번호 미설정 계정: 초기비번(bnz1234) 확인 후 설정 화면으로
-  if (!data.pw_set) {
-    if (pw !== INIT_PW) { err.textContent = '첫 로그인 비밀번호는 bnz1234 입니다.'; return; }
-    openPwSetScreen(data);
+  // 서버 RPC(verify_login)로 비밀번호 검증 — 평문을 프론트에서 읽지 않음
+  const { data: __vr, error: __ve } = await sb.rpc('verify_login', { p_user_id: data.id, p_password: pw });
+  if (__ve) { err.textContent = '로그인 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'; return; }
+  if (!__vr || !__vr.length) {
+    err.textContent = data.pw_set ? '비밀번호가 맞지 않습니다.' : '첫 로그인 비밀번호를 확인해 주세요. (bnz + 코드 숫자 4자리)';
     return;
   }
+  const __user = __vr[0];
+  window.__pwSetAuth = pw;   // 최초 설정 시 현재(초기) 비밀번호로 사용
 
-  // 일반 로그인: 비밀번호 확인
-  if (data.password_hash !== pw) { err.textContent = '비밀번호가 맞지 않습니다.'; return; }
+  // 최초 비밀번호 미설정 계정: 슬랙 인증 + 새 비밀번호 설정 화면으로
+  if (!__user.pw_set) { openPwSetScreen(__user); return; }
 
   try {
     if (document.getElementById('autoLogin').checked) {
       // 이름+입사일만 저장 (비밀번호는 저장하지 않음)
-      localStorage.setItem('bck_auto', JSON.stringify({name, hire, code: data.code}));
+      localStorage.setItem('bck_auto', JSON.stringify({name, hire, code: __user.code}));
     } else {
       localStorage.removeItem('bck_auto');
     }
   } catch(e) {}
-  loginAs(data);
+  loginAs(__user);
 }
 
 // 최초 비밀번호 설정 화면 진입
-// ── 이메일 인증 + 최초 비밀번호 설정 ──────────────
-const EMAILJS_SVC  = 'service_c2of8j3';
-const EMAILJS_TPL  = 'template_v85k3ij';
-const EMAILJS_KEY  = '4lk7oZZYhsJbbULdm';
-
-let pwSetUser  = null;
-let otpCode    = null;   // 발송한 6자리 코드
-let otpExpiry  = null;   // 만료 timestamp (10분)
+// ── 슬랙 DM 인증 + 최초 비밀번호 설정 ──────────────
+let pwSetUser    = null;
+let pwSetSlackId = null;   // 첫 로그인 시 입력받은 슬랙 멤버 ID
+let otpCode      = null;   // 발송한 6자리 코드
+let otpExpiry    = null;   // 만료 timestamp (10분)
 
 // 이메일 마스킹: abc@bonanza.kr → a**@bonanza.kr
 function maskEmail(email) {
@@ -808,6 +821,7 @@ function maskEmail(email) {
 // STEP1 진입
 function openPwSetScreen(user) {
   pwSetUser = user;
+  pwSetSlackId = null;
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('pwSetScreen').style.display = 'flex';
   // 단계 초기화
@@ -815,14 +829,10 @@ function openPwSetScreen(user) {
   // 환영 메시지
   document.getElementById('pwSetWelcome').innerHTML =
     '<strong>' + (user.name||'') + '</strong>님, 환영합니다.<br>' +
-    '보안을 위해 이메일 인증 후 비밀번호를 직접 설정해 주세요.';
-  // 이메일 표시 (읽기 전용)
-  const emailEl = document.getElementById('pwEmailInput');
-  emailEl.value = user.email || '';
-  emailEl.readOnly = true;
-  emailEl.style.background = 'var(--cr)';
-  document.getElementById('emailEditRow').style.display = 'none';
-  document.getElementById('emailEditBtn').textContent = '변경';
+    '본인 슬랙 계정으로 인증번호를 받아 비밀번호를 설정합니다.';
+  // 기존에 등록된 슬랙 멤버 ID가 있으면 미리 채움
+  const sidEl = document.getElementById('pwSlackId');
+  if (sidEl) sidEl.value = user.slack_member_id || '';
   document.getElementById('pwStep1Err').textContent = '';
 }
 
@@ -871,14 +881,17 @@ async function applyEmailChange() {
   setTimeout(()=>{ err.textContent=''; err.style.color=''; }, 2500);
 }
 
-// OTP 발송
+// OTP 발송 — 슬랙 DM (notification_settings.slack_bot_token 사용)
 async function sendOtp() {
   const err = document.getElementById('pwStep1Err');
-  const email = (document.getElementById('pwEmailInput').value||'').trim();
-  if (!email || !email.includes('@')) {
-    err.textContent = '이메일 주소가 없습니다. [변경] 버튼으로 이메일을 먼저 등록해 주세요.';
+  const slackId = (document.getElementById('pwSlackId').value||'').trim().toUpperCase();
+  // 슬랙 멤버 ID 형식: U로 시작하는 총 8~11자리 (U + 7~10자리 영문·숫자)
+  if (!/^U[A-Z0-9]{7,10}$/.test(slackId)) {
+    err.style.color = '';
+    err.textContent = '슬랙 멤버 ID 형식이 올바르지 않습니다. (U로 시작하는 8~11자리)';
     return;
   }
+  pwSetSlackId = slackId;
   err.style.color = '';
   err.textContent = '인증번호 발송 중...';
 
@@ -887,22 +900,49 @@ async function sendOtp() {
   otpExpiry = Date.now() + 10 * 60 * 1000; // 10분
 
   try {
-    emailjs.init(EMAILJS_KEY);
-    await emailjs.send(EMAILJS_SVC, EMAILJS_TPL, {
-      to_email:  email,
-      user_name: pwSetUser.name || '',
-      otp_code:  otpCode
-    });
+    const { data: ns } = await sb.from('notification_settings').select('slack_bot_token').single();
+    if (!ns || !ns.slack_bot_token) {
+      err.textContent = '슬랙 봇 토큰이 설정되지 않았습니다. 운영팀에 문의해 주세요.';
+      otpCode = null; otpExpiry = null; return;
+    }
+    let ok = true, ecode = '';
+    try {
+      const res = await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: {
+          'Content-Type':  'application/json; charset=utf-8',
+          'Authorization': 'Bearer ' + ns.slack_bot_token
+        },
+        body: JSON.stringify({
+          channel: slackId,
+          text: '[보난자 커피 운영앱] 첫 로그인 인증번호는 *' + otpCode + '* 입니다. (10분 이내 입력)'
+        })
+      });
+      const j = await res.json();
+      ok = !!j.ok; ecode = j.error || '';
+    } catch(_) {
+      // CORS 등으로 응답 본문을 읽지 못한 경우: 발송은 되었을 수 있으므로 낙관적으로 진행
+      ok = true;
+    }
+    if (!ok) {
+      const map = {
+        channel_not_found: '멤버 ID를 찾을 수 없습니다. ID를 다시 확인해 주세요.',
+        user_not_found:    '멤버 ID를 찾을 수 없습니다. ID를 다시 확인해 주세요.',
+        not_in_channel:    '봇이 DM을 보낼 수 없습니다. 운영팀에 문의해 주세요.',
+        account_inactive:  '슬랙 봇 토큰이 비활성 상태입니다. 운영팀에 문의해 주세요.'
+      };
+      err.textContent = '발송 실패: ' + (map[ecode] || ecode || '알 수 없는 오류');
+      otpCode = null; otpExpiry = null; return;
+    }
     // STEP2로 전환
     document.getElementById('pwStep2Info').innerHTML =
-      '<strong>' + maskEmail(email) + '</strong>으로 인증번호를 발송했습니다.<br>' +
-      '메일함을 확인해 주세요. (유효시간 10분)';
+      '<strong>슬랙 DM</strong>으로 인증번호를 발송했습니다.<br>슬랙 앱을 확인해 주세요. (유효시간 10분)';
     document.getElementById('otpInput').value = '';
     document.getElementById('pwStep2Err').textContent = '';
     showPwStep(2);
     setTimeout(()=>document.getElementById('otpInput').focus(), 100);
   } catch(e) {
-    err.textContent = '발송 오류: ' + (e?.text || e?.message || JSON.stringify(e));
+    err.textContent = '발송 오류: ' + (e?.message || JSON.stringify(e));
     otpCode = null; otpExpiry = null;
   }
 }
@@ -935,10 +975,12 @@ async function doSetPassword() {
   if (p1.length < 4) { err.textContent = '비밀번호는 4자 이상으로 설정해 주세요.'; return; }
   if (p1 !== p2)     { err.textContent = '두 비밀번호가 일치하지 않습니다. 다시 확인해 주세요.'; return; }
   err.textContent = '설정 중...';
-  const { error } = await sb.from('users').update({ password_hash: p1, pw_set: true }).eq('id', pwSetUser.id);
-  if (error) { err.textContent = '설정 중 오류가 발생했습니다: ' + error.message; return; }
-  pwSetUser.password_hash = p1;
-  pwSetUser.pw_set        = true;
+  const { data: __ok, error: __e } = await sb.rpc('set_password', { p_user_id: pwSetUser.id, p_new_password: p1, p_current_password: window.__pwSetAuth || '' });
+  if (__e || !__ok) { err.textContent = '비밀번호 설정에 실패했습니다. 다시 로그인해 주세요.'; return; }
+  // 슬랙 멤버 ID는 민감정보가 아니므로 users에 저장 (수집률 100%)
+  await sb.from('users').update({ slack_member_id: pwSetSlackId || pwSetUser.slack_member_id || null }).eq('id', pwSetUser.id);
+  pwSetUser.pw_set          = true;
+  pwSetUser.slack_member_id = pwSetSlackId || pwSetUser.slack_member_id;
   document.getElementById('pwSetScreen').style.display = 'none';
   loginAs(pwSetUser);
 }
@@ -1439,15 +1481,20 @@ function goPage(page) {
 }
 
 // ── BOARD ─────────────────────────────────────────
-async function renderBoard(area) {
+const BOARD_PAGE = 20;
+async function renderBoard(area, opts) {
+  if (!opts || !opts.keepPage) window.__boardPage = 0;
+  const __page  = window.__boardPage || 0;
+  const __limit = (__page + 1) * BOARD_PAGE;
   area.innerHTML = `<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>`;
-  const { data: posts } = await sb.from('posts')
+  const q = (document.getElementById('boardSearch')?.value || '').trim().toLowerCase();
+  let __bq = sb.from('posts')
     .select('*, categories(name), users(name,store)')
-    .eq('category_id', currentCatId)
-    .order('created_at', {ascending: false});
-
-  const q = (document.getElementById('boardSearch')?.value || '').toLowerCase();
-  const filtered = (posts || []).filter(p => canSee(p) && (!q || p.title.toLowerCase().includes(q) || p.body.toLowerCase().includes(q)));
+    .eq('category_id', currentCatId);
+  if (q) { const esc = q.replace(/[%,()]/g,' '); __bq = __bq.or(`title.ilike.%${esc}%,body.ilike.%${esc}%`); }
+  const { data: posts } = await __bq.order('created_at', {ascending: false}).range(0, __limit - 1);
+  const __fetchedFull = (posts || []).length >= __limit;   // 원본 조회가 꽉 찼으면 더 있을 수 있음
+  const filtered = (posts || []).filter(p => canSee(p));
   const week = new Date(Date.now() - 7*24*60*60*1000).toISOString();
 
   const catTabs = visibleCats().map(c =>
@@ -1490,7 +1537,8 @@ async function renderBoard(area) {
       <div class="search-box"><i class="ti ti-search" style="color:var(--th)"></i><input id="boardSearch" placeholder="공지 검색..." oninput="renderBoard(document.getElementById('contentArea'))" /></div>
       ${newBtn}
     </div>
-    <div class="post-list">${postHtml}</div>`;
+    <div class="post-list">${postHtml}</div>
+    ${__fetchedFull ? `<div style="text-align:center;margin:14px 0"><button class="btn-cancel-sm" style="padding:9px 22px;font-size:13px" onclick="window.__boardPage=(window.__boardPage||0)+1;renderBoard(document.getElementById('contentArea'),{keepPage:true})"><i class="ti ti-chevron-down"></i> 더 보기</button></div>` : ''}`;
 
   // load read rates async
   if ((['admin','dept','ceo','executive_director'].includes(currentUser.role) || currentUser.is_master || currentUser.is_vice_master || currentUser.part) && filtered.length > 0) {
@@ -2665,6 +2713,7 @@ async function renderStaff(area) {
       <td><span class="staff-role ${roleCls[u.role]||''}" style="font-size:10px">${roleLbl[u.role]||u.role}</span></td>
       <td style="font-weight:600">${u.name}</td>
       <td>${u.store}</td>
+      <td style="font-size:12px;color:var(--ts)">${u.part||'-'}</td>
       <td style="font-family:monospace;font-size:11px;color:var(--th)">${u.code}</td>
       <td style="color:var(--th)">${u.phone||'-'}</td>
       <td style="font-size:12px;color:var(--th)">${u.email||'-'}</td>
@@ -2674,7 +2723,7 @@ async function renderStaff(area) {
       ${currentUser.is_master ? `<td class="pw-col-cell" style="font-size:10px;max-width:120px;display:none">
         <div style="display:flex;align-items:center;gap:4px;flex-wrap:nowrap">
           <span style="background:${u.pw_set?'var(--gnb)':'var(--crm)'};color:${u.pw_set?'var(--gn)':'var(--ts)'};border-radius:4px;padding:1px 5px;font-size:9px;white-space:nowrap;flex-shrink:0">${u.pw_set?'변경':'초기'}</span>
-          <span style="font-family:monospace;color:var(--th);font-size:10px;user-select:all;overflow:hidden;text-overflow:ellipsis">${u.password_hash||''}</span>
+          <button class="btn-sm ghost" style="font-size:9px;padding:2px 6px;white-space:nowrap" onclick="event.stopPropagation();adminResetPw('${u.id}','${(u.name||'').replace(/'/g,'')}')">비번 초기화</button>
         </div>
       </td>` : ''}
       <td style="white-space:nowrap">
@@ -2767,6 +2816,7 @@ async function renderStaff(area) {
           <th onclick="sortStaff('role')" style="cursor:pointer">직위 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
           <th onclick="sortStaff('name')" style="cursor:pointer">이름 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
           <th onclick="sortStaff('store')" style="cursor:pointer">매장 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
+          <th onclick="sortStaff('part')" style="cursor:pointer">파트 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
           <th onclick="sortStaff('code')" style="cursor:pointer">코드 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
           <th>연락처</th><th>이메일</th>
           <th onclick="sortStaff('hire_date')" style="cursor:pointer">입사일 <i class="ti ti-arrows-sort" style="font-size:11px;opacity:.5"></i></th>
@@ -3049,7 +3099,7 @@ async function openEditUser(userId){
       <div><label class="form-label">퇴사일 <span style="font-size:10px;color:var(--th)">(익일 자동 비활성)</span></label>
         <input class="form-input" type="date" id="eu_retire" value="${u?.retire_date||''}"/>
       </div>
-      <div><label class="form-label">본사 파트 <span style="font-size:10px;color:var(--th)">(업무 신청 담당)</span></label>
+      <div><label class="form-label">파트 <span style="font-size:10px;color:var(--th)">(현장·본사 공통 · 업무신청/근태 담당)</span></label>
         <select class="form-input" id="eu_part">${partOpts}</select>
       </div>
       ${!editingUserId ? `<div style="grid-column:1/-1"><label class="form-label">계정 코드 방식</label>
@@ -3073,14 +3123,9 @@ async function openEditUser(userId){
     </div>
     ${userId?`<div style="margin-top:12px;padding-top:12px;border-top:0.5px solid var(--crd)">
       <label class="form-label">비밀번호 초기화 (변경 시만 입력)</label>
-      <input class="form-input" id="eu_pw" placeholder="새 비밀번호"/>
-      ${currentUser.is_master ? `<div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-        <p style="font-size:11px;color:var(--th);margin:0">현재 비밀번호:
-          <strong id="modalPwVal" style="filter:blur(4px);transition:filter .2s;cursor:pointer;user-select:none"
-            onclick="this.style.filter=this.style.filter?'':'blur(4px)'"
-            title="클릭하여 표시/숨김">${u?.password_hash||''}</strong>
-        </p>
-        <span style="font-size:10px;color:var(--th)">(클릭 시 표시)</span>
+      ${(currentUser.is_master && u?.id) ? `<div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+        <button type="button" class="btn-sm ghost" style="font-size:11px;padding:4px 10px" onclick="adminResetPw('${u.id}','${(u.name||'').replace(/'/g,'')}')">비밀번호 초기화</button>
+        <span style="font-size:10px;color:var(--th)">초기값(bnz+코드)으로 리셋 · 첫 로그인 재설정</span>
       </div>` : ''}
     </div>
     <div style="margin-top:12px;padding-top:12px;border-top:0.5px solid var(--crd)">
@@ -3176,7 +3221,7 @@ async function submitEditUser(){
       ? (parseInt(document.getElementById('eu_pt_days')?.value||0)||null) : null,
     sub_stores: window.__tempSubStores?.length ? window.__tempSubStores : null
   };
-  if(pw) payload.password_hash = pw;
+  // 비밀번호는 users에 직접 쓰지 않음(보안). 비번 관리는 '비밀번호 초기화' 버튼 사용.
   let error, newCode;
   if(editingUserId){
     ({error} = await sb.from('users').update(payload).eq('id',editingUserId));
@@ -3481,10 +3526,10 @@ async function submitBulkAdd() {
 }
 
 // ── 직원 삭제 (이중 확인) ────────────────────────────────────────
-function verifyAdminPassword(actionDesc){
+async function verifyAdminPassword(actionDesc){
   const pw = prompt('🔒 '+actionDesc+'\n\n계속하려면 현재 로그인한 관리자(['+currentUser.name+']) 비밀번호를 입력해주세요.');
   if(pw === null) return false; // 취소
-  if(pw !== currentUser.password_hash){
+  if(!(await reauth(pw))){
     alert('비밀번호가 일치하지 않습니다. 삭제가 취소되었습니다.');
     return false;
   }
@@ -3494,7 +3539,7 @@ function verifyAdminPassword(actionDesc){
 async function deleteUser(id, name){
   if (!confirm(`${name} 직원을 삭제하시겠습니까?\n\n⚠ 삭제하면 복구할 수 없습니다.`)) return;
   const pw = prompt('확인을 위해 비밀번호를 입력해주세요:');
-  if (!pw || pw !== currentUser.password_hash) { alert('비밀번호가 일치하지 않습니다.'); return; }
+  if (!(await reauth(pw))) { alert('비밀번호가 일치하지 않습니다.'); return; }
   // FK 참조 해제 — 모든 관련 테이블
   await sb.from('posts').update({author_id:null}).eq('author_id',id);
   await sb.from('comments').update({author_id:null}).eq('author_id',id);
@@ -3524,7 +3569,7 @@ async function bulkDeleteUsers(){
   // 1차 확인
   if(!confirm('선택한 '+ids.length+'명을 삭제하시겠습니까?\n\n삭제하면 계정과 모든 기록이 사라지며 복구할 수 없습니다.\n인원현황 시트에서도 자동으로 제거됩니다.')) return;
   // 2차 확인: 비밀번호 입력
-  if(!verifyAdminPassword('선택한 '+ids.length+'명의 데이터를 영구 삭제합니다. 되돌릴 수 없습니다.')) return;
+  if(!(await verifyAdminPassword('선택한 '+ids.length+'명의 데이터를 영구 삭제합니다. 되돌릴 수 없습니다.'))) return;
   const {error} = await sb.from('users').delete().in('id', ids);
   if(error){ alert('삭제 오류: '+error.message); return; }
   window.__selStaff = new Set();
@@ -3984,7 +4029,7 @@ async function deleteCat(id) {
   // 비밀번호 확인
   const pw = prompt('"' + catName + '" 카테고리를 비활성화(숨김)합니다.' + (cnt>0?'\n(게시글 '+cnt+'개 포함)':'') + '\n\n비밀번호를 입력해주세요:');
   if (!pw) return;
-  if (pw !== currentUser.password_hash) { alert('비밀번호가 일치하지 않습니다.'); return; }
+  if (!(await reauth(pw))) { alert('비밀번호가 일치하지 않습니다.'); return; }
 
   if (currentUser.is_master) {
     const fullDel = confirm('총괄 권한으로 처리합니다.\n\n[확인] 완전 삭제 (복구 불가)\n[취소] 비활성화(숨김, 데이터 보존)');
@@ -5124,7 +5169,7 @@ async function deleteRequest(reqId) {
   }
 
   const pw = prompt('삭제 확인을 위해 비밀번호를 입력해주세요:');
-  if (!pw || pw !== currentUser.password_hash) { alert('비밀번호가 일치하지 않습니다.'); return; }
+  if (!(await reauth(pw))) { alert('비밀번호가 일치하지 않습니다.'); return; }
 
   if (!confirm(`"${req.title}" 업무 신청을 삭제하시겠습니까?\n\n삭제하면 복구할 수 없습니다.`)) return;
 
@@ -5241,7 +5286,7 @@ async function deleteInterview(id) {
   if (!pw) return; // 사용자가 취소를 누르거나 입력하지 않은 경우
 
   // 수정됨: password_hash와 password 모두 체크하여 유연하게 대처
-  if (pw !== currentUser.password_hash && pw !== currentUser.password) { 
+  if (!(await reauth(pw))) { 
     alert('비밀번호가 일치하지 않습니다.'); 
     return; 
   }
@@ -5290,7 +5335,7 @@ async function deleteRepair(id) {
     return;
   }
   const pw = prompt('삭제 확인을 위해 비밀번호를 입력해주세요:');
-  if (!pw || pw !== currentUser.password_hash) { alert('비밀번호가 일치하지 않습니다.'); return; }
+  if (!(await reauth(pw))) { alert('비밀번호가 일치하지 않습니다.'); return; }
   if (!confirm('이 보수 내역을 삭제하시겠습니까? 복구할 수 없습니다.')) return;
 
   // repair_records 테이블에서 삭제
@@ -5581,7 +5626,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-07-11';   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-07-12';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -5906,10 +5951,10 @@ async function saveProfile(){
   const con = document.getElementById('p_con').value;
   const updates = {store, phone:phone||null, email:email||null, nickname:nickname||null, slack_id:slackId||null};
   if(cur||pw||con){
-    if(cur!==currentUser.password_hash){alert('현재 비밀번호가 맞지 않습니다.');return;}
     if(pw.length<4){alert('새 비밀번호는 4자 이상이어야 합니다.');return;}
     if(pw!==con){alert('새 비밀번호가 일치하지 않습니다.');return;}
-    updates.password_hash = pw;
+    const {data:__pwok,error:__pwerr}=await sb.rpc('set_password',{p_user_id:currentUser.id,p_new_password:pw,p_current_password:cur});
+    if(__pwerr||!__pwok){alert('현재 비밀번호가 맞지 않습니다.');return;}
   }
   const {error} = await sb.from('users').update(updates).eq('id',currentUser.id);
   if(error){alert('저장 오류: '+error.message);return;}
@@ -6291,7 +6336,7 @@ async function loadSecureMenuSettings() {
   window.__secureMenus = data?.value ? JSON.parse(data.value) : {interviews: true};
 }
 
-function requirePasswordForMenu(menuKey, callback) {
+async function requirePasswordForMenu(menuKey, callback) {
   // 관리자(총괄/부총괄/운영팀)는 바로 진입
   if (currentUser.is_master || currentUser.is_vice_master || currentUser.role === 'admin') {
     callback();
@@ -6304,7 +6349,7 @@ function requirePasswordForMenu(menuKey, callback) {
   }
   const pw = prompt('보안이 설정된 메뉴입니다.\n비밀번호를 입력해주세요:');
   if (!pw) return;
-  if (pw !== currentUser.password_hash) {
+  if (!(await reauth(pw))) {
     alert('비밀번호가 일치하지 않습니다.');
     return;
   }
@@ -7173,7 +7218,8 @@ async function renderReqStats(area) {
 }
 
 // 완료 내역 아카이브 — 모든 매니저·관리자 열람, 유형·매장 필터
-async function renderReqArchive(area) {
+const ARC_PAGE = 25;
+async function renderReqArchive(area, opts) {
   // 열람 권한: 매니저 + 관리자(운영팀/부서담당/부총괄/총괄). 매장 일반 직원은 제외
   const g = userGrade(currentUser);
   const canView = currentUser.is_master || currentUser.role === 'admin' || isManagerRole(currentUser.role) || !!currentUser.part || currentUser.is_vice_master;
@@ -7181,17 +7227,22 @@ async function renderReqArchive(area) {
     area.innerHTML = '<div class="page-header"><div class="page-title">완료 내역</div></div><div style="text-align:center;padding:50px;color:var(--th)">열람 권한이 없습니다.</div>';
     return;
   }
+  if (!opts || !opts.keepPage) window.__arcPage = 0;
+  const __page  = window.__arcPage || 0;
+  const __limit = (__page + 1) * ARC_PAGE;
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  let __aq = sb.from('requests').select('*, request_types(name, icon), parts(name)').eq('status','done');
+  if (arcType)  __aq = __aq.eq('type_id', arcType);   // 유형·매장 필터는 서버측 적용
+  if (arcStore) __aq = __aq.eq('store', arcStore);
   const [{ data: reqs }, { data: types }, { data: stores }] = await Promise.all([
-    sb.from('requests').select('*, request_types(name, icon), parts(name)').eq('status','done').order('completed_at', {ascending:false}).order('created_at', {ascending:false}),
+    __aq.order('completed_at', {ascending:false}).order('created_at', {ascending:false}).range(0, __limit - 1),
     sb.from('request_types').select('*').order('sort_order'),
     sb.from('store_options').select('*').order('sort_order')
   ]);
+  const __fetchedFull = (reqs || []).length >= __limit;
   let list = reqs || [];
 
-  // 필터 적용
-  if (arcType) list = list.filter(r => String(r.type_id) === String(arcType));
-  if (arcStore) list = list.filter(r => r.store === arcStore);
+  // 검색어(제목·양식값)는 로드된 항목 내에서 필터
   if (arcQ) {
     const q = arcQ.toLowerCase();
     list = list.filter(r => {
@@ -7222,13 +7273,14 @@ async function renderReqArchive(area) {
   }).join('') : '<div style="text-align:center;padding:46px;color:var(--th);font-size:14px">완료된 업무 내역이 없습니다.</div>';
 
   area.innerHTML = `
-    <div class="page-header"><div class="page-title">완료 내역</div><div class="page-sub">처리 완료된 업무를 모아봅니다 · 유사 사례 참고용 (총 ${list.length}건)</div></div>
+    <div class="page-header"><div class="page-title">완료 내역</div><div class="page-sub">처리 완료된 업무를 모아봅니다 · 유사 사례 참고용 (${list.length}건 표시${__fetchedFull ? '+' : ''})</div></div>
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
       <select class="form-input" style="flex:1;min-width:130px" onchange="arcType=this.value;renderReqArchive(document.getElementById('contentArea'))">${typeOpts}</select>
       <select class="form-input" style="flex:1;min-width:130px" onchange="arcStore=this.value;renderReqArchive(document.getElementById('contentArea'))">${storeOpts}</select>
     </div>
     <div class="search-box" style="margin-bottom:14px"><i class="ti ti-search" style="color:var(--th)"></i><input id="arcSearch" placeholder="완료 내역 검색 (내용·항목)" value="${arcQ}" oninput="arcQ=this.value;clearTimeout(window.__arcT);window.__arcT=setTimeout(()=>renderReqArchive(document.getElementById('contentArea')),350)"/></div>
-    <div class="post-list">${cards}</div>`;
+    <div class="post-list">${cards}</div>
+    ${__fetchedFull ? `<div style="text-align:center;margin:14px 0"><button class="btn-cancel-sm" style="padding:9px 22px;font-size:13px" onclick="window.__arcPage=(window.__arcPage||0)+1;renderReqArchive(document.getElementById('contentArea'),{keepPage:true})"><i class="ti ti-chevron-down"></i> 더 보기</button></div>` : ''}`;
   // 검색창 포커스 유지
   setTimeout(()=>{ const s=document.getElementById('arcSearch'); if(s && arcQ){ s.focus(); s.setSelectionRange(s.value.length,s.value.length);} }, 30);
 }
@@ -9141,7 +9193,7 @@ async function confirmDeleteSchedule(id, store, year, month) {
   // 1단계: 비밀번호 확인
   const pw = prompt(`[삭제 확인] "${label}"\n\n본인 비밀번호를 입력하세요.`);
   if (pw === null) return;
-  if (pw !== currentUser.password_hash) {
+  if (!(await reauth(pw))) {
     alert('비밀번호가 일치하지 않습니다.');
     return;
   }
@@ -9231,7 +9283,7 @@ async function renderScheduleEdit(area) {
     sb.from('users').select('id,name,store,role,employment_type,hire_date,retire_date,active,pt_work_hours,pt_hours_per_day,pt_weekly_days').eq('store',store).order('name'),
     sb.from('store_shift_codes').select('*').eq('store',store).eq('active',true).order('sort_order'),
     sb.from('leave_types').select('*').order('sort_order'),
-    curSchedule ? sb.from('schedule_entries').select('*').eq('schedule_id', curSchedule.id) : Promise.resolve({data:[]}),
+    curSchedule ? sb.from('schedule_entries').select('*').eq('schedule_id', curSchedule.id).limit(10000) : Promise.resolve({data:[]}),
     curSchedule ? sb.from('schedule_leave_balance').select('*, user:users(name)').eq('schedule_id', curSchedule.id) : Promise.resolve({data:[]})
   ]);
 
@@ -9410,6 +9462,7 @@ async function renderScheduleEdit(area) {
       </div>
       ${curSchedule?.reject_reason ? `<div style="background:var(--rdb);border-radius:8px;padding:10px 13px;font-size:13px;color:var(--rd);margin-bottom:12px"><strong>반려 사유:</strong> ${curSchedule.reject_reason}</div>` : ''}
 
+      <div id="schAdminNotes" style="margin-bottom:14px"></div>
       <!-- 운영계획/특이사항 — 저장 분리 방식 -->
       <div id="schMemoSection" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
         <div>
@@ -9531,6 +9584,7 @@ async function renderScheduleEdit(area) {
     if (curSchedule?.id) initBalancePanel();
     else updateDailyCountRow();
     restoreMemoCache();
+    renderScheduleAdminNotes();
     renderNewHirePanel();
     if (window.__retireList?.length) {
       renderRetirePanel();
@@ -10524,8 +10578,7 @@ async function saveMemoField(type) {
     await sb.from('schedules').update({
       [field]: val, updated_at: new Date().toISOString()
     }).eq('id', curSchedule.id);
-    // 로컬 캐시 제거
-    try { localStorage.removeItem(`sch_${type}_${curSchedule.id}`); } catch(e){}
+    if (curSchedule) curSchedule[field] = val;
   }
 
   // 뷰 업데이트
@@ -10540,38 +10593,67 @@ async function saveMemoField(type) {
   if (btnS) btnS.style.display = 'none';
 }
 
-// 타이핑 중 localStorage 임시 저장 (새로고침 대비)
+// 타이핑 중 DB 임시저장 (디바운스) — PC/모바일 임시저장 상태 100% 공유
+// localStorage 대신 schedules 테이블에 바로 자동 저장한다.
+let __memoSaveTimer = {};
 function cacheMemo(type, val) {
-  if (!curSchedule?.id) return;
-  try { localStorage.setItem(`sch_${type}_${curSchedule.id}`, val); } catch(e){}
+  if (!curSchedule?.id) return;   // 신규(미저장) 스케줄은 최초 저장 시 반영
+  clearTimeout(__memoSaveTimer[type]);
+  __memoSaveTimer[type] = setTimeout(async () => {
+    const field = type === 'op' ? 'operation_plan' : 'special_notes';
+    try {
+      await sb.from('schedules').update({ [field]: val, updated_at: new Date().toISOString() }).eq('id', curSchedule.id);
+      if (curSchedule) curSchedule[field] = val;
+    } catch(e) { console.warn('메모 임시저장 실패:', e); }
+  }, 800);
 }
 
-// 렌더 후 localStorage 캐시 복원
-function restoreMemoCache() {
-  if (!curSchedule?.id) return;
-  ['op','notes'].forEach(type => {
-    try {
-      const cached = localStorage.getItem(`sch_${type}_${curSchedule.id}`);
-      if (cached === null) return;
-      const ta = document.getElementById(type === 'op' ? 'schOpPlan' : 'schNotes');
-      const view = document.getElementById(type === 'op' ? 'schOpView' : 'schNotesView');
-      if (!ta || !view) return;
-      // 캐시가 DB값과 다른 경우에만 복원
-      const dbVal = type === 'op'
-        ? (curSchedule.operation_plan||'')
-        : (curSchedule.special_notes||'');
-      if (cached !== dbVal) {
-        ta.value = cached;
-        // 뷰에도 반영
-        view.innerHTML = cached
-          ? cached.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-          : `<span style="color:var(--th)">${type==='op'?'이번 달 매장 운영 계획을 작성하세요':'입퇴사, 휴점, 행사, 지각인원 등 특이사항'}</span>`;
-      }
-    } catch(e){}
-  });
-}
+// 임시저장 값은 이제 DB(schedules)에 저장되므로 렌더 시 이미 반영됨. (localStorage 복원 제거)
+function restoreMemoCache() { /* no-op: DB 기반 임시저장으로 대체 */ }
 
 // ── 스케줄 작성 기준 모달 ────────────────────────────────────
+// ── 관리자 전용 메모/댓글 (매니저 이상만 열람·작성, 팀원 비노출) ──────────
+async function renderScheduleAdminNotes() {
+  const box = document.getElementById('schAdminNotes');
+  if (!box) return;
+  if (userGrade(currentUser) === 'staff') { box.innerHTML = ''; return; }  // 팀원(member) 비노출
+  if (!curSchedule?.id) {
+    box.innerHTML = `<div style="background:var(--cr);border:0.5px dashed var(--crd);border-radius:10px;padding:12px;font-size:12px;color:var(--th)"><i class="ti ti-lock"></i> 관리자 전용 메모 — 스케줄을 한 번 저장하면 사용할 수 있습니다.</div>`;
+    return;
+  }
+  const { data: notes } = await sb.from('schedule_admin_notes')
+    .select('*, author:users(name)').eq('schedule_id', curSchedule.id).order('created_at', {ascending:true});
+  const list = (notes||[]).map(n => `
+    <div style="padding:8px 10px;border-bottom:0.5px solid var(--crm)">
+      <div style="font-size:11px;color:var(--th);margin-bottom:2px"><b style="color:var(--tm)">${n.author?.name||'?'}</b> · ${fmtDateTime(n.created_at).slice(5,16)}
+        ${(n.author_id===currentUser.id || currentUser.is_master) ? `<span onclick="deleteScheduleAdminNote(${n.id})" style="float:right;color:var(--rd);cursor:pointer;font-size:11px">삭제</span>` : ''}</div>
+      <div style="font-size:13px;color:var(--tm);white-space:pre-wrap">${(n.body||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>
+    </div>`).join('') || '<div style="padding:10px;font-size:12px;color:var(--th)">아직 메모가 없습니다.</div>';
+  box.innerHTML = `
+    <div style="background:#FFF9F0;border:0.5px solid #E8C07A;border-radius:10px;overflow:hidden">
+      <div style="padding:8px 12px;background:#F6E7C8;font-size:12px;font-weight:700;color:#7A5C00"><i class="ti ti-lock"></i> 관리자 전용 메모 (매니저 이상만 열람 · 퇴사 협의·잔여휴무 조율 등)</div>
+      <div style="max-height:220px;overflow-y:auto">${list}</div>
+      <div style="display:flex;gap:6px;padding:8px 10px;border-top:0.5px solid var(--crm)">
+        <input id="schAdminNoteInput" class="form-input" style="flex:1;font-size:13px" placeholder="메모 입력 후 Enter (팀원에게는 보이지 않음)" onkeydown="if(event.key==='Enter')postScheduleAdminNote()"/>
+        <button class="btn-submit" style="font-size:12px;padding:6px 12px" onclick="postScheduleAdminNote()">등록</button>
+      </div>
+    </div>`;
+}
+async function postScheduleAdminNote() {
+  const inp = document.getElementById('schAdminNoteInput');
+  const body = (inp?.value||'').trim();
+  if (!body || !curSchedule?.id) return;
+  const { error } = await sb.from('schedule_admin_notes').insert({ schedule_id: curSchedule.id, author_id: currentUser.id, body });
+  if (error) { alert('메모 저장 오류: ' + error.message); return; }
+  if (inp) inp.value = '';
+  renderScheduleAdminNotes();
+}
+async function deleteScheduleAdminNote(id) {
+  if (!confirm('이 메모를 삭제할까요?')) return;
+  await sb.from('schedule_admin_notes').delete().eq('id', id);
+  renderScheduleAdminNotes();
+}
+
 const SCHEDULE_MANUAL_KEY = 'schedule_writing_guide';
 
 async function openScheduleManual() {
@@ -10679,10 +10761,6 @@ async function saveScheduleDraft() {
   const store = window.__schStore, year = window.__schYear, month = window.__schMonth;
   const opPlan = document.getElementById('schOpPlan')?.value.trim() || null;
   const notes  = document.getElementById('schNotes')?.value.trim() || null;
-  // 저장 시 캐시 제거
-  if (curSchedule?.id) {
-    try { localStorage.removeItem(`sch_op_${curSchedule.id}`); localStorage.removeItem(`sch_notes_${curSchedule.id}`); } catch(e){}
-  }
   const now = new Date().toISOString();
 
   let scheduleId = curSchedule?.id;
@@ -10724,24 +10802,32 @@ async function saveScheduleDraft() {
   }, 300);
 }
 
-// entries DB 반영 (전체 삭제 후 재삽입 — 단순하고 안전)
+// entries DB 반영 — 안전한 UPSERT (복합키: schedule_id, slot_key, date)
+// 기존의 "전체 DELETE 후 INSERT" 방식은 저장 도중 다른 사용자가 빈 스케줄을 보는
+// race condition이 있어 폐기함. 현재 화면의 셀은 UPSERT로 유지하고,
+// 화면에서 지워진 셀에 해당하는 기존 행만 골라 삭제한다.
 async function persistScheduleEntries(scheduleId) {
   const { data: shiftCodes } = await sb.from('store_shift_codes').select('code').eq('store', window.__schStore);
   const shiftCodeSet = new Set((shiftCodes||[]).map(s=>s.code));
 
   const selects = document.querySelectorAll('#schTbody select');
   const rows = [];
+  const presentKeys = new Set();
   selects.forEach(sel => {
     const val = sel.value;
     if (!val) return;
     const userId = sel.dataset.staff || null;
     const extraName = sel.dataset.extra || null;
     const date = sel.dataset.date;
+    if (!date || (!userId && !extraName)) return;
+    // slot_key: 정직원=user_id, 추가인원=('x:'+이름). user_id가 NULL이어도 안전한 복합키 구성.
+    const slotKey = userId ? String(userId) : ('x:' + extraName);
     const isShift = shiftCodeSet.has(val);
     const entryKey = (userId||extraName) + '_' + date;
     const memEntry = curScheduleEntries[entryKey] || {};
     rows.push({
       schedule_id: scheduleId,
+      slot_key: slotKey,
       user_id: userId || null,
       extra_name: extraName || null,
       date,
@@ -10753,14 +10839,26 @@ async function persistScheduleEntries(scheduleId) {
       note: sel.dataset.note || memEntry.note || null,
       adjusted_hours: memEntry.adjusted_hours || null  // PT 일별 근무시간 조정값
     });
+    presentKeys.add(slotKey + '|' + date);
   });
 
-  await sb.from('schedule_entries').delete().eq('schedule_id', scheduleId);
+  // (1) 현재 화면의 셀을 UPSERT (복합키 충돌 시 갱신)
   if (rows.length > 0) {
-    // 500개씩 끊어서 insert (대량 대비)
     for (let i=0; i<rows.length; i+=500) {
-      await sb.from('schedule_entries').insert(rows.slice(i, i+500));
+      const { error } = await sb.from('schedule_entries')
+        .upsert(rows.slice(i, i+500), { onConflict: 'schedule_id,slot_key,date' });
+      if (error) { alert('스케줄 저장 오류: ' + error.message); throw error; }
     }
+  }
+
+  // (2) 화면에서 비워진(삭제된) 셀에 해당하는 기존 행만 골라 삭제 — 전체 삭제 아님
+  const { data: existing } = await sb.from('schedule_entries')
+    .select('id, slot_key, date').eq('schedule_id', scheduleId).limit(10000);
+  const staleIds = (existing||[])
+    .filter(e => !presentKeys.has((e.slot_key||'') + '|' + e.date))
+    .map(e => e.id);
+  for (let i=0; i<staleIds.length; i+=200) {
+    await sb.from('schedule_entries').delete().in('id', staleIds.slice(i, i+200));
   }
 
   // 집계 계산 후 schedule_leave_balance 갱신
@@ -10776,7 +10874,7 @@ async function recalcLeaveBalance(scheduleId) {
 
   const [{data: holidays}, {data: entries}, {data: staffList}] = await Promise.all([
     sb.from('holidays').select('date').gte('date',monthStart).lte('date',monthEnd),
-    sb.from('schedule_entries').select('*').eq('schedule_id', scheduleId),
+    sb.from('schedule_entries').select('*').eq('schedule_id', scheduleId).limit(10000),
     sb.from('users').select('id,name,store,hire_date,retire_date,employment_type,pt_hours_per_day').eq('store',store)
   ]);
   const holidaySet = new Set((holidays||[]).map(h=>h.date));
@@ -12959,7 +13057,7 @@ async function saveScheduleHistory(scheduleId, note) {
     const version = (lastVer?.version || 0) + 1;
 
     // 현재 entries 스냅샷
-    const { data: entries } = await sb.from('schedule_entries').select('*').eq('schedule_id', scheduleId);
+    const { data: entries } = await sb.from('schedule_entries').select('*').eq('schedule_id', scheduleId).limit(10000);
     const { data: sch } = await sb.from('schedules').select('operation_plan,special_notes').eq('id',scheduleId).single();
 
     await sb.from('schedule_history').insert({
