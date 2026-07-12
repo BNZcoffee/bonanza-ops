@@ -5499,6 +5499,25 @@ async function createNotification(userId, type, refId, refType, message) {
   if (error) console.warn('알림 생성 오류:', error.message);
 }
 
+// 겸직 포함 — 현재 사용자가 관리하는 매장 목록(주 소속 + 추가 관할 sub_stores)
+function myManagedStores(){
+  const u = currentUser; if(!u) return [];
+  return [...new Set([u.store, ...(Array.isArray(u.sub_stores)?u.sub_stores:[])].filter(Boolean))];
+}
+// 지정 매장들의 매니저(겸직 sub_stores 포함)에게 알림 발송
+async function notifyStoreManagers(stores, type, refId, refType, msg, excludeIds){
+  const set = new Set((stores||[]).filter(Boolean));
+  if(!set.size) return;
+  const ex = new Set((excludeIds||[]).filter(Boolean));
+  const { data: users } = await sb.from('users').select('id, role, store, sub_stores').eq('active', true);
+  const targets = (users||[]).filter(u=>{
+    if(ex.has(u.id) || !isManagerRole(u.role)) return false;
+    if(set.has(u.store)) return true;
+    return Array.isArray(u.sub_stores) && u.sub_stores.some(x=>set.has(x));
+  });
+  for(const t of targets){ try{ await createNotificationWithSlack(t.id, type, refId, refType, msg); }catch(e){} }
+}
+
 
 // ── 댓글 수정/삭제 ───────────────────────────────────────────────
 async function delCmt(cmtId, postId){
@@ -12478,6 +12497,19 @@ async function confirmScheduleApprove() {
   // 퇴사일자 자동 반영 (스케줄 → 인원현황)
   await syncRetireDatesFromSchedule(curSchedule.id);
 
+  // 지원 근무 배치 알림 — 지원받는 매장 매니저(겸직 포함)에게 1회씩
+  try {
+    const { data: __sup } = await sb.from('schedule_entries')
+      .select('date, support_store, user:users(name)').eq('schedule_id', curSchedule.id)
+      .not('support_store','is',null).limit(10000);
+    const __by = {};
+    (__sup||[]).forEach(e=>{ if(e.support_store && e.support_store!==curSchedule.store){ (__by[e.support_store]=__by[e.support_store]||[]).push((e.user&&e.user.name||'')+'('+String(e.date).slice(5)+')'); } });
+    for(const st of Object.keys(__by)){
+      await notifyStoreManagers([st], 'schedule_support', curSchedule.id, 'schedule',
+        '[지원 배치] '+curSchedule.store+'→'+st+' · '+curSchedule.year+'년 '+curSchedule.month+'월: '+__by[st].slice(0,10).join(', ')+(__by[st].length>10?' 외':''), [currentUser.id]);
+    }
+  } catch(e){ console.warn('지원 배치 알림 오류:', e); }
+
   const { data: req } = await sb.from('users').select('id').eq('id', curSchedule.requested_by).maybeSingle();
   if (req) await createNotification(req.id, 'schedule_confirmed', curSchedule.id, 'schedule',
     `[스케줄 컨펌완료] ${curSchedule.store} ${curSchedule.year}년 ${curSchedule.month}월 스케줄이 확정되었습니다.`);
@@ -14585,7 +14617,7 @@ async function renderAttendanceIssue(area){
     .gte('issue_date',mStart).lte('issue_date',mEnd)
     .order('issue_date',{ascending:false}).order('created_at',{ascending:false}).limit(1000);
   const admin=isAttAdmin();
-  if(!admin) q=q.or(`store.eq.${currentUser.store},work_store.eq.${currentUser.store}`);  // 매니저: 소속 매장 + 지원 온(근무발생) 매장 공유
+  if(!admin){ const __ms=(myManagedStores().length?myManagedStores():[currentUser.store||'']).map(x=>'"'+x+'"').join(','); q=q.or(`store.in.(${__ms}),work_store.in.(${__ms})`); }  // 매니저: 관리 매장(겸직 포함) + 지원 온 매장 공유
   else if(__attStore) q=q.eq('store',__attStore);
   const { data: rows } = await q;
   let list = rows||[];
@@ -14743,9 +14775,10 @@ async function submitAttIssue(){
   const { data: __dup } = await sb.from('attendance_issues').select('id').eq('user_id',uid).eq('issue_date',date).eq('report_type',__attTab).neq('status','rejected').limit(1);
   if(__dup && __dup.length){ err.textContent='이미 이 직원의 같은 날짜·유형 보고가 있습니다. (중복 등록 불가)'; return; }
   const targetStore = (__attUsers.find(u=>u.id===uid)||{}).store || currentUser.store;
-  const { error } = await sb.from('attendance_issues').insert({
+  const wstore = sh.work_store||currentUser.store||targetStore;
+  const { data: __newAtt, error } = await sb.from('attendance_issues').insert({
     report_type:__attTab, store:targetStore, user_id:uid, issue_date:date,
-    work_store:sh.work_store||currentUser.store||targetStore, shift_code:sh.shift_code||null,
+    work_store:wstore, shift_code:sh.shift_code||null,
     shift_start:sh.start, shift_end:sh.end, actual_in:ain, actual_out:aout,
     diff_minutes:min, break_option:document.getElementById('att_break').value,
     reason_category:document.getElementById('att_reason').value,
@@ -14754,6 +14787,8 @@ async function submitAttIssue(){
   });
   if(error){ err.textContent = /duplicate|unique|ux_att_dup/i.test(error.message) ? '이미 동일 직원·날짜·유형 보고가 있습니다.' : ('저장 오류: '+error.message); return; }
   document.getElementById('attFormModal').remove();
+  { const __un=(__attUsers.find(u=>u.id===uid)||{}).name||'직원'; const __tl=__attTab==='late'?'근태(지각·결근)':'근무시간(연장·야간)';
+    notifyStoreManagers([targetStore, wstore], 'att_new', __newAtt&&__newAtt.id, 'attendance', '[근태이슈 등록] '+date+' '+__un+' · '+__tl, [currentUser.id]); }
   if(targetStore !== currentUser.store) alert('저장되었습니다.\n이 건은 대상 직원 소속 매장('+targetStore+') 관리자 목록에서 조회·마감됩니다.');
   renderAttendanceIssue(document.getElementById('contentArea'));
 }
