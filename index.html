@@ -418,6 +418,7 @@ textarea.form-input{min-height:120px;resize:vertical}
     <div class="sidebar-section" id="scheduleNav" style="display:none">
       <div class="sidebar-label">스케줄 관리</div>
       <button class="nav-btn" onclick="goPage('schedules')" id="nav-schedules"><i class="ti ti-calendar-event"></i> 매장 스케줄</button>
+      <button class="nav-btn" onclick="goPage('attendanceIssue')" id="nav-attendanceIssue" style="display:none"><i class="ti ti-alarm"></i> 근태 이슈 관리</button>
       <button class="nav-btn" onclick="goPage('scheduleConfirm')" id="nav-scheduleConfirm" style="display:none"><i class="ti ti-clipboard-check"></i> 컨펌 대기 목록</button>
       <button class="nav-btn" onclick="goPage('scheduleClose')" id="nav-scheduleClose" style="display:none"><i class="ti ti-checklist"></i> 근태 마감 현황</button>
       <button class="nav-btn" onclick="goPage('scheduleSettings')" id="nav-scheduleSettings" style="display:none"><i class="ti ti-settings"></i> 휴무 기준 설정</button>
@@ -1451,6 +1452,10 @@ function goPage(page) {
     const nb = document.getElementById('nav-schedules');
     if (nb) nb.classList.add('active');
     renderSchedules(area);
+  } else if (page === 'attendanceIssue') {
+    const nb = document.getElementById('nav-attendanceIssue');
+    if (nb) nb.classList.add('active');
+    renderAttendanceIssue(area);
   } else if (page === 'scheduleEdit') {
     const nb = document.getElementById('nav-schedules');
     if (nb) nb.classList.add('active');
@@ -6552,6 +6557,7 @@ function applyMenuPermissions() {
   show('nav-leave-settings', hasPerm('leave_setting'));
   // 위에서 권한 키 기반으로 처리 완료
   show('nav-scheduleSettings', isAdminRole || isManagerRole(currentUser.role)); // 휴무 기준 설정: 운영팀+매니저(본인매장만)
+  show('nav-attendanceIssue', currentUser.is_master||currentUser.is_vice_master||currentUser.role==='admin'||currentUser.role==='hr'||!!currentUser.part||isManagerRole(currentUser.role));
   // 개별 메뉴
   show('nav-staff', hasPerm('staff_view'));
   show('nav-stats', hasPerm('notice_stats'));
@@ -14539,6 +14545,270 @@ async function savePartWebhook(id) {
 // 슬랙 Bot Token DM 발송
 // users.slack_member_id (U로 시작하는 슬랙 멤버 ID)가 있으면 DM 발송
 // ═══════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
+// 근태 이슈 관리 (① 지각/결근 late · ② 연장/야간 overtime)
+// ═══════════════════════════════════════════════════════════════
+let __attTab = 'late';
+let __attMonth = null;      // 'YYYY-MM'
+let __attStore = '';
+let __attUsers = [];        // 폼/멘션용 캐시
+
+function isAttAdmin(){ const u=currentUser; return !!(u && (u.is_master||u.is_vice_master||u.role==='admin'||u.role==='hr'||u.part==='인사팀'||u.part==='운영팀')); }
+function canSeeAtt(){ const u=currentUser; return !!(u && (isAttAdmin()||isManagerRole(u.role))); }
+function attHm2min(t){ if(!t||t.indexOf(':')<0) return null; const [h,m]=t.split(':').map(Number); if(isNaN(h)||isNaN(m)) return null; return h*60+m; }
+function attDiffLabel(min){ if(min==null||isNaN(min)) return '-'; const sg=min<0?'-':''; const a=Math.abs(min); if(a<=60) return sg+a+'분'; return sg+Math.floor(a/60)+'시간 '+(a%60)+'분'; }
+const ATT_REASONS = { late:['지각','시스템 오류','결근','기타'], overtime:['연장','야간','단순 지각','시스템 이상','기타'] };
+function attStatusBadge(st){
+  if(st==='confirmed') return '<span class="badge-access" style="background:var(--gnb);color:var(--gn)">확인</span>';
+  if(st==='rejected')  return '<span class="badge-access" style="background:var(--rdb);color:var(--rd)">반려</span>';
+  return '<span class="badge-access" style="background:var(--blb);color:var(--bl)">접수</span>';
+}
+
+async function renderAttendanceIssue(area){
+  if(!canSeeAtt()){ area.innerHTML='<div class="page-header"><div class="page-title">근태 이슈 관리</div></div><div style="text-align:center;padding:50px;color:var(--th)">열람 권한이 없습니다.</div>'; return; }
+  if(!__attMonth){ const n=new Date(); __attMonth=`${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; }
+  area.innerHTML='<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+
+  // 데이터 로드 (해당 월)
+  const mStart=__attMonth+'-01';
+  const [yy,mm]=__attMonth.split('-').map(Number);
+  const mEnd=`${__attMonth}-${String(new Date(yy,mm,0).getDate()).padStart(2,'0')}`;
+  let q=sb.from('attendance_issues').select('*').eq('report_type',__attTab)
+    .gte('issue_date',mStart).lte('issue_date',mEnd)
+    .order('issue_date',{ascending:false}).order('created_at',{ascending:false}).limit(1000);
+  const admin=isAttAdmin();
+  if(!admin) q=q.eq('store', currentUser.store);        // 매니저: 소속 매장만
+  else if(__attStore) q=q.eq('store',__attStore);
+  const { data: rows } = await q;
+  let list = rows||[];
+
+  // 대상자 이름/활성 배치 로드 → 블라인드 처리
+  const uids=[...new Set(list.map(r=>r.user_id).filter(Boolean))];
+  let umap={};
+  if(uids.length){ const {data:us}=await sb.from('users').select('id,name,active,store').in('id',uids); (us||[]).forEach(u=>umap[u.id]=u); }
+  if(!admin) list=list.filter(r=>{ const u=umap[r.user_id]; return !u || u.active!==false; }); // 매니저: 퇴사자 블라인드
+
+  // 매장 필터(관리자)용 옵션
+  const stores=[...new Set(list.map(r=>r.store).filter(Boolean))];
+  const storeSel = admin ? `<select class="form-input" style="min-width:120px" onchange="__attStore=this.value;renderAttendanceIssue(document.getElementById('contentArea'))">
+      <option value="">전체 매장</option>${(window.__attStoreOpts||stores).map(s=>`<option value="${s}"${__attStore===s?' selected':''}>${s}</option>`).join('')}</select>` : '';
+
+  const cards = list.length ? list.map(r=>{
+    const u=umap[r.user_id]||{}; const nm=u.name||'(직원)';
+    const shift = (r.shift_start&&r.shift_end)?`${r.shift_start}~${r.shift_end}`:'근무조 미배정';
+    const diffTxt = __attTab==='late' ? `지각 ${attDiffLabel(r.diff_minutes)}` : `초과 ${attDiffLabel(r.diff_minutes)}`;
+    return `<div class="post-card" onclick="openAttIssueDetail(${r.id})" style="cursor:pointer">
+      <div class="post-card-top">
+        <span class="post-title-txt">${r.issue_date} · ${nm}${u.active===false?' <span style="font-size:10px;color:var(--rd)">(퇴사)</span>':''}</span>
+        ${attStatusBadge(r.status)}${r.payroll_applied?'<span class="badge-access" style="background:var(--pub);color:var(--pu)">급여반영</span>':''}
+      </div>
+      <div class="post-meta">
+        <span><i class="ti ti-building-store" style="font-size:12px"></i> ${r.work_store||r.store||'-'}</span>
+        <span><i class="ti ti-clock" style="font-size:12px"></i> ${shift}</span>
+        <span style="color:var(--rd)">${diffTxt}</span>
+        <span>${r.reason_category||''}</span>
+      </div>
+    </div>`;
+  }).join('') : '<div style="text-align:center;padding:40px;color:var(--th)">해당 월 접수 내역이 없습니다.</div>';
+
+  const tabBtn=(k,l)=>`<button onclick="__attTab='${k}';renderAttendanceIssue(document.getElementById('contentArea'))" class="staff-tab${__attTab===k?' active':''}" style="cursor:pointer">${l}</button>`;
+  area.innerHTML = `
+    <div class="page-header"><div class="page-title">근태 이슈 관리</div><div class="page-sub">지각·연장 등 근태 예외 보고 · 인사/운영 점검 (${list.length}건)</div></div>
+    <div style="display:flex;gap:6px;margin-bottom:12px">${tabBtn('late','① 근태 이슈(지각·결근)')}${tabBtn('overtime','② 근무시간 이슈(연장·야간)')}</div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+      <input type="month" class="form-input" style="min-width:130px" value="${__attMonth}" onchange="__attMonth=this.value;renderAttendanceIssue(document.getElementById('contentArea'))"/>
+      ${storeSel}
+      <button class="btn-submit" style="margin-left:auto;font-size:13px;padding:7px 14px" onclick="openAttIssueForm()"><i class="ti ti-plus"></i> 새 보고</button>
+    </div>
+    <div class="post-list">${cards}</div>`;
+}
+
+async function openAttIssueForm(){
+  // 대상 직원 목록 (매니저=소속매장, 관리자=전체 활성)
+  let uq=sb.from('users').select('id,name,store').eq('active',true).order('name');
+  if(!isAttAdmin()) uq=uq.eq('store', currentUser.store);
+  const { data: us } = await uq;
+  __attUsers = us||[];
+  const typeLabel = __attTab==='late' ? '근태 이슈(지각·결근)' : '근무시간 이슈(연장·야간)';
+  const reasons = ATT_REASONS[__attTab];
+  const old=document.getElementById('attFormModal'); if(old) old.remove();
+  const m=document.createElement('div'); m.id='attFormModal'; m.className='modal-bg open';
+  m.innerHTML=`<div class="modal-inner" style="width:min(96vw,540px);max-height:92vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <span style="font-size:15px;font-weight:600"><i class="ti ti-alarm" style="color:var(--brm)"></i> 새 보고 · ${typeLabel}</span>
+      <button onclick="document.getElementById('attFormModal').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--th)"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="display:grid;gap:10px">
+      <div><label class="form-label">발생 일자</label><input type="date" class="form-input" id="att_date" value="${todayKST()}" onchange="attLoadShift()"/></div>
+      <div><label class="form-label">대상 직원</label><select class="form-input" id="att_user" onchange="attLoadShift()"><option value="">선택</option>${__attUsers.map(u=>`<option value="${u.id}">${u.name} (${u.store||''})</option>`).join('')}</select></div>
+      <div id="att_shift_box" style="background:var(--cr);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--th)">발생일자·직원 선택 시 해당일 근무조가 자동 표시됩니다.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label class="form-label">실제 출근 (분)</label><input type="time" class="form-input" id="att_in" onchange="attCalcDiff()"/></div>
+        <div><label class="form-label">실제 퇴근 (10분)</label><input type="time" step="600" class="form-input" id="att_out" onchange="attCalcDiff()"/></div>
+      </div>
+      <div id="att_diff" style="font-size:13px;font-weight:600;color:var(--rd)"></div>
+      <div><label class="form-label">휴게</label><select class="form-input" id="att_break"><option value="30m">30분</option><option value="1h">1시간</option></select></div>
+      <div><label class="form-label">사유</label><select class="form-input" id="att_reason">${reasons.map(r=>`<option value="${r}">${r}</option>`).join('')}</select></div>
+      <div><label class="form-label">상세 (1~2줄)</label><textarea class="form-input" id="att_text" rows="2" placeholder="상황을 간단히 적어주세요"></textarea></div>
+      <div><label class="form-label">증빙 이미지 (여러 장 선택 시 1장으로 자동 합침)</label><input type="file" id="att_proof" accept="image/*" multiple class="form-input"/></div>
+      <button class="btn-submit" style="margin-top:4px" onclick="submitAttIssue()"><i class="ti ti-device-floppy"></i> 보고 저장</button>
+      <div id="att_form_err" style="font-size:12px;color:var(--rd);min-height:15px"></div>
+    </div></div>`;
+  document.body.appendChild(m);
+  window.__attFormShift=null;
+}
+
+async function attLoadShift(){
+  const box=document.getElementById('att_shift_box'); if(!box) return;
+  const date=document.getElementById('att_date').value; const uid=document.getElementById('att_user').value;
+  window.__attFormShift=null;
+  if(!date||!uid){ box.innerHTML='발생일자·직원 선택 시 해당일 근무조가 자동 표시됩니다.'; return; }
+  const { data: ent } = await sb.from('schedule_entries').select('shift_code, support_store, schedule:schedules(store)').eq('user_id',uid).eq('date',date).limit(1);
+  const e=(ent||[])[0];
+  if(e && e.shift_code){
+    const wstore = e.support_store || e.schedule?.store || '';
+    const { data: sc } = await sb.from('store_shift_codes').select('start_time,end_time').eq('store',wstore).eq('code',e.shift_code).limit(1);
+    const c=(sc||[])[0];
+    if(c && c.start_time && c.end_time){
+      window.__attFormShift={ manual:false, work_store:wstore, shift_code:e.shift_code, start:c.start_time.slice(0,5), end:c.end_time.slice(0,5) };
+      box.innerHTML=`<b>근무조 자동:</b> ${wstore} · ${e.shift_code} · <b>${window.__attFormShift.start}~${window.__attFormShift.end}</b>${e.support_store?' <span style="color:var(--bl)">(지원)</span>':''}`;
+      attCalcDiff(); return;
+    }
+  }
+  // 근무조 미배정 → 예정 시각 수동 입력
+  window.__attFormShift={ manual:true, work_store:'', shift_code:'' };
+  box.innerHTML=`<div style="color:var(--ts);margin-bottom:6px">해당일 근무조가 없어 <b>예정 출/퇴근 시각</b>을 직접 입력하세요 (지원·대타 등).</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <input type="time" class="form-input" id="att_pstart" placeholder="예정 출근" onchange="window.__attFormShift.start=this.value;attCalcDiff()"/>
+      <input type="time" step="600" class="form-input" id="att_pend" placeholder="예정 퇴근" onchange="window.__attFormShift.end=this.value;attCalcDiff()"/>
+    </div>`;
+}
+function attCalcDiff(){
+  const d=document.getElementById('att_diff'); if(!d) return;
+  const sh=window.__attFormShift; if(!sh||!sh.start||!sh.end){ d.textContent=''; return; }
+  const ain=document.getElementById('att_in').value, aout=document.getElementById('att_out').value;
+  let min=null,lbl='';
+  if(__attTab==='late'){ if(ain){ min=attHm2min(ain)-attHm2min(sh.start); lbl='지각'; } }
+  else { if(aout){ min=attHm2min(aout)-attHm2min(sh.end); lbl='초과'; } }
+  d.textContent = (min!=null)?`${lbl}: ${attDiffLabel(min)}`:'';
+  window.__attCalcMin = min;
+}
+
+async function submitAttIssue(){
+  const err=document.getElementById('att_form_err');
+  const date=document.getElementById('att_date').value, uid=document.getElementById('att_user').value;
+  const sh=window.__attFormShift;
+  if(!date||!uid){ err.textContent='발생일자와 대상 직원을 선택하세요.'; return; }
+  if(!sh||!sh.start||!sh.end){ err.textContent='근무조(또는 예정 출/퇴근 시각)를 확인하세요.'; return; }
+  const ain=document.getElementById('att_in').value||null, aout=document.getElementById('att_out').value||null;
+  if(__attTab==='late' && !ain){ err.textContent='실제 출근 시각을 입력하세요.'; return; }
+  if(__attTab==='overtime' && !aout){ err.textContent='실제 퇴근 시각을 입력하세요.'; return; }
+  err.style.color=''; err.textContent='저장 중...';
+  const min = (__attTab==='late') ? (ain?attHm2min(ain)-attHm2min(sh.start):null) : (aout?attHm2min(aout)-attHm2min(sh.end):null);
+  // 증빙 업로드 (여러 장 → 콜라주 1장)
+  let proofUrl=null;
+  const fi=document.getElementById('att_proof');
+  if(fi && fi.files && fi.files.length){
+    let file=fi.files[0];
+    if(fi.files.length>1){ try{ file=await mergeImages(Array.from(fi.files)); }catch(e){} }
+    proofUrl = await nUploadFile(file,'attendance');
+  }
+  const targetStore = (__attUsers.find(u=>u.id===uid)||{}).store || currentUser.store;
+  const { error } = await sb.from('attendance_issues').insert({
+    report_type:__attTab, store:targetStore, user_id:uid, issue_date:date,
+    work_store:sh.work_store||targetStore, shift_code:sh.shift_code||null,
+    shift_start:sh.start, shift_end:sh.end, actual_in:ain, actual_out:aout,
+    diff_minutes:min, break_option:document.getElementById('att_break').value,
+    reason_category:document.getElementById('att_reason').value,
+    reason_text:document.getElementById('att_text').value.trim()||null,
+    proof_url:proofUrl, status:'submitted', created_by:currentUser.id
+  });
+  if(error){ err.textContent='저장 오류: '+error.message; return; }
+  document.getElementById('attFormModal').remove();
+  renderAttendanceIssue(document.getElementById('contentArea'));
+}
+
+async function openAttIssueDetail(id){
+  const { data: r } = await sb.from('attendance_issues').select('*').eq('id',id).single();
+  if(!r) return;
+  const { data: u } = await sb.from('users').select('name,active,store').eq('id',r.user_id).maybeSingle();
+  const admin=isAttAdmin();
+  const diffTxt=(r.report_type==='late'?'지각 ':'초과 ')+attDiffLabel(r.diff_minutes);
+  const old=document.getElementById('attDetailModal'); if(old) old.remove();
+  const m=document.createElement('div'); m.id='attDetailModal'; m.className='modal-bg open';
+  m.innerHTML=`<div class="modal-inner" style="width:min(96vw,560px);max-height:92vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span style="font-size:15px;font-weight:600">${r.issue_date} · ${u?.name||'(직원)'} ${attStatusBadge(r.status)}</span>
+      <button onclick="document.getElementById('attDetailModal').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--th)"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:13px;line-height:1.9;color:var(--tm)">
+      <div>유형: <b>${r.report_type==='late'?'근태 이슈(지각·결근)':'근무시간 이슈(연장·야간)'}</b></div>
+      <div>근무 매장: <b>${r.work_store||r.store||'-'}</b> · 근무조: <b>${r.shift_start||'-'}~${r.shift_end||'-'}</b></div>
+      <div>실제 출근: <b>${r.actual_in||'-'}</b> · 실제 퇴근: <b>${r.actual_out||'-'}</b> · 휴게: ${r.break_option==='1h'?'1시간':'30분'}</div>
+      <div style="color:var(--rd);font-weight:600">${diffTxt}</div>
+      <div>사유: <b>${r.reason_category||'-'}</b> ${r.reason_text?('— '+r.reason_text):''}</div>
+      ${r.proof_url?`<div style="margin-top:6px"><img src="${r.proof_url}" onclick="openImageZoom('${r.proof_url}')" style="max-width:160px;border-radius:8px;cursor:zoom-in;border:0.5px solid var(--crd)"/><div style="font-size:10px;color:var(--th)">클릭하여 확대</div></div>`:''}
+    </div>
+    ${admin?`<div style="border-top:0.5px solid var(--crd);margin-top:12px;padding-top:12px">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="btn-cancel-sm" style="color:var(--gn);border-color:var(--gn)" onclick="attReview(${r.id},'confirmed')"><i class="ti ti-check"></i> 확인</button>
+        <button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd)" onclick="attReview(${r.id},'rejected')"><i class="ti ti-x"></i> 반려</button>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;margin-left:6px"><input type="checkbox" ${r.payroll_applied?'checked':''} onchange="attTogglePayroll(${r.id},this.checked)" style="width:auto"/> 급여 반영 처리</label>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px">발생 대휴 부여(수동): <input type="number" step="0.5" id="att_extra_${r.id}" value="${r.extra_leave_days||0}" style="width:70px;padding:4px 6px;border:0.5px solid var(--crd);border-radius:6px"/> 일
+        <button class="btn-cancel-sm" onclick="attSaveExtraLeave(${r.id})">저장</button>
+        <span style="color:var(--th)">※ 대휴 자동부여 없음 — 인사·운영 수동 반영</span></div>
+    </div>`:''}
+    <div id="att_cmts_${r.id}" style="border-top:0.5px solid var(--crd);margin-top:12px;padding-top:12px"></div>
+  </div>`;
+  document.body.appendChild(m);
+  renderAttComments(id);
+}
+async function attReview(id,status){
+  const { error } = await sb.from('attendance_issues').update({status,reviewed_by:currentUser.id,reviewed_at:new Date().toISOString()}).eq('id',id);
+  if(error){ alert('처리 오류: '+error.message); return; }
+  const { data: r } = await sb.from('attendance_issues').select('created_by,report_type').eq('id',id).single();
+  if(r?.created_by){ try{ await createNotificationWithSlack(r.created_by,'att_review',id,'attendance',`[근태이슈 ${status==='confirmed'?'확인':'반려'}] 보고 건이 ${status==='confirmed'?'확인':'반려'} 처리되었습니다.`); }catch(e){} }
+  document.getElementById('attDetailModal')?.remove();
+  renderAttendanceIssue(document.getElementById('contentArea'));
+}
+async function attTogglePayroll(id,checked){ await sb.from('attendance_issues').update({payroll_applied:checked}).eq('id',id); }
+async function attSaveExtraLeave(id){
+  const v=parseFloat(document.getElementById('att_extra_'+id).value||0)||0;
+  const { error } = await sb.from('attendance_issues').update({extra_leave_days:v}).eq('id',id);
+  alert(error?('오류: '+error.message):'발생 대휴 '+v+'일 저장됨 (실제 반영은 인사/운영 수동)');
+}
+
+async function renderAttComments(id){
+  const box=document.getElementById('att_cmts_'+id); if(!box) return;
+  const { data: cs } = await sb.from('attendance_issue_comments').select('*').eq('issue_id',id).order('created_at',{ascending:true});
+  const aids=[...new Set((cs||[]).map(c=>c.author_id).filter(Boolean))];
+  let amap={}; if(aids.length){ const {data:au}=await sb.from('users').select('id,name').in('id',aids); (au||[]).forEach(a=>amap[a.id]=a.name); }
+  const list=(cs||[]).map(c=>`<div style="padding:7px 0;border-bottom:0.5px solid var(--crm)">
+    <div style="font-size:11px;color:var(--th)"><b style="color:var(--tm)">${amap[c.author_id]||'?'}</b> · ${fmtDateTime(c.created_at).slice(5,16)}</div>
+    <div style="font-size:13px;color:var(--tm);white-space:pre-wrap">${(c.body||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div></div>`).join('')
+    || '<div style="font-size:12px;color:var(--th);padding:6px 0">댓글이 없습니다.</div>';
+  box.innerHTML=`<div class="section-label" style="margin-bottom:6px">댓글 · 상황 공유 (@이름 태그 알림)</div>
+    <div style="max-height:200px;overflow-y:auto">${list}</div>
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <input id="att_cmt_in_${id}" class="form-input" style="flex:1;font-size:13px" placeholder="댓글 입력 (@이름 태그)" onkeydown="if(event.key==='Enter')postAttComment(${id})"/>
+      <button class="btn-submit" style="font-size:12px;padding:6px 12px" onclick="postAttComment(${id})">등록</button></div>`;
+}
+async function postAttComment(id){
+  const inp=document.getElementById('att_cmt_in_'+id); const body=(inp?.value||'').trim(); if(!body) return;
+  const { error } = await sb.from('attendance_issue_comments').insert({issue_id:id,author_id:currentUser.id,body});
+  if(error){ alert('댓글 오류: '+error.message); return; }
+  // @이름 멘션 알림
+  const names=(body.match(/@([^\s@]{1,20})/g)||[]).map(x=>x.slice(1));
+  if(names.length){
+    const { data: us } = await sb.from('users').select('id,name').eq('active',true);
+    for(const nm of names){ const u=(us||[]).find(x=>x.name===nm); if(u && u.id!==currentUser.id){ try{ await createNotificationWithSlack(u.id,'att_mention',id,'attendance',`[근태이슈 멘션] ${currentUser.name}님이 회원님을 언급했습니다: ${body}`); }catch(e){} } }
+  }
+  if(inp) inp.value='';
+  renderAttComments(id);
+}
+
 async function sendSlackDM(slackMemberId, msg) {
   if (!slackMemberId) return;
   const { data: ns } = await sb.from('notification_settings')
