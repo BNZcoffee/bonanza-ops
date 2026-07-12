@@ -547,6 +547,11 @@ let roleCls = {ceo:'role-admin',executive_director:'role-admin',admin:'role-admi
 // 권한 시스템 핵심 직위(코드값 고정, 삭제 불가)
 const CORE_ROLES = ['ceo','executive_director','dept','manager','member'];
 // 매니저급으로 취급할 직위 키 (매니저B 등 추가 시 여기에 포함). manager_로 시작하면 자동 매니저급
+// XSS 방어 — 사용자 입력 텍스트를 innerHTML로 출력할 때 이스케이프
+function esc(v){
+  if (v == null) return '';
+  return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
 function isManagerRole(role) {
   if (!role) return false;
   return role === 'manager' || role.indexOf('manager') === 0;  // manager, manager_b, managerB(소문자화) 등
@@ -1523,7 +1528,7 @@ async function renderBoard(area, opts) {
     const cc = cmtCounts[p.id]||0;
     return `<div class="post-card" onclick="openPostById(${p.id})">
       <div class="post-card-top">
-        <span class="post-title-txt">${p.title}</span>
+        <span class="post-title-txt">${esc(p.title)}</span>
         ${isNew?'<span class="badge-new">NEW</span>':''}
         <span class="badge-access ${accCls}">${accLbl}</span>
         ${p.comments_on?`<span class="badge-comment"><i class="ti ti-message-2"></i> ${cc}</span>`:''}
@@ -1725,7 +1730,7 @@ async function renderPostDetail(area) {
           ${isMine ? `<button onclick="editCmt(${c.id})" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:6px"><i class="ti ti-edit"></i></button>` : ''}
           ${(isMine||isAdminUser) ? `<button onclick="delCmt(${c.id},${p.id})" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:2px"><i class="ti ti-trash"></i></button>` : ''}
         </div>
-        <div class="comment-body" id="cbody-${c.id}">${c.body}</div>
+        <div class="comment-body" id="cbody-${c.id}">${esc(c.body)}</div>
       </div>`;
     }).join('');
     cmtHtml = `<div class="comment-section">
@@ -1777,7 +1782,7 @@ async function renderPostDetail(area) {
     <div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage('board')"><i class="ti ti-arrow-left"></i> 목록</button></div>
     <div class="post-detail">
       <div class="detail-header">
-        <div class="detail-title-row">${isNew?'<span class="badge-new">NEW</span>':''} ${p.title}</div>
+        <div class="detail-title-row">${isNew?'<span class="badge-new">NEW</span>':''} ${esc(p.title)}</div>
         <div class="detail-meta">
           <span>${fmtDate(p.created_at)}</span>
           <span>${p.categories?.name||''}</span>
@@ -2467,7 +2472,7 @@ function renderRefDocs() {
       const accLbl = p.access==='all' ? '전 직원' : '매니저 이상';
       return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:4px">
         <i class="ti ti-link" style="color:var(--bl)"></i>
-        <span style="flex:1;font-size:13px">${p.title}</span>
+        <span style="flex:1;font-size:13px">${esc(p.title)}</span>
         <span style="font-size:9px;font-weight:700;border-radius:8px;padding:2px 6px;background:${p.access==='all'?'var(--gnb)':'var(--blb)'};color:${p.access==='all'?'var(--gn)':'var(--bl)'}">${accLbl}</span>
         <button type="button" onclick="removeRefDoc(${p.id})" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-x"></i></button>
       </div>`;
@@ -2487,7 +2492,7 @@ async function openRefPicker() {
   const listHtml = candidates.length ? candidates.map(p => {
     const accLbl = p.access==='all' ? '전 직원' : '매니저 이상';
     return `<div onclick="addRefDoc(${p.id})" style="padding:9px 12px;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:5px;cursor:pointer;display:flex;align-items:center;gap:8px">
-      <span style="flex:1;font-size:13px">${p.title}</span>
+      <span style="flex:1;font-size:13px">${esc(p.title)}</span>
       <span style="font-size:9px;color:var(--th)">${p.categories?.name||''}</span>
       <span style="font-size:9px;font-weight:700;border-radius:8px;padding:2px 6px;background:${p.access==='all'?'var(--gnb)':'var(--blb)'};color:${p.access==='all'?'var(--gn)':'var(--bl)'}">${accLbl}</span>
     </div>`;
@@ -2507,7 +2512,7 @@ function filterRefList(q) {
   box.innerHTML = filtered.length ? filtered.map(p => {
     const accLbl = p.access==='all' ? '전 직원' : '매니저 이상';
     return `<div onclick="addRefDoc(${p.id})" style="padding:9px 12px;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:5px;cursor:pointer;display:flex;align-items:center;gap:8px">
-      <span style="flex:1;font-size:13px">${p.title}</span>
+      <span style="flex:1;font-size:13px">${esc(p.title)}</span>
       <span style="font-size:9px;font-weight:700;border-radius:8px;padding:2px 6px;background:${p.access==='all'?'var(--gnb)':'var(--blb)'};color:${p.access==='all'?'var(--gn)':'var(--bl)'}">${accLbl}</span>
     </div>`;
   }).join('') : '<div style="color:var(--th);font-size:13px;padding:10px">검색 결과가 없습니다.</div>';
@@ -2716,7 +2721,7 @@ async function renderStaff(area) {
     <tr id="urow-${u.id}">
       <td><input type="checkbox" class="uchk" data-id="${u.id}" onclick="toggleUserSel('${u.id}',this.checked)"></td>
       <td><span class="staff-role ${roleCls[u.role]||''}" style="font-size:10px">${roleLbl[u.role]||u.role}</span></td>
-      <td style="font-weight:600">${u.name}</td>
+      <td style="font-weight:600">${esc(u.name)}</td>
       <td>${u.store}</td>
       <td style="font-size:12px;color:var(--ts)">${u.part||'-'}</td>
       <td style="font-family:monospace;font-size:11px;color:var(--th)">${u.code}</td>
@@ -3768,7 +3773,7 @@ function showBulkGuide(list, failCount) {
           </a>` : ''}
         </div>
       </div>
-      <textarea id="bulkGuideText-${i}" style="width:100%;border:0.5px solid var(--crd);border-radius:6px;padding:8px;font-size:11px;color:var(--ts);background:var(--cr);resize:none;font-family:inherit;line-height:1.6;min-height:100px" readonly>${it.body}</textarea>
+      <textarea id="bulkGuideText-${i}" style="width:100%;border:0.5px solid var(--crd);border-radius:6px;padding:8px;font-size:11px;color:var(--ts);background:var(--cr);resize:none;font-family:inherit;line-height:1.6;min-height:100px" readonly>${esc(it.body)}</textarea>
     </div>`
   ).join('');
 
@@ -3831,7 +3836,7 @@ async function renderStats(area) {
     const r = readsByPost[p.id]||0;
     const rate = total>0?Math.round(r/total*100):0;
     return `<div class="post-card" style="cursor:default">
-      <div class="post-card-top"><span class="post-title-txt" style="font-size:13px">${p.title}</span>
+      <div class="post-card-top"><span class="post-title-txt" style="font-size:13px">${esc(p.title)}</span>
         <span class="badge-new" style="background:var(--crm);color:var(--ts)">${p.categories?.name||''}</span>
       </div>
       <div style="margin:6px 0"><div class="reach-bar"><div class="reach-fill" style="width:${rate}%"></div></div></div>
@@ -4192,7 +4197,7 @@ async function renderSaved(area){
     return `<div class="post-card" onclick="openPostById(${p.id})">
       <div class="post-card-top">
         <i class="ti ti-bookmark-filled" style="color:var(--gd);font-size:14px"></i>
-        <span class="post-title-txt">${p.title}</span>
+        <span class="post-title-txt">${esc(p.title)}</span>
         <span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:${cc.bg};color:${cc.fg}">${p.categories?.name||''}</span>
       </div>
       <div class="post-meta"><span>${fmtDate(p.created_at)}</span></div>
@@ -4267,7 +4272,7 @@ async function loadNotifPanel() {
         const icon  = iconMap2[n.ref_type] || 'ti-bell';
         return `<div class="notif-item" onclick="notifGo('${n.ref_type}',${n.ref_id},null)" style="opacity:.6;border-left:3px solid var(--crd);padding-left:10px">
           <div class="notif-item-title" style="color:var(--ts)">
-            <i class="ti ${icon}" style="color:var(--th);margin-right:5px;font-size:12px"></i>${n.message}
+            <i class="ti ${icon}" style="color:var(--th);margin-right:5px;font-size:12px"></i>${esc(n.message)}
           </div>
           <div class="notif-item-meta">${fmtDateTime(n.created_at)||''} · 확인 완료</div>
         </div>`;
@@ -4316,7 +4321,7 @@ async function loadNotifPanel() {
       const color = colorMap[n.ref_type] || 'var(--gn)';
       return `<div class="notif-item" onclick="notifGo('${n.ref_type}',${n.ref_id},${n.id})" style="border-left:3px solid ${color};padding-left:10px">
         <div class="notif-item-title">
-          <i class="ti ${icon}" style="color:${color};margin-right:5px;font-size:13px"></i>${n.message}
+          <i class="ti ${icon}" style="color:${color};margin-right:5px;font-size:13px"></i>${esc(n.message)}
         </div>
         <div class="notif-item-meta">${fmtDateTime(n.created_at)||''}</div>
       </div>`;
@@ -4328,7 +4333,7 @@ async function loadNotifPanel() {
     const sep = notifItems.length ? 'border-top:0.5px solid var(--crd);margin-top:4px;padding-top:6px;' : '';
     html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding-bottom:6px;${sep}">담당 배정된 업무 신청</div>`;
     html += myReqs.map(r=>`<div class="notif-item" onclick="openReqById(${r.id});closeNotifPanel()">
-      <div class="notif-item-title"><span class="notif-dot-item" style="background:var(--gd)"></span>${r.title}</div>
+      <div class="notif-item-title"><span class="notif-dot-item" style="background:var(--gd)"></span>${esc(r.title)}</div>
       <div class="notif-item-meta">${r.request_types?.name||'신청'} · ${REQ_STATUS[r.status]?.label||''} · ${fmtDate(r.created_at)}</div>
     </div>`).join('');
   }
@@ -4337,7 +4342,7 @@ async function loadNotifPanel() {
     const sep = (notifItems.length||myReqs.length) ? 'border-top:0.5px solid var(--crd);margin-top:8px;padding-top:6px;' : '';
     html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding-bottom:6px;${sep}">읽지 않은 공지</div>`;
     html += unread.map(p=>`<div class="notif-item" onclick="openPostById(${p.id});closeNotifPanel()">
-      <div class="notif-item-title"><span class="notif-dot-item"></span>${p.title}</div>
+      <div class="notif-item-title"><span class="notif-dot-item"></span>${esc(p.title)}</div>
       <div class="notif-item-meta">${p.categories?.name||''} · ${fmtDate(p.created_at)}</div>
     </div>`).join('');
   }
@@ -5586,7 +5591,7 @@ async function renderAll(area) {
     const catName = p.categories?.name || '';
     return `<div class="post-card" onclick="openPostById(${p.id})">
       <div class="post-card-top">
-        <span class="post-title-txt">${p.title}</span>
+        <span class="post-title-txt">${esc(p.title)}</span>
         ${isNew ? '<span class="badge-new">NEW</span>' : ''}
         <span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:${cc.bg};color:${cc.fg}">${catName}</span>
       </div>
@@ -5617,7 +5622,7 @@ async function doSearchAll(){
     const catIdx = allCats.findIndex(c=>c.id===p.category_id);
     const cc = CAT_COLORS[catIdx>=0?catIdx%CAT_COLORS.length:0];
     return `<div class="post-card" onclick="openPostById(${p.id})">
-      <div class="post-card-top"><span class="post-title-txt">${p.title}</span>
+      <div class="post-card-top"><span class="post-title-txt">${esc(p.title)}</span>
         ${isNew ? '<span class="badge-new">NEW</span>' : ''}
         <span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:${cc.bg};color:${cc.fg}">${p.categories?.name||''}</span>
       </div><div class="post-meta"><span>${fmtDate(p.created_at)}</span></div>
@@ -5651,7 +5656,15 @@ async function sweepExpiredDrafts(){
       try { await sb.from('schedule_admin_notes').delete().eq('schedule_id', ss.id); } catch(e){}
       await sb.from('schedules').delete().eq('id', ss.id);
     }
-  } catch(e) { console.warn('임시저장 만료 스윕 오류:', e); }
+    // 근태 증빙 이미지 180일 경과 → 스토리지 파일 영구 삭제(기록은 보존, proof_url만 null)
+    const cut180 = new Date(now - 180*864e5).toISOString();
+    const { data: oldAtt } = await sb.from('attendance_issues').select('id, proof_url').not('proof_url','is',null).lt('created_at', cut180);
+    for (const a of (oldAtt||[])) {
+      const pth = (a.proof_url||'').split('/attachments/')[1];
+      if (pth) { try { await sb.storage.from('attachments').remove([pth]); } catch(e){} }
+      await sb.from('attendance_issues').update({ proof_url: null }).eq('id', a.id);
+    }
+  } catch(e) { console.warn('임시저장/첨부 만료 스윕 오류:', e); }
 }
 function draftDaysLeft(updatedAt, ttlDays){
   const dl = Math.ceil((new Date(updatedAt).getTime() + ttlDays*864e5 - Date.now())/864e5);
@@ -7657,7 +7670,7 @@ async function renderReqDetail(area) {
     const v = fd[f.label] || '-';
     contentHtml += '<div style="display:flex;padding:7px 0;border-bottom:0.5px solid var(--crd)">' +
       '<div style="width:130px;font-size:12px;color:var(--th);flex-shrink:0">' + f.label + '</div>' +
-      '<div style="font-size:13px;color:var(--tm);white-space:pre-wrap">' + v + '</div></div>';
+      '<div style="font-size:13px;color:var(--tm);white-space:pre-wrap">' + esc(v) + '</div></div>';
   });
 
   // 첨부파일
@@ -7668,7 +7681,7 @@ async function renderReqDetail(area) {
         const ext = (a.file_name||'').split('.').pop().toLowerCase();
         return '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:4px">' +
           '<i class="ti ti-paperclip" style="color:var(--bl)"></i>' +
-          '<span style="flex:1;font-size:13px;color:var(--bl)">' + a.file_name + '</span>' +
+          '<span style="flex:1;font-size:13px;color:var(--bl)">' + esc(a.file_name) + '</span>' +
           '<button onclick="openFilePreview(\'' + a.file_url + '\',\'' + (a.file_name||'').replace(/'/g,"\\'") + '\')" title="미리보기" style="background:none;border:none;cursor:pointer;color:var(--th);padding:0"><i class="ti ti-eye"></i></button>' +
           '<button onclick="downloadFile(\'' + a.file_url + '\',\'' + a.file_name.replace(/'/g,"\\'") + '\')" style="background:none;border:none;color:var(--bl);cursor:pointer"><i class="ti ti-download"></i></button>' +
         '</div>';
@@ -8731,7 +8744,7 @@ async function renderRepairs(area) {
         : `openRepairById(${r.id})`;
       return `<div class="post-card" onclick="${onclick}">
         <div class="post-card-top">
-          <span class="post-title-txt"><i class="ti ti-hammer" style="color:var(--brm);margin-right:5px"></i>${r.title}</span>
+          <span class="post-title-txt"><i class="ti ti-hammer" style="color:var(--brm);margin-right:5px"></i>${esc(r.title)}</span>
           ${srcBadge}${catBadge}${imgBadge}
         </div>
         <div class="post-meta">
@@ -8868,7 +8881,7 @@ async function renderRepairDetail(area) {
     </div>
     <div class="post-detail">
       <div class="detail-header">
-        <div class="detail-title-row">${r.title}</div>
+        <div class="detail-title-row">${esc(r.title)}</div>
         <div class="detail-meta" style="flex-wrap:wrap;gap:10px">
           <span>${r.store}</span>
           <span>${r.repair_date||fmtDate(r.created_at)}</span>
@@ -9526,7 +9539,7 @@ async function renderScheduleEdit(area) {
           return `<span class="badge-access" style="background:var(--blb);color:var(--bl)">마감 ${cnt}일</span>`;
         })()}
       </div>
-      ${curSchedule?.reject_reason ? `<div style="background:var(--rdb);border-radius:8px;padding:10px 13px;font-size:13px;color:var(--rd);margin-bottom:12px"><strong>반려 사유:</strong> ${curSchedule.reject_reason}</div>` : ''}
+      ${curSchedule?.reject_reason ? `<div style="background:var(--rdb);border-radius:8px;padding:10px 13px;font-size:13px;color:var(--rd);margin-bottom:12px"><strong>반려 사유:</strong> ${esc(curSchedule.reject_reason)}</div>` : ''}
 
       <div id="schAdminNotes" style="margin-bottom:14px"></div>
       <!-- 운영계획/특이사항 — 저장 분리 방식 -->
@@ -14605,6 +14618,7 @@ function attStatusBadge(st){
 }
 
 async function renderAttendanceIssue(area){
+  sweepExpiredDrafts();
   if(!canSeeAtt()){ area.innerHTML='<div class="page-header"><div class="page-title">근태 이슈 관리</div></div><div style="text-align:center;padding:50px;color:var(--th)">열람 권한이 없습니다.</div>'; return; }
   if(!__attMonth){ const n=new Date(); __attMonth=`${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; }
   area.innerHTML='<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
@@ -14811,7 +14825,7 @@ async function openAttIssueDetail(id){
       <div>근무 매장: <b>${r.work_store||r.store||'-'}</b> · 근무조: <b>${r.shift_start||'-'}~${r.shift_end||'-'}</b></div>
       <div>실제 출근: <b>${r.actual_in||'-'}</b> · 실제 퇴근: <b>${r.actual_out||'-'}</b> · 휴게: ${r.break_option==='1h'?'1시간':'30분'}</div>
       <div style="color:var(--rd);font-weight:600">${diffTxt}</div>
-      <div>사유: <b>${r.reason_category||'-'}</b> ${r.reason_text?('— '+r.reason_text):''}</div>
+      <div>사유: <b>${esc(r.reason_category)||'-'}</b> ${r.reason_text?('— '+esc(r.reason_text)):''}</div>
       ${r.proof_url?`<div style="margin-top:6px"><img src="${r.proof_url}" onclick="openImageZoom('${r.proof_url}')" style="max-width:160px;border-radius:8px;cursor:zoom-in;border:0.5px solid var(--crd)"/><div style="font-size:10px;color:var(--th)">클릭하여 확대</div></div>`:''}
     </div>
     ${admin?`<div style="border-top:0.5px solid var(--crd);margin-top:12px;padding-top:12px">
