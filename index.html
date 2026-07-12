@@ -14585,7 +14585,7 @@ async function renderAttendanceIssue(area){
     .gte('issue_date',mStart).lte('issue_date',mEnd)
     .order('issue_date',{ascending:false}).order('created_at',{ascending:false}).limit(1000);
   const admin=isAttAdmin();
-  if(!admin) q=q.eq('store', currentUser.store);        // 매니저: 소속 매장만
+  if(!admin) q=q.or(`store.eq.${currentUser.store},work_store.eq.${currentUser.store}`);  // 매니저: 소속 매장 + 지원 온(근무발생) 매장 공유
   else if(__attStore) q=q.eq('store',__attStore);
   const { data: rows } = await q;
   let list = rows||[];
@@ -14745,7 +14745,7 @@ async function submitAttIssue(){
   const targetStore = (__attUsers.find(u=>u.id===uid)||{}).store || currentUser.store;
   const { error } = await sb.from('attendance_issues').insert({
     report_type:__attTab, store:targetStore, user_id:uid, issue_date:date,
-    work_store:sh.work_store||targetStore, shift_code:sh.shift_code||null,
+    work_store:sh.work_store||currentUser.store||targetStore, shift_code:sh.shift_code||null,
     shift_start:sh.start, shift_end:sh.end, actual_in:ain, actual_out:aout,
     diff_minutes:min, break_option:document.getElementById('att_break').value,
     reason_category:document.getElementById('att_reason').value,
