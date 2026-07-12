@@ -785,14 +785,15 @@ async function doLogin() {
     err.textContent = '입사일(' + data.hire_date + ')부터 로그인할 수 있습니다.'; return;
   }
 
-  // 서버 RPC(verify_login)로 비밀번호 검증 — 평문을 프론트에서 읽지 않음
-  const { data: __vr, error: __ve } = await sb.rpc('verify_login', { p_user_id: data.id, p_password: pw });
+  // 서버 RPC(verify_login_v2)로 비밀번호 검증 + 세션 토큰 발급
+  const { data: __vr, error: __ve } = await sb.rpc('verify_login_v2', { p_user_id: data.id, p_password: pw });
   if (__ve) { err.textContent = '로그인 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'; return; }
   if (!__vr || !__vr.length) {
     err.textContent = data.pw_set ? '비밀번호가 맞지 않습니다.' : '첫 로그인 비밀번호를 확인해 주세요. (bnz + 코드 숫자 4자리)';
     return;
   }
-  const __user = __vr[0];
+  const __user = __vr[0].user_row;
+  setSessionToken(__vr[0].session_token);
   window.__pwSetAuth = pw;   // 최초 설정 시 현재(초기) 비밀번호로 사용
 
   // 최초 비밀번호 미설정 계정: 슬랙 인증 + 새 비밀번호 설정 화면으로
@@ -987,6 +988,7 @@ async function doSetPassword() {
   await sb.from('users').update({ slack_member_id: pwSetSlackId || pwSetUser.slack_member_id || null }).eq('id', pwSetUser.id);
   pwSetUser.pw_set          = true;
   pwSetUser.slack_member_id = pwSetSlackId || pwSetUser.slack_member_id;
+  try { const { data: __sv } = await sb.rpc('verify_login_v2', { p_user_id: pwSetUser.id, p_password: p1 }); if(__sv && __sv.length) setSessionToken(__sv[0].session_token); } catch(e){}
   document.getElementById('pwSetScreen').style.display = 'none';
   loginAs(pwSetUser);
 }
@@ -1106,7 +1108,13 @@ async function saveSlackId(){
   document.getElementById('slackModal').classList.remove('open');
 }
 
+// ── 서버 세션 토큰 (마이그레이션 1단계 기반) ──
+function setSessionToken(tok){ window.__sessionToken = tok || null; try{ tok ? localStorage.setItem('bnz_session', tok) : localStorage.removeItem('bnz_session'); }catch(e){} }
+function getSessionToken(){ if(window.__sessionToken) return window.__sessionToken; try{ return localStorage.getItem('bnz_session'); }catch(e){ return null; } }
+async function clearSession(){ const t=getSessionToken(); if(t){ try{ await sb.rpc('revoke_session',{ p_token: t }); }catch(e){} } window.__sessionToken=null; try{ localStorage.removeItem('bnz_session'); }catch(e){} }
+
 async function doLogout() {
+  try { await clearSession(); } catch(e) {}
   try { localStorage.removeItem('bck_auto'); } catch(e) {}
   currentUser = null;
   document.getElementById('mainScreen').style.display = 'none';
@@ -1952,7 +1960,7 @@ function postCmtAtTrigger(ta, postId) {
       `<div onclick="selectPostCmtTag(${postId},'${u.id}','${u.name}','${u.store||''}')"
         style="padding:8px 12px;cursor:pointer;font-size:12px;display:flex;gap:8px;align-items:center;border-bottom:0.5px solid var(--crd)"
         onmouseover="this.style.background='var(--crm)'" onmouseout="this.style.background=''">
-        <span style="font-weight:600">${u.name}</span>
+        <span style="font-weight:600">${esc(u.name)}</span>
         <span style="font-size:10px;color:#fff;background:var(--brm);border-radius:4px;padding:1px 5px">${u.store||''}</span>
       </div>`
     ).join('');
@@ -5950,7 +5958,7 @@ async function renderProfile(area){
           <div style="position:absolute;inset:0;background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;border-radius:50%;opacity:0;transition:.2s" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0"><i class="ti ti-camera" style="color:#fff;font-size:18px"></i></div>
         </div>
         <div>
-          <div style="font-size:18px;font-weight:600;color:var(--tm)">${currentUser.name}</div>
+          <div style="font-size:18px;font-weight:600;color:var(--tm)">${esc(currentUser.name)}</div>
           <div style="font-size:13px;color:var(--ts)">${currentUser.store} · ${roleLbl[currentUser.role]||currentUser.role} · ${currentUser.code}</div>
           <div style="font-size:11px;color:var(--th);margin-top:4px">사진 클릭하여 변경</div>
         </div>
@@ -6389,9 +6397,10 @@ document.addEventListener('click',  () => { __lastActivity = Date.now(); });
 document.addEventListener('keydown', () => { __lastActivity = Date.now(); });
 document.addEventListener('scroll', () => { __lastActivity = Date.now(); });
 
-setInterval(() => {
+setInterval(async () => {
   if (!currentUser) return;
   if (Date.now() - __lastActivity > AUTO_LOGOUT_MS) {
+    try { await clearSession(); } catch(e) {}
     alert('30분 이상 활동이 없어 자동 로그아웃됩니다.');
     location.reload();
   }
@@ -7012,7 +7021,7 @@ async function searchPermUser() {
   const { data } = await sb.from('users').select('id,name,store,role,part,is_master,is_vice_master,active').ilike('name', '%'+q+'%').limit(10);
   if (!data || !data.length) { box.innerHTML = '<div style="font-size:13px;color:var(--th);padding:8px">검색 결과가 없습니다.</div>'; return; }
   box.innerHTML = data.map(u => `<div onclick="selectPermUser('${u.id}')" style="display:flex;align-items:center;gap:8px;padding:9px 10px;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:5px;cursor:pointer;background:#fff">
-    <span style="font-weight:600;font-size:13px">${u.name}</span>
+    <span style="font-weight:600;font-size:13px">${esc(u.name)}</span>
     <span style="font-size:11px;color:var(--th)">${u.store||''} · ${GRADE_LABEL[userGrade(u)]}</span>
     ${!u.active?'<span style="font-size:10px;color:var(--rd)">(퇴사)</span>':''}
     <i class="ti ti-chevron-right" style="margin-left:auto;color:var(--th)"></i>
@@ -7062,7 +7071,7 @@ async function selectPermUser(userId) {
   document.getElementById('permUserDetail').innerHTML = `
     <div style="border:0.5px solid var(--crd);border-radius:10px;padding:14px;margin-top:10px;background:var(--cr)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div><span style="font-weight:600">${u.name}</span> <span style="font-size:12px;color:var(--th)">${u.store||''} · 등급: ${GRADE_LABEL[grade]}</span></div>
+        <div><span style="font-weight:600">${esc(u.name)}</span> <span style="font-size:12px;color:var(--th)">${u.store||''} · 등급: ${GRADE_LABEL[grade]}</span></div>
         <button class="btn-cancel-sm" style="padding:4px 8px" onclick="closePermUser()"><i class="ti ti-x"></i></button>
       </div>
       <div style="font-size:11px;color:var(--th);margin-bottom:8px">토글을 등급 기본값과 다르게 바꾸면 개인 예외로 저장됩니다. 기본값과 같게 두면 예외가 해제됩니다.</div>
@@ -8339,7 +8348,7 @@ async function renderInterviewDetail(area) {
 
       <div style="margin-bottom:20px">
         <div class="section-label" style="margin-bottom:8px">면담 내용</div>
-        <div style="font-size:14px;line-height:1.8;color:var(--tm);white-space:pre-wrap;background:var(--cr);border-radius:8px;padding:14px 16px">${r.content || ''}</div>
+        <div style="font-size:14px;line-height:1.8;color:var(--tm);white-space:pre-wrap;background:var(--cr);border-radius:8px;padding:14px 16px">${esc(r.content)}</div>
       </div>
 
       <div class="confirm-section">
@@ -8891,7 +8900,7 @@ async function renderRepairDetail(area) {
           <span>작성: ${r.author?.store?r.author.store+' · ':''} ${r.author?.name||''}</span>
         </div>
       </div>
-      ${r.content?`<div style="font-size:14px;line-height:1.9;color:var(--tm);white-space:pre-wrap;margin-bottom:18px;background:var(--cr);border-radius:8px;padding:14px 16px">${r.content}</div>`:''}
+      ${r.content?`<div style="font-size:14px;line-height:1.9;color:var(--tm);white-space:pre-wrap;margin-bottom:18px;background:var(--cr);border-radius:8px;padding:14px 16px">${esc(r.content)}</div>`:''}
       ${imgs.length?`
         <div style="margin-bottom:16px">
           <div class="section-label" style="margin-bottom:10px"><i class="ti ti-photo" style="color:var(--brm)"></i> 사진 (${imgs.length}장)</div>
@@ -13292,8 +13301,8 @@ async function openScheduleHistoryModal(scheduleId) {
     if (opChanged) {
       changeHtml += `<div style="margin-bottom:8px;padding:8px 10px;background:var(--blb);border-radius:6px;font-size:12px">
         <strong style="color:var(--bl)">운영 계획 수정</strong>
-        <div style="color:var(--rd);text-decoration:line-through;margin-top:3px;font-size:11px;white-space:pre-wrap">${prevH.operation_plan||'(없음)'}</div>
-        <div style="color:var(--gn);margin-top:3px;font-size:11px;white-space:pre-wrap">${h.operation_plan||'(없음)'}</div>
+        <div style="color:var(--rd);text-decoration:line-through;margin-top:3px;font-size:11px;white-space:pre-wrap">${esc(prevH.operation_plan)||'(없음)'}</div>
+        <div style="color:var(--gn);margin-top:3px;font-size:11px;white-space:pre-wrap">${esc(h.operation_plan)||'(없음)'}</div>
       </div>`;
     }
 
@@ -13301,8 +13310,8 @@ async function openScheduleHistoryModal(scheduleId) {
     if (notesChanged) {
       changeHtml += `<div style="margin-bottom:8px;padding:8px 10px;background:var(--blb);border-radius:6px;font-size:12px">
         <strong style="color:var(--bl)">특이사항 수정</strong>
-        <div style="color:var(--rd);text-decoration:line-through;margin-top:3px;font-size:11px;white-space:pre-wrap">${prevH.special_notes||'(없음)'}</div>
-        <div style="color:var(--gn);margin-top:3px;font-size:11px;white-space:pre-wrap">${h.special_notes||'(없음)'}</div>
+        <div style="color:var(--rd);text-decoration:line-through;margin-top:3px;font-size:11px;white-space:pre-wrap">${esc(prevH.special_notes)||'(없음)'}</div>
+        <div style="color:var(--gn);margin-top:3px;font-size:11px;white-space:pre-wrap">${esc(h.special_notes)||'(없음)'}</div>
       </div>`;
     }
 
@@ -13332,7 +13341,7 @@ async function openScheduleHistoryModal(scheduleId) {
       <details class="toggle-block" style="margin-bottom:6px">
         <summary style="cursor:pointer;padding:9px 14px;font-size:13px;font-weight:600;background:var(--cr);display:flex;align-items:center;justify-content:space-between;list-style:none;border-radius:8px">
           <span>
-            v${h.version} · <span style="color:var(--ts)">${h.note||''}</span>
+            v${h.version} · <span style="color:var(--ts)">${esc(h.note)}</span>
             ${badge}
             <span style="font-size:11px;color:var(--th);font-weight:400;margin-left:8px">${fmtDateTime(h.saved_at)||''} · ${h.saver?.name||''}</span>
           </span>
@@ -13644,7 +13653,7 @@ async function renderHandoverDetail(area) {
     } else {
       return `<div style="margin-bottom:22px">
         <div class="section-label" style="margin-bottom:8px;display:flex;align-items:center;gap:6px"><i class="ti ${icon}" style="color:var(--brm)"></i>${f.label}</div>
-        <div style="background:var(--cr);border-radius:8px;padding:13px 15px;font-size:14px;line-height:1.8;color:var(--tm);white-space:pre-wrap">${val||'<span style="color:var(--th)">미등록</span>'}</div></div>`;
+        <div style="background:var(--cr);border-radius:8px;padding:13px 15px;font-size:14px;line-height:1.8;color:var(--tm);white-space:pre-wrap">${val?esc(val):'<span style="color:var(--th)">미등록</span>'}</div></div>`;
     }
   };
 
