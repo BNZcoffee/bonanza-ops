@@ -4232,6 +4232,20 @@ function toggleNotifPanel() {
   panel.classList.add('open');
 }
 function closeNotifPanel() { document.getElementById('notifPanel').classList.remove('open'); }
+
+// 알림 클릭 → 안전한 라우팅 (읽음처리 → 패널닫기 → 대상 모달/페이지) — 유형별 꼼꼼 분기
+function notifGo(refType, refId, notifId){
+  try { if(notifId) markNotifRead(notifId); } catch(e){}
+  try { closeNotifPanel(); } catch(e){}
+  setTimeout(() => { try {
+    if (refType==='post')            openPostById(refId);
+    else if (refType==='request')    openReqById(refId);
+    else if (refType==='schedule')   openScheduleById(refId);
+    else if (refType==='interview')  openInterviewById(refId);
+    else if (refType==='attendance') openAttIssueDetail(refId);
+    else goPage('all');
+  } catch(e){ console.warn('알림 이동 오류:', e); } }, 60);
+}
 async function loadNotifPanel() {
   const list  = document.getElementById('notifList');
   if (!list) return;
@@ -4249,15 +4263,9 @@ async function loadNotifPanel() {
     if (items.length) {
       html += `<div style="font-size:10px;color:var(--th);padding:0 0 8px;letter-spacing:.5px">최근 30일 확인한 알림 ${items.length}건</div>`;
       html += items.map(n => {
-        const iconMap2  = {interview:'ti-message-report', post:'ti-article', schedule:'ti-calendar-event', request:'ti-clipboard-check'};
+        const iconMap2  = {interview:'ti-message-report', post:'ti-article', schedule:'ti-calendar-event', request:'ti-clipboard-check', attendance:'ti-alarm'};
         const icon  = iconMap2[n.ref_type] || 'ti-bell';
-        let onclick = 'closeNotifPanel();';
-        if (n.ref_type==='post')          onclick += `openPostById(${n.ref_id})`;
-        else if (n.ref_type==='request')  onclick += `openReqById(${n.ref_id})`;
-        else if (n.ref_type==='schedule') onclick += `openScheduleById(${n.ref_id})`;
-        else if (n.ref_type==='interview')onclick += `openInterviewById(${n.ref_id})`;
-        else                               onclick += `goPage('all')`;
-        return `<div class="notif-item" onclick="${onclick}" style="opacity:.6;border-left:3px solid var(--crd);padding-left:10px">
+        return `<div class="notif-item" onclick="notifGo('${n.ref_type}',${n.ref_id},null)" style="opacity:.6;border-left:3px solid var(--crd);padding-left:10px">
           <div class="notif-item-title" style="color:var(--ts)">
             <i class="ti ${icon}" style="color:var(--th);margin-right:5px;font-size:12px"></i>${n.message}
           </div>
@@ -4302,17 +4310,11 @@ async function loadNotifPanel() {
   if (notifItems.length) {
     html += `<div style="font-size:10px;font-weight:700;color:var(--rd);letter-spacing:1px;padding:4px 0 6px">업무 알림 ${notifItems.length}건</div>`;
     html += notifItems.map(n => {
-      const iconMap  = {interview:'ti-message-report', post:'ti-article', schedule:'ti-calendar-event', request:'ti-clipboard-check'};
-      const colorMap = {interview:'var(--pu)', post:'var(--bl)', schedule:'var(--gd)', request:'var(--gn)'};
+      const iconMap  = {interview:'ti-message-report', post:'ti-article', schedule:'ti-calendar-event', request:'ti-clipboard-check', attendance:'ti-alarm'};
+      const colorMap = {interview:'var(--pu)', post:'var(--bl)', schedule:'var(--gd)', request:'var(--gn)', attendance:'var(--rd)'};
       const icon  = iconMap[n.ref_type] || 'ti-bell';
       const color = colorMap[n.ref_type] || 'var(--gn)';
-      let onclick = `markNotifRead(${n.id});closeNotifPanel();`;
-      if (n.ref_type==='post')          onclick += `openPostById(${n.ref_id})`;
-      else if (n.ref_type==='request')  onclick += `openReqById(${n.ref_id})`;
-      else if (n.ref_type==='schedule') onclick += `openScheduleById(${n.ref_id})`;
-      else if (n.ref_type==='interview')onclick += `openInterviewById(${n.ref_id})`;
-      else                               onclick += `goPage('all')`;
-      return `<div class="notif-item" onclick="${onclick}" style="border-left:3px solid ${color};padding-left:10px">
+      return `<div class="notif-item" onclick="notifGo('${n.ref_type}',${n.ref_id},${n.id})" style="border-left:3px solid ${color};padding-left:10px">
         <div class="notif-item-title">
           <i class="ti ${icon}" style="color:${color};margin-right:5px;font-size:13px"></i>${n.message}
         </div>
@@ -10887,11 +10889,16 @@ async function persistScheduleEntries(scheduleId) {
     presentKeys.add(slotKey + '|' + date);
   });
 
+  // 동일 (slot_key,date) 중복 제거 (upsert 배치 내 중복 시 Postgres 오류 예방 · 마지막 값 우선)
+  const __dedup = new Map();
+  rows.forEach(r => __dedup.set(r.slot_key + '|' + r.date, r));
+  const rowsU = [...__dedup.values()];
+
   // (1) 현재 화면의 셀을 UPSERT (복합키 충돌 시 갱신)
-  if (rows.length > 0) {
-    for (let i=0; i<rows.length; i+=500) {
+  if (rowsU.length > 0) {
+    for (let i=0; i<rowsU.length; i+=500) {
       const { error } = await sb.from('schedule_entries')
-        .upsert(rows.slice(i, i+500), { onConflict: 'schedule_id,slot_key,date' });
+        .upsert(rowsU.slice(i, i+500), { onConflict: 'schedule_id,slot_key,date' });
       if (error) { alert('스케줄 저장 오류: ' + error.message); throw error; }
     }
   }
@@ -14640,7 +14647,7 @@ async function openAttIssueForm(){
       <button onclick="document.getElementById('attFormModal').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--th)"><i class="ti ti-x"></i></button>
     </div>
     <div style="display:grid;gap:10px">
-      <div><label class="form-label">발생 일자</label><input type="date" class="form-input" id="att_date" value="${todayKST()}" onchange="attLoadShift()"/></div>
+      <div><label class="form-label">발생 일자</label><input type="date" class="form-input" id="att_date" value="${todayKST()}" onchange="attReloadFormUsers();attLoadShift()"/></div>
       <div><label class="form-label">대상 직원</label><select class="form-input" id="att_user" onchange="attLoadShift()"><option value="">선택</option>${__attUsers.map(u=>`<option value="${u.id}">${u.name} (${u.store||''})</option>`).join('')}</select></div>
       <div id="att_shift_box" style="background:var(--cr);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--th)">발생일자·직원 선택 시 해당일 근무조가 자동 표시됩니다.</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -14657,6 +14664,24 @@ async function openAttIssueForm(){
     </div></div>`;
   document.body.appendChild(m);
   window.__attFormShift=null;
+  attReloadFormUsers();
+}
+
+// 대상 직원 목록: (관리자=전체 활성) / (매니저=소속 매장 + 그 날짜 내 매장으로 지원 온 직원)
+async function attReloadFormUsers(){
+  const sel=document.getElementById('att_user'); if(!sel) return;
+  const date=document.getElementById('att_date')?.value; const cur=sel.value;
+  let uq=sb.from('users').select('id,name,store').eq('active',true).order('name');
+  if(!isAttAdmin()) uq=uq.eq('store', currentUser.store);
+  const { data: base } = await uq;
+  let merged = (base||[]).slice();
+  if(!isAttAdmin() && date){
+    const { data: sup } = await sb.from('schedule_entries').select('user_id').eq('date',date).eq('support_store',currentUser.store).not('user_id','is',null);
+    const supIds=[...new Set((sup||[]).map(e=>e.user_id))].filter(id=>!merged.some(u=>u.id===id));
+    if(supIds.length){ const {data:su}=await sb.from('users').select('id,name,store').in('id',supIds); (su||[]).forEach(u=>merged.push(Object.assign({},u,{__support:true}))); }
+  }
+  __attUsers = merged;
+  sel.innerHTML = '<option value="">선택</option>'+merged.map(u=>`<option value="${u.id}"${u.id===cur?' selected':''}>${u.name} (${u.store||''})${u.__support?' · 지원':''}</option>`).join('');
 }
 
 async function attLoadShift(){
@@ -14714,6 +14739,9 @@ async function submitAttIssue(){
     if(fi.files.length>1){ try{ file=await mergeImages(Array.from(fi.files)); }catch(e){} }
     proofUrl = await nUploadFile(file,'attendance');
   }
+  // 동일 직원·날짜·유형 중복 방지 (A·B 매장 매니저 중복 등록 방지)
+  const { data: __dup } = await sb.from('attendance_issues').select('id').eq('user_id',uid).eq('issue_date',date).eq('report_type',__attTab).neq('status','rejected').limit(1);
+  if(__dup && __dup.length){ err.textContent='이미 이 직원의 같은 날짜·유형 보고가 있습니다. (중복 등록 불가)'; return; }
   const targetStore = (__attUsers.find(u=>u.id===uid)||{}).store || currentUser.store;
   const { error } = await sb.from('attendance_issues').insert({
     report_type:__attTab, store:targetStore, user_id:uid, issue_date:date,
@@ -14724,8 +14752,9 @@ async function submitAttIssue(){
     reason_text:document.getElementById('att_text').value.trim()||null,
     proof_url:proofUrl, status:'submitted', created_by:currentUser.id
   });
-  if(error){ err.textContent='저장 오류: '+error.message; return; }
+  if(error){ err.textContent = /duplicate|unique|ux_att_dup/i.test(error.message) ? '이미 동일 직원·날짜·유형 보고가 있습니다.' : ('저장 오류: '+error.message); return; }
   document.getElementById('attFormModal').remove();
+  if(targetStore !== currentUser.store) alert('저장되었습니다.\n이 건은 대상 직원 소속 매장('+targetStore+') 관리자 목록에서 조회·마감됩니다.');
   renderAttendanceIssue(document.getElementById('contentArea'));
 }
 
