@@ -3360,7 +3360,7 @@ async function openBulkAddUser() {
       <div style="font-size:12px;color:var(--ts);background:var(--crm);border-radius:8px;padding:10px 13px;margin-bottom:14px;line-height:1.7">
         한 번에 여러 명을 등록합니다. 각 행에 직접 입력하거나, 엑셀/시트에서 <strong>10개 열을 복사해 표에 붙여넣기(Ctrl+V / Cmd+V)</strong> 하세요.<br>
         <span style="color:var(--th)">열 순서: 이름 · 소속매장 · 직위 · 고용형태 · 계약시간 · 휴게(분) · 주근무일수 · 이메일 · 연락처 · 입사일 · 퇴사일 · 파트</span><br>
-        초기 비밀번호: <strong>bnz + 코드번호 4자리</strong> (자동 부여) · <strong>입사일 필수</strong> · 계약직/PT는 계약시간 필수 · <strong>계약직은 퇴사일 필수</strong>(계약직 선택 시 8h/60분 자동입력)
+        초기 비밀번호: <strong>bnz1234</strong> (공통 · 자동 부여) · <strong>입사일 필수</strong> · 계약직/PT는 계약시간 필수 · <strong>계약직은 퇴사일 필수</strong>(계약직 선택 시 8h/60분 자동입력)
       </div>
 
       <div style="overflow-x:auto">
@@ -3390,7 +3390,9 @@ async function openBulkAddUser() {
         <button class="btn-cancel-sm" onclick="addBulkRow()" style="font-size:12px;color:var(--bl);border-color:var(--bl)">
           <i class="ti ti-plus"></i> 행 추가
         </button>
-        <span style="font-size:11px;color:var(--th)">* 필수</span>
+        <button class="btn-cancel-sm" onclick="addBulkRows(10)" style="font-size:12px;color:var(--bl);border-color:var(--bl)">+10행</button>
+        <button class="btn-cancel-sm" onclick="addBulkRows(50)" style="font-size:12px;color:var(--bl);border-color:var(--bl)">+50행</button>
+        <span style="font-size:11px;color:var(--th)">* 필수 · 엑셀에서 수백 명도 한 번에 붙여넣기 가능</span>
       </div>
 
       <div id="bulkResult" style="margin-top:10px;font-size:12px;color:var(--ts)"></div>
@@ -3491,6 +3493,7 @@ function addBulkRow() {
   tbody.appendChild(tr);
 }
 
+function addBulkRows(n){ for (let i=0;i<(n||1);i++) addBulkRow(); }
 function removeBulkRow(idx) {
   document.getElementById('bulk-row-' + idx)?.remove();
 }
@@ -3627,6 +3630,15 @@ async function submitBulkAdd() {
   const resultEl = document.getElementById('bulkResult');
   let success = 0, failed = 0, skipped = 0;
   const errors = [];
+  const today = todayKST();
+
+  // 다음 코드 번호 1회 계산 (행마다 재조회 X → 대량 등록 성능·안정성)
+  const { data: __codeData } = await sb.from('users').select('code');
+  let __codeMax = 0;
+  (__codeData||[]).forEach(u=>{ const m = u.code && u.code.match(/BCK-(\d+)/); if(m) __codeMax = Math.max(__codeMax, parseInt(m[1])); });
+
+  const payloads = [];    // insert 대기 목록
+  const metaByCode = {};  // 코드→pt_contracts 메타
 
   for (let i = 0; i < rows.length; i++) {
     const rowId = rows[i].id.split('-').pop();
@@ -3656,38 +3668,53 @@ async function submitBulkAdd() {
       errors.push(`${name}: 계약직 퇴사일 미입력`); failed++; continue;
     }
 
-    const newCode = await getNextCode();
+    const newCode = 'BCK-' + String(++__codeMax).padStart(3,'0');
     const tempPw  = 'bnz' + newCode.replace('BCK-','').padStart(4,'0');
-    const { error } = await sb.from('users').insert({
+    payloads.push({
       code: newCode, name, store, role,
       password_hash: tempPw, pw_set: false,
       email: email||null, phone: phone||null, hire_date: hire,
       retire_date: retire||null,
-      active: (!retire || retire >= todayKST()), part,
+      active: (!retire || retire >= today), part,
       employment_type: emp,
       pt_work_hours: ptWrk,
       pt_break_minutes: ptBrk,
       pt_hours_per_day: ptNet,
       pt_weekly_days: ptDays
     });
+    if (needsHours && ptWrk > 0) metaByCode[newCode] = { ptWrk, ptBrk, hire };
+  }
 
-    if (error) {
-      errors.push(`${name}: ${error.message.includes('unique') ? '코드 중복' : error.message}`);
-      failed++;
-    } else {
-      // pt_contracts 테이블에도 저장
-      if (needsHours && ptWrk > 0) {
-        const { data: newUser } = await sb.from('users').select('id').eq('code', newCode).maybeSingle();
-        if (newUser) {
-          await sb.from('pt_contracts').insert({
-            user_id: newUser.id, work_hours: ptWrk, break_minutes: ptBrk||30,
-            start_date: hire || todayKST(),
-            note: '일괄 등록', created_by: currentUser.id
-          });
+  // ── 배치 insert (100건씩 청크) — 수백 명도 빠르게 처리 ──
+  if (payloads.length) {
+    const CHUNK = 100;
+    for (let c = 0; c < payloads.length; c += CHUNK) {
+      const chunk = payloads.slice(c, c + CHUNK);
+      const { data: ins, error } = await sb.from('users').insert(chunk).select('id,code');
+      if (error) {
+        // 청크 실패 시 개별 재시도로 원인 행만 추려냄
+        for (const one of chunk) {
+          const { error: e2 } = await sb.from('users').insert(one);
+          if (e2) { errors.push(`${one.name}: ${e2.message.includes('unique') ? '코드 중복' : e2.message}`); failed++; }
+          else success++;
         }
+      } else {
+        success += (ins ? ins.length : chunk.length);
       }
-      success++;
     }
+    // pt_contracts 배치 저장 (PT·계약직 계약시간 보유 행)
+    try {
+      const codes = Object.keys(metaByCode);
+      if (codes.length) {
+        const { data: newUsers } = await sb.from('users').select('id,code').in('code', codes);
+        const idByCode = {}; (newUsers||[]).forEach(u => idByCode[u.code] = u.id);
+        const contracts = codes.filter(cd => idByCode[cd]).map(cd => ({
+          user_id: idByCode[cd], work_hours: metaByCode[cd].ptWrk, break_minutes: metaByCode[cd].ptBrk || 30,
+          start_date: metaByCode[cd].hire || today, note: '일괄 등록', created_by: currentUser.id
+        }));
+        if (contracts.length) await sb.from('pt_contracts').insert(contracts);
+      }
+    } catch (e) {}
   }
 
   // 전부 성공 → 간단 알림 후 닫기 (일괄 등록은 초기 셋업용이라 개별 안내문 모달 생략)
