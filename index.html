@@ -1516,7 +1516,7 @@ async function renderBoard(area, opts) {
   area.innerHTML = `<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>`;
   const q = (document.getElementById('boardSearch')?.value || '').trim().toLowerCase();
   let __bq = sb.from('posts')
-    .select('*, categories(name), users(name,store)')
+    .select('*, categories(name), users(name, store, part, role)')
     .eq('category_id', currentCatId);
   if (q) { const esc = q.replace(/[%,()]/g,' '); __bq = __bq.or(`title.ilike.%${esc}%,body.ilike.%${esc}%`); }
   const { data: posts } = await __bq.order('created_at', {ascending: false}).range(0, __limit - 1);
@@ -1586,7 +1586,7 @@ async function renderBoard(area, opts) {
 
 // ── POST DETAIL ───────────────────────────────────
 async function openPostById(id) {
-  const { data } = await sb.from('posts').select('*, categories(name), users(name,store)').eq('id',id).single();
+  const { data } = await sb.from('posts').select('*, categories(name), users(name, store, part, role)').eq('id',id).single();
   if (!data || !canSee(data)) return;
   currentPost = data;
   // 게시글의 카테고리로 currentCatId 동기화 (전체보기·검색 등 어디서 열어도 정확히 판단)
@@ -1611,7 +1611,7 @@ async function renderPostDetail(area) {
 
   // load reads, comments, attachments
   const [readsRes, cmtsRes, attRes, favRes] = await Promise.all([
-    sb.from('post_reads').select('*, users(name,store)').eq('post_id', p.id),
+    sb.from('post_reads').select('*, users(name, store, part, role)').eq('post_id', p.id),
     sb.from('comments').select('*, users(name,store,nickname,avatar_url)').eq('post_id', p.id).order('created_at'),
     sb.from('attachments').select('*').eq('post_id', p.id),
     sb.from('post_favorites').select('id').eq('post_id', p.id).eq('user_id', currentUser.id)
