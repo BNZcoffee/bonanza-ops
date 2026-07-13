@@ -973,41 +973,50 @@ async function doSetPassword() {
 }
 
 // 신규 계정 안내 메일 생성 (등록 후)
-function showAccountGuide(acc) {
+// 계정 안내문 기본 템플릿 (DB app_settings.account_guide_template 없을 때 fallback)
+const DEFAULT_ACCT_GUIDE =
+'안녕하세요, {이름}님. 보난자커피 운영팀입니다.\n\n' +
+'보난자커피 운영 매뉴얼 앱 계정이 생성되었습니다.\n\n' +
+'[ 로그인 정보 ]\n' +
+'· 접속 주소: https://bnzcoffee.github.io/bonanza-ops/\n' +
+'· 이름: {이름}  ·  소속 매장: {소속매장}  ·  직급: {직급}\n' +
+'· 입사일: {입사일} (로그인 화면에서 달력으로 선택)\n\n' +
+'[ 처음 접속하는 방법 ]\n' +
+'1. 위 주소 접속 → 이름 입력 + 입사일 선택 + 초기 비밀번호(로그인 화면 안내) 입력 후 로그인.\n' +
+'2. 슬랙 멤버 ID(U로 시작) 입력 화면 → [인증번호 발송] → 슬랙 DM 6자리 인증번호 입력.\n' +
+'3. 새 비밀번호를 직접 설정하면 완료됩니다.\n\n' +
+'[ 슬랙 멤버 ID 찾는 법 ]\n' +
+'슬랙 앱 → 본인 프로필 → 점 세 개(⋯ 더보기) → "멤버 ID 복사"\n' +
+'(U로 시작하는 8~11자리 영문·숫자)\n\n' +
+'[ 휴대폰 홈 화면에 추가 ]\n' +
+'· 아이폰(Safari): 공유 → "홈 화면에 추가"\n' +
+'· 안드로이드(Chrome): ⋮ → "홈 화면에 추가"\n\n' +
+'문의는 운영팀으로 연락 주세요.';
+
+// 관리자 그룹: 총괄·부총괄·인사팀·운영팀
+function isAdminGroup(){ const u=currentUser; return !!(u && (u.is_master||u.is_vice_master||u.role==='admin'||u.role==='hr'||u.part==='인사팀'||u.part==='운영팀')); }
+
+async function loadAcctGuideTpl(){
+  if (window.__acctGuideTpl) return window.__acctGuideTpl;
+  try { const { data } = await sb.from('app_settings').select('value').eq('key','account_guide_template').maybeSingle();
+        if (data && data.value) { window.__acctGuideTpl = data.value; return data.value; } } catch(e){}
+  return DEFAULT_ACCT_GUIDE;
+}
+function fillGuidePlaceholders(tpl, acc){
+  const roleLabel = (roleLbl && roleLbl[acc.role]) || acc.role || '';
+  return String(tpl)
+    .split('{이름}').join(acc.name||'')
+    .split('{입사일}').join(acc.hire_date||'')
+    .split('{소속매장}').join(acc.store||'')
+    .split('{직급}').join(roleLabel);
+}
+
+async function showAccountGuide(acc) {
   const appUrl = 'https://bnzcoffee.github.io/bonanza-ops/';
   const hireLine = acc.hire_date ? ('입사일(' + acc.hire_date + ')부터') : '오늘부터';
   const subject = '[보난자커피] 운영 매뉴얼 앱 계정 안내';
-  const initPw = initPwFromCode(acc.code);
-  const bodyLines = [
-    '안녕하세요, 보난자커피 운영팀입니다.',
-    '',
-    '보난자커피 운영 매뉴얼 앱 계정이 생성되었습니다.',
-    '',
-    '[ 로그인 정보 ]',
-    '· 접속 주소: ' + appUrl,
-    '· 이름: ' + (acc.name||''),
-    '· 소속 매장: ' + (acc.store||''),
-    '· 입사일: ' + (acc.hire_date||'') + ' (로그인 화면에서 달력으로 선택)',
-    '· 첫 로그인 비밀번호: bnz1234  (공통 · 첫 로그인 후 직접 변경)',
-    '',
-    '[ 처음 접속하는 방법 ]',
-    '1. 위 주소 접속 → 이름 입력 + 입사일 선택 + 위 첫 비밀번호 입력 후 로그인.',
-    '2. 슬랙 멤버 ID(U로 시작) 입력 화면이 뜹니다.',
-    '3. [인증번호 발송] → 본인 슬랙 DM으로 온 6자리 인증번호 입력.',
-    '4. 새 비밀번호를 직접 설정하면 완료됩니다.',
-    '',
-    '[ 슬랙 멤버 ID 찾는 법 ]',
-    '슬랙 앱 → 본인 프로필 → 점 세 개(⋯ 더보기) → "멤버 ID 복사"',
-    '(U로 시작하는 8~11자리 영문·숫자)',
-    '',
-    '[ 휴대폰 홈 화면에 추가 (앱처럼 사용) ]',
-    '· 아이폰(Safari): 공유 버튼 → "홈 화면에 추가"',
-    '· 안드로이드(Chrome): 점 세 개(⋮) → "홈 화면에 추가"',
-    '',
-    '문의는 운영팀으로 연락 주세요. 감사합니다.',
-    '보난자커피 운영팀'
-  ];
-  const body = bodyLines.join('\n');
+  const tpl = await loadAcctGuideTpl();
+  const body = fillGuidePlaceholders(tpl, acc);
   const emailTo = acc.email || '';
   const mailto = 'mailto:' + encodeURIComponent(emailTo) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
 
@@ -1037,6 +1046,35 @@ function copyAcctGuide() {
   const t = document.getElementById('acctGuideText');
   if (!t) return;
   navigator.clipboard.writeText(t.value).then(()=>alert('안내문이 복사되었습니다. 본인에게 전달하세요.'));
+}
+
+// ── 안내문 템플릿 편집 (관리자 그룹 전용) ──
+async function openGuideTemplateEditor(){
+  if (!isAdminGroup()) { alert('권한이 없습니다.'); return; }
+  const tpl = await loadAcctGuideTpl();
+  const old = document.getElementById('guideTplModal'); if (old) old.remove();
+  const m = document.createElement('div'); m.id='guideTplModal'; m.className='modal-bg open';
+  m.innerHTML = '<div class="modal-inner" style="width:min(96vw,600px);max-height:92vh;overflow-y:auto">' +
+    '<div class="modal-title"><i class="ti ti-template"></i> 계정 안내문 템플릿 편집</div>' +
+    '<div style="font-size:12px;color:var(--ts);margin-bottom:8px;line-height:1.6">사용 가능 태그: <b>{이름} {입사일} {소속매장} {직급}</b> — 신규 등록 시 실제 정보로 자동 치환됩니다.</div>' +
+    '<textarea id="guideTplText" class="form-input" style="min-height:320px;font-size:12px;line-height:1.6;font-family:inherit">' + String(tpl).replace(/</g,'&lt;') + '</textarea>' +
+    '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">' +
+      '<button class="btn-cancel-sm" onclick="document.getElementById(\'guideTplModal\').remove()">취소</button>' +
+      '<button class="btn-submit" onclick="saveGuideTemplate()"><i class="ti ti-device-floppy"></i> 저장</button>' +
+    '</div></div>';
+  document.body.appendChild(m);
+}
+async function saveGuideTemplate(){
+  if (!isAdminGroup()) { alert('권한이 없습니다.'); return; }
+  const val = document.getElementById('guideTplText').value;
+  const { data: ex } = await sb.from('app_settings').select('key').eq('key','account_guide_template').maybeSingle();
+  let error;
+  if (ex) { ({ error } = await sb.from('app_settings').update({ value: val }).eq('key','account_guide_template')); }
+  else    { ({ error } = await sb.from('app_settings').insert({ key:'account_guide_template', value: val })); }
+  if (error) { alert('저장 오류: ' + error.message); return; }
+  window.__acctGuideTpl = val;
+  alert('안내문 템플릿이 저장되었습니다.');
+  document.getElementById('guideTplModal').remove();
 }
 
 async function loginAs(user) {
@@ -2790,6 +2828,7 @@ async function renderStaff(area) {
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-left:auto">
         ${canEditStaff() ? `
         <button class="btn-new" style="background:var(--brm)" onclick="openEditUser(null)"><i class="ti ti-user-plus"></i> 직원 추가</button>
+        ${isAdminGroup() ? `<button class="btn-cancel-sm" style="font-size:12px" onclick="openGuideTemplateEditor()"><i class="ti ti-template"></i> 안내문 편집</button>` : ''}
         <button class="btn-new" style="background:#4A6FA5" onclick="openBulkAddUser()"><i class="ti ti-users-plus"></i> 일괄 등록</button>
         <button class="btn-new" style="background:var(--gn)" onclick="openStoreManager()"><i class="ti ti-building"></i> 매장 관리</button>
         <button class="btn-new" style="background:var(--brm)" onclick="openRoleManager()"><i class="ti ti-id-badge-2"></i> 직위 관리</button>
@@ -3244,7 +3283,7 @@ async function submitEditUser(){
     const tempPw = initPwFromCode(newCode);
     ({error} = await sb.from('users').insert({...payload,code:newCode,password_hash:tempPw,pw_set:false}));
     if(!error) {
-      showAccountGuide({code:newCode, name:payload.name, email:payload.email, hire_date:payload.hire_date, store:payload.store});
+      showAccountGuide({code:newCode, name:payload.name, email:payload.email, hire_date:payload.hire_date, store:payload.store, role:payload.role});
     }
   }
   if(error){alert('오류: '+error.message);return;}
