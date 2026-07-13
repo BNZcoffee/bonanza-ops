@@ -2817,7 +2817,6 @@ async function renderStaff(area) {
         <button class="btn-new" style="background:var(--gn)" onclick="openStoreManager()"><i class="ti ti-building"></i> 매장 관리</button>
         <button class="btn-new" style="background:var(--brm)" onclick="openRoleManager()"><i class="ti ti-id-badge-2"></i> 직위 관리</button>
         <button class="btn-new" style="background:#5F7A6A" onclick="openPartsAdmin()"><i class="ti ti-building-community"></i> 파트 관리</button>
-        <button class="btn-new" onclick="openBulkImport()"><i class="ti ti-table-import"></i> 일괄 등록</button>
         ` : '<span style="font-size:12px;color:var(--th);align-self:center">조회 전용 (수정 권한: 운영총괄·인사팀)</span>'}
       </div>
     </div>
@@ -3359,7 +3358,7 @@ async function openBulkAddUser() {
 
       <div style="font-size:12px;color:var(--ts);background:var(--crm);border-radius:8px;padding:10px 13px;margin-bottom:14px;line-height:1.7">
         한 번에 여러 명을 등록합니다. 각 행에 직접 입력하거나, 엑셀/시트에서 <strong>11개 열을 복사해 표에 붙여넣기(Ctrl+V / Cmd+V)</strong> 하세요.<br>
-        <span style="color:var(--th)">열 순서: 소속매장 · 이름 · 고용형태 · 주 근무일수 · 계약시간(h) · 휴게(분) · 직위 · 입사일 · 퇴사일 · 연락처 · 파트</span><br>
+        <span style="color:var(--th)">열 순서: 이름 · 소속매장 · 직위 · 고용형태 · 주 근무일수 · 계약시간(h) · 휴게(분) · 입사일 · 연락처 · 이메일 · 파트</span><br>
         초기 비밀번호: <strong>bnz1234</strong> (공통 · 자동 부여) · <strong>입사일 필수</strong> · 계약직/PT는 계약시간 필수 · <strong>계약직은 퇴사일 필수</strong>(계약직 선택 시 8h/60분 자동입력)
       </div>
 
@@ -3369,15 +3368,14 @@ async function openBulkAddUser() {
             <tr style="background:var(--crm)">
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">이름 *</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">소속 매장 *</th>
-              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">고용 형태 *</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">직위 *</th>
-              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">계약일 수(D)</th>
+              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">고용 형태 *</th>
+              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">주 근무일수</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">계약시간(h)</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">휴게(분)</th>
-              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">이메일</th>
-              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">연락처</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">입사일 *</th>
-              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">퇴사일</th>
+              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">연락처</th>
+              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">이메일</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">파트</th>
             </tr>
           </thead>
@@ -3433,60 +3431,41 @@ function addBulkRow() {
       <input class="form-input" id="b_name_${idx}" placeholder="홍길동" style="padding:5px 8px;font-size:12px"/>
     </td>
     <td style="padding:4px;border:0.5px solid var(--crd)">
-      <select class="form-input" id="b_store_${idx}" style="padding:5px 8px;font-size:12px">
-        ${storeOpts}
-      </select>
+      <select class="form-input" id="b_store_${idx}" style="padding:5px 8px;font-size:12px">${storeOpts}</select>
     </td>
-      <td style="padding:4px;border:0.5px solid var(--crd)">
+    <td style="padding:4px;border:0.5px solid var(--crd)">
+      <select class="form-input" id="b_role_${idx}" style="padding:5px 8px;font-size:12px">${roleOpts}</select>
+    </td>
+    <td style="padding:4px;border:0.5px solid var(--crd)">
       <select class="form-input" id="b_emp_${idx}" onchange="toggleBulkPt(${idx},this.value)" style="padding:5px 8px;font-size:12px">
-        <option value="fulltime">정규직</option>
-        <option value="contract">계약직</option>
-        <option value="parttime">PT</option>
-      </select>
-      </td>
-      <td style="padding:4px;border:0.5px solid var(--crd)">
-      <select class="form-input" id="b_role_${idx}" style="padding:5px 8px;font-size:12px">
-        ${roleOpts}
-      </select>
-    </td>
-     <td style="padding:4px;border:0.5px solid var(--crd)">
-     <select class="form-input" id="b_days_${idx}" disabled style="padding:5px 8px;font-size:12px;width:72px;background:var(--crm)">
-        <option value="">선택</option>
-        <option value="1">1일</option><option value="2">2일</option><option value="3">3일</option>
-        <option value="4">4일</option><option value="5">5일</option><option value="6">6일</option>
+        <option value="fulltime">정규직</option><option value="contract">계약직</option><option value="parttime">PT</option>
       </select>
     </td>
     <td style="padding:4px;border:0.5px solid var(--crd)">
-      <input class="form-input" type="number" id="b_pth_${idx}" placeholder="-" min="1" max="12" step="0.5"
-        style="padding:5px 8px;font-size:12px;width:60px;background:var(--crm)" disabled
-        oninput="calcBulkNet(${idx})"/>
+      <select class="form-input" id="b_days_${idx}" disabled style="padding:5px 8px;font-size:12px;width:72px;background:var(--crm)">
+        <option value="">선택</option><option value="1">1일</option><option value="2">2일</option><option value="3">3일</option><option value="4">4일</option><option value="5">5일</option><option value="6">6일</option>
+      </select>
     </td>
     <td style="padding:4px;border:0.5px solid var(--crd)">
-      <input class="form-input" type="number" id="b_brk_${idx}" placeholder="60" min="0" max="120" step="15"
-        style="padding:5px 8px;font-size:12px;width:60px;background:var(--crm)" disabled
-        oninput="calcBulkNet(${idx})"/>
+      <input class="form-input" type="number" id="b_pth_${idx}" placeholder="-" min="1" max="12" step="0.5" style="padding:5px 8px;font-size:12px;width:60px;background:var(--crm)" disabled oninput="calcBulkNet(${idx})"/>
     </td>
     <td style="padding:4px;border:0.5px solid var(--crd)">
-      <input class="form-input" id="b_email_${idx}" placeholder="email@bonanza.kr" type="email" style="padding:5px 8px;font-size:12px"/>
-    </td>
-    <td style="padding:4px;border:0.5px solid var(--crd)">
-      <input class="form-input" id="b_phone_${idx}" placeholder="010-0000-0000" style="padding:5px 8px;font-size:12px"/>
+      <input class="form-input" type="number" id="b_brk_${idx}" placeholder="60" min="0" max="120" step="15" style="padding:5px 8px;font-size:12px;width:60px;background:var(--crm)" disabled oninput="calcBulkNet(${idx})"/>
     </td>
     <td style="padding:4px;border:0.5px solid var(--crd)">
       <input class="form-input" type="date" id="b_hire_${idx}" style="padding:5px 8px;font-size:12px"/>
     </td>
     <td style="padding:4px;border:0.5px solid var(--crd)">
-      <input class="form-input" type="date" id="b_retire_${idx}" title="계약직은 필수" style="padding:5px 8px;font-size:12px"/>
+      <input class="form-input" id="b_phone_${idx}" placeholder="010-0000-0000" style="padding:5px 8px;font-size:12px"/>
     </td>
     <td style="padding:4px;border:0.5px solid var(--crd)">
-      <select class="form-input" id="b_part_${idx}" style="padding:5px 8px;font-size:12px">
-        ${partOpts}
-      </select>
+      <input class="form-input" id="b_email_${idx}" placeholder="email@bonanza.kr" type="email" style="padding:5px 8px;font-size:12px"/>
+    </td>
+    <td style="padding:4px;border:0.5px solid var(--crd)">
+      <select class="form-input" id="b_part_${idx}" style="padding:5px 8px;font-size:12px">${partOpts}</select>
     </td>
     <td style="padding:4px;border:0.5px solid var(--crd);text-align:center">
-      <button onclick="removeBulkRow(${idx})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:14px" title="행 삭제">
-        <i class="ti ti-trash"></i>
-      </button>
+      <button onclick="removeBulkRow(${idx})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:14px" title="행 삭제"><i class="ti ti-trash"></i></button>
     </td>`;
   tbody.appendChild(tr);
 }
@@ -3506,12 +3485,10 @@ function toggleBulkPt(idx, val) {
   const days = document.getElementById('b_days_' + idx);
   const daysOn = (val === 'parttime');
   if (days) { days.disabled = !daysOn; days.style.background = daysOn ? 'var(--cr)' : 'var(--crm)'; if (!daysOn) days.value = ''; }
-  const rt = document.getElementById('b_retire_' + idx);
   if (val === 'contract') {
-    if (!ptH.value) ptH.value = 8;
-    if (!brk.value || brk.value === '30') brk.value = 60;
-    if (rt) rt.style.borderColor = 'var(--rd)';
-  } else if (rt) { rt.style.borderColor = ''; }
+    if (!ptH.value) ptH.value = 8;      // 계약직 기본 계약시간 8h
+    if (!brk.value || brk.value === '30') brk.value = 60;  // 휴게 60분
+  }
   if (isPT) { ptH.focus(); }
 }
 
@@ -3524,7 +3501,7 @@ function calcBulkNet(idx) {
 }
 
 // ── 엑셀/스프레드시트 붙여넣기(TSV) → 일괄 표 자동 채우기 ──
-const BULK_COLS = 12; // 이름·소속매장·고용형태·직위·주근무일수·계약시간·휴게·이메일·연락처·입사일·퇴사일·파트
+const BULK_COLS = 11; // 이름·소속매장·직위·고용형태·주근무일수·계약시간·휴게·입사일·연락처·이메일·파트
 function bulkRowIds() {
   const tbody = document.getElementById('bulkTbody');
   if (!tbody) return [];
@@ -3563,6 +3540,7 @@ function empValFromText(text) {
 }
 function fillBulkRow(rowId, cols) {
   const setVal = (pfx, v) => { const el = document.getElementById(pfx + rowId); if (el && v != null && String(v).trim() !== '') el.value = String(v).trim(); };
+  // 열 순서: 0이름 1소속매장 2직위 3고용형태 4주근무일수 5계약시간 6휴게 7입사일 8연락처 9이메일 10파트
   setVal('b_name_', cols[0]);
   setSelByText(document.getElementById('b_store_' + rowId), cols[1]);
   const rk = roleKeyFromText(cols[2]);
@@ -3570,23 +3548,21 @@ function fillBulkRow(rowId, cols) {
   const ev = empValFromText(cols[3]);
   const empEl = document.getElementById('b_emp_' + rowId);
   if (ev && empEl) { empEl.value = ev; toggleBulkPt(rowId, ev); }
+  if (ev === 'parttime') {
+    const dEl = document.getElementById('b_days_' + rowId);
+    const dv = (cols[4] || '').replace(/[^0-9]/g, '');
+    if (dEl && dv) dEl.value = dv;
+  }
   if (ev === 'parttime' || ev === 'contract') {
-    setVal('b_pth_', cols[4]);
-    setVal('b_brk_', cols[5]);
-    if (ev === 'parttime') {
-      const dEl = document.getElementById('b_days_' + rowId);
-      const dv = (cols[6] || '').replace(/[^0-9]/g, '');
-      if (dEl && dv) dEl.value = dv;
-    }
+    setVal('b_pth_', cols[5]);
+    setVal('b_brk_', cols[6]);
     calcBulkNet(rowId);
   }
-  setVal('b_email_', cols[7]);
-  setVal('b_phone_', cols[8]);
-  const hv = normBulkDate(cols[9]);
+  const hv = normBulkDate(cols[7]);
   if (hv) { const he = document.getElementById('b_hire_' + rowId); if (he) he.value = hv; }
-  const rv = normBulkDate(cols[10]);
-  if (rv) { const re2 = document.getElementById('b_retire_' + rowId); if (re2) re2.value = rv; }
-  setSelByText(document.getElementById('b_part_' + rowId), cols[11]);
+  setVal('b_phone_', cols[8]);
+  setVal('b_email_', cols[9]);
+  setSelByText(document.getElementById('b_part_' + rowId), cols[10]);
 }
 function handleBulkPaste(e) {
   const cd = e.clipboardData || window.clipboardData;
@@ -3595,14 +3571,13 @@ function handleBulkPaste(e) {
   if (!raw || (raw.indexOf('\t') === -1 && raw.indexOf('\n') === -1)) return;
   e.preventDefault();
 
-  // 빈 줄 무시 로직 (공백만 있는 줄 스킵)
-  const lines = raw.replace(/\r/g, '').split('\n').filter(l => l.trim().length > 0);
-  if (lines.length === 0) return;
-  const parsed = lines.map(l => l.split('\t'));
-
-  // 11개 열이 안 될 경우 경고
-  if (parsed.some(r => r.length < 11)) {
-    alert('항목이 부족합니다. 복사한 엑셀이 11개 열인지 확인해 주세요.\n\n[필수 순서]: 이름 · 소속매장 · 고용형태 · 주근무일수 · 계약시간 · 휴게 · 직위 · 입사일 · 퇴사일 · 연락처 · 파트');
+  // 행 전체가 공란(빈 문자열/탭만)인 줄은 오류 없이 스킵 (엑셀 구분용 빈 줄 대응)
+  const lines = raw.replace(/\r/g, '').split('\n');
+  const parsed = lines.map(l => l.split('\t')).filter(cells => cells.some(c => c.trim() !== ''));
+  if (parsed.length === 0) return;
+  // 열 개수 검증 — 시스템 폼 항목(11개)과 불일치 시 차단
+  if (parsed.some(r => r.length !== BULK_COLS)) {
+    alert('항목이 일치하지 않습니다. 복사한 데이터를 확인해 주세요.\n\n필요 열(11개): 이름 · 소속매장 · 직위 · 고용형태 · 주근무일수 · 계약시간 · 휴게(분) · 입사일 · 연락처 · 이메일 · 파트');
     return;
   }
 
@@ -3654,7 +3629,6 @@ async function submitBulkAdd() {
     const ptWrk = needsHours ? parseFloat(document.getElementById('b_pth_' + rowId)?.value || 0) : null;
     const ptBrk = needsHours ? parseInt(document.getElementById('b_brk_' + rowId)?.value || 30) : null;
     const ptDays = (emp === 'parttime') ? (parseInt(document.getElementById('b_days_' + rowId)?.value || 0) || null) : null;
-    const retire = document.getElementById('b_retire_' + rowId)?.value || null;
     // 총 체류시간 = 계약근로 + 휴게
   const ptNet = (ptWrk && ptBrk != null) ? Math.round((ptWrk + ptBrk/60)*100)/100 : null;
 
@@ -3664,9 +3638,6 @@ async function submitBulkAdd() {
     if (needsHours && (!ptWrk || ptWrk <= 0)) {
       errors.push(`${name}: 계약직·PT 계약시간 미입력`); failed++; continue;
     }
-    if (emp === 'contract' && !retire) {
-      errors.push(`${name}: 계약직 퇴사일 미입력`); failed++; continue;
-    }
 
     const newCode = 'BCK-' + String(++__codeMax).padStart(3,'0');
     const tempPw  = 'bnz' + newCode.replace('BCK-','').padStart(4,'0');
@@ -3674,8 +3645,7 @@ async function submitBulkAdd() {
       code: newCode, name, store, role,
       password_hash: tempPw, pw_set: false,
       email: email||null, phone: phone||null, hire_date: hire,
-      retire_date: retire||null,
-      active: (!retire || retire >= today), part,
+      active: true, part,
       employment_type: emp,
       pt_work_hours: ptWrk,
       pt_break_minutes: ptBrk,
@@ -3850,39 +3820,7 @@ async function openBulkImport(){
 
 let bulkRowCnt=0;
 // (중복 제거됨)
-function fillBulkRow(rowId, cols) {
-  const setVal = (pfx, v) => { const el = document.getElementById(pfx + rowId); if (el && v != null && String(v).trim() !== '') el.value = String(v).trim(); };
-
-  // 0:이름, 1:매장, 2:고용형태, 3:주근무일수, 4:계약시간, 5:휴게, 6:직위, 7:입사일, 8:퇴사일, 9:연락처, 10:파트
-   setVal('b_name_', cols[0]);
-   setSelByText(document.getElementById('b_store_' + rowId), cols[1]);
-  const ev = empValFromText(cols[2]);
-  const empEl = document.getElementById('b_emp_' + rowId);
-  if (ev && empEl) { empEl.value = ev; toggleBulkPt(rowId, ev); }
-
-  if (ev === 'parttime') {
-    const dv = (cols[3] || '').replace(/[^0-9]/g, '');
-    if (dv) setVal('b_days_', dv);
-  }
-
-  if (ev === 'parttime' || ev === 'contract') {
-    setVal('b_pth_', cols[4]);
-    setVal('b_brk_', cols[5]);
-    calcBulkNet(rowId);
-  }
-
-  const rk = roleKeyFromText(cols[6]);
-  if (rk) { const re = document.getElementById('b_role_' + rowId); if (re) re.value = rk; }
-
-  const hv = normBulkDate(cols[7]);
-  if (hv) setVal('b_hire_', hv);
-
-  const rv = normBulkDate(cols[8]);
-  if (rv) setVal('b_retire_', rv);
-
-  setVal('b_phone_', cols[9]);
-  setSelByText(document.getElementById('b_part_' + rowId), cols[10]);
-}
+// (fillBulkRow 중복 정의 제거됨 — 위의 단일 정의 사용)
 
 const roleMap={'대표':'ceo','이사':'executive_director','총괄':'admin','부서담당':'dept','매니저':'manager','팀원':'member','바리스타':'member','파티쉐':'member','구매':'dept','인사':'dept'};
 async function submitBulk(){
