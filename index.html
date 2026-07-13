@@ -3370,8 +3370,8 @@ async function openBulkAddUser() {
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">이름 *</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">소속 매장 *</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">고용 형태 *</th>
-              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">계약일 수(D)</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">직위 *</th>
+              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">계약일 수(D)</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">계약시간(h)</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">휴게(분)</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">이메일</th>
@@ -3422,7 +3422,7 @@ function addBulkRow() {
     ? window.__roleOptions.map(r => `<option value="${r.key}">${r.label}</option>`).join('')
     : `<option value="ceo">대표</option>
        <option value="executive_director">이사</option>
-       <option value="pdept">부서담당</option>
+       <option value="dept">부서담당</option>
        <option value="manager">매니저</option>
        <option value="member" selected>팀원</option>`;
 
@@ -3443,6 +3443,11 @@ function addBulkRow() {
         <option value="contract">계약직</option>
         <option value="parttime">PT</option>
       </select>
+      </td>
+      <td style="padding:4px;border:0.5px solid var(--crd)">
+      <select class="form-input" id="b_role_${idx}" style="padding:5px 8px;font-size:12px">
+        ${roleOpts}
+      </select>
     </td>
      <td style="padding:4px;border:0.5px solid var(--crd)">
      <select class="form-input" id="b_days_${idx}" disabled style="padding:5px 8px;font-size:12px;width:72px;background:var(--crm)">
@@ -3452,17 +3457,12 @@ function addBulkRow() {
       </select>
     </td>
     <td style="padding:4px;border:0.5px solid var(--crd)">
-      <select class="form-input" id="b_role_${idx}" style="padding:5px 8px;font-size:12px">
-        ${roleOpts}
-      </select>
-    </td>
-    <td style="padding:4px;border:0.5px solid var(--crd)">
       <input class="form-input" type="number" id="b_pth_${idx}" placeholder="-" min="1" max="12" step="0.5"
         style="padding:5px 8px;font-size:12px;width:60px;background:var(--crm)" disabled
         oninput="calcBulkNet(${idx})"/>
     </td>
     <td style="padding:4px;border:0.5px solid var(--crd)">
-      <input class="form-input" type="number" id="b_brk_${idx}" placeholder="30" min="0" max="120" step="15"
+      <input class="form-input" type="number" id="b_brk_${idx}" placeholder="60" min="0" max="120" step="15"
         style="padding:5px 8px;font-size:12px;width:60px;background:var(--crm)" disabled
         oninput="calcBulkNet(${idx})"/>
     </td>
@@ -3524,7 +3524,7 @@ function calcBulkNet(idx) {
 }
 
 // ── 엑셀/스프레드시트 붙여넣기(TSV) → 일괄 표 자동 채우기 ──
-const BULK_COLS = 12; // 이름·소속매장·직위·고용형태·계약시간·휴게·주근무일수·이메일·연락처·입사일·퇴사일·파트
+const BULK_COLS = 12; // 이름·소속매장·고용형태·직위·주근무일수·계약시간·휴게·이메일·연락처·입사일·퇴사일·파트
 function bulkRowIds() {
   const tbody = document.getElementById('bulkTbody');
   if (!tbody) return [];
@@ -3602,7 +3602,7 @@ function handleBulkPaste(e) {
 
   // 11개 열이 안 될 경우 경고
   if (parsed.some(r => r.length < 11)) {
-    alert('항목이 부족합니다. 복사한 엑셀이 11개 열인지 확인해 주세요.\n\n[필수 순서]: 소속매장 · 이름 · 고용형태 · 주근무일수 · 계약시간 · 휴게 · 직위 · 입사일 · 퇴사일 · 연락처 · 파트');
+    alert('항목이 부족합니다. 복사한 엑셀이 11개 열인지 확인해 주세요.\n\n[필수 순서]: 이름 · 소속매장 · 고용형태 · 주근무일수 · 계약시간 · 휴게 · 직위 · 입사일 · 퇴사일 · 연락처 · 파트');
     return;
   }
 
@@ -3821,7 +3821,7 @@ async function openBulkImport(){
   document.getElementById('catList').innerHTML=`
     <div class="hint-box" style="background:var(--gnb);border:0.5px solid var(--gn);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--gn);margin-bottom:12px">
       아래 표에 직접 입력하거나, Google Sheets/Excel에서 복사 후 이름 첫 셀 클릭 → Cmd+V 붙여넣기<br>
-      직위: <strong>매니저/바리스타/파티쉐/구매팀/인사팀</strong> | 날짜: YYYY-MM-DD | 초기 비밀번호: 자동(bnz+코드숫자)
+      직위: <strong>대표/이사/부서담당/매니저/팀원</strong> | 날짜: YYYY-MM-DD | 초기 비밀번호: 자동(bnz+코드숫자)
     </div>
     <div style="overflow-x:auto;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:8px">
       <table style="width:100%;border-collapse:collapse">
@@ -3853,10 +3853,9 @@ let bulkRowCnt=0;
 function fillBulkRow(rowId, cols) {
   const setVal = (pfx, v) => { const el = document.getElementById(pfx + rowId); if (el && v != null && String(v).trim() !== '') el.value = String(v).trim(); };
 
-  // 0:매장, 1:이름, 2:고용형태, 3:주근무일수, 4:계약시간, 5:휴게, 6:직위, 7:입사일, 8:퇴사일, 9:연락처, 10:파트
-  setSelByText(document.getElementById('b_store_' + rowId), cols[0]);
-  setVal('b_name_', cols[1]);
-
+  // 0:이름, 1:매장, 2:고용형태, 3:주근무일수, 4:계약시간, 5:휴게, 6:직위, 7:입사일, 8:퇴사일, 9:연락처, 10:파트
+   setVal('b_name_', cols[0]);
+   setSelByText(document.getElementById('b_store_' + rowId), cols[1]);
   const ev = empValFromText(cols[2]);
   const empEl = document.getElementById('b_emp_' + rowId);
   if (ev && empEl) { empEl.value = ev; toggleBulkPt(rowId, ev); }
@@ -3885,7 +3884,7 @@ function fillBulkRow(rowId, cols) {
   setSelByText(document.getElementById('b_part_' + rowId), cols[10]);
 }
 
-const roleMap={'대표':'ceo','이사':'executive_director','운영팀':'admin','부서담당':'dept','매니저':'manager','팀원':'member','바리스타':'member','파티쉐':'member','구매팀':'dept','인사팀':'dept'};
+const roleMap={'대표':'ceo','이사':'executive_director','총괄':'admin','부서담당':'dept','매니저':'manager','팀원':'member','바리스타':'member','파티쉐':'member','구매':'dept','인사':'dept'};
 async function submitBulk(){
   if(!canEditStaff()){alert('등록 권한이 없습니다.');return;}
   const tbody=document.getElementById('bulkTbody');
