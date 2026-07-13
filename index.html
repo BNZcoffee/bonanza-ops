@@ -335,11 +335,6 @@ textarea.form-input{min-height:120px;resize:vertical}
     <input type="text" id="loginName" placeholder="이름 (예: 홍길동)" autocomplete="name" />
     <input type="date" id="loginHire" style="width:100%;border:0.5px solid var(--crd);border-radius:8px;padding:10px 14px;font-size:14px;color:var(--tm);background:var(--cr);margin-bottom:10px;outline:none;font-family:inherit" />
     <input type="password" id="loginPw" placeholder="비밀번호" autocomplete="current-password" />
-    <!-- 동명이인 분기: 코드 추가 입력 -->
-    <div id="dupCodeRow" style="display:none">
-      <div style="font-size:12px;color:var(--rd);margin-bottom:6px;text-align:left">동일 이름의 계정이 여러 개입니다. 운영팀에 문의하여 본인 식별 코드를 확인해 주세요.</div>
-      <input type="text" id="loginCodeFallback" placeholder="직원 식별 코드 (운영팀 문의)" style="text-transform:uppercase" />
-    </div>
     <label class="autologin-row">
       <input type="checkbox" id="autoLogin" style="width:auto;margin:0"> 이름·입사일 기억하기
     </label>
@@ -753,26 +748,8 @@ async function doLogin() {
     err.textContent = '일치하는 계정이 없습니다. 이름 또는 입사일을 확인해 주세요.'; return;
   }
 
-  let data;
-
-  if (rows.length === 1) {
-    // 단일 매칭
-    document.getElementById('dupCodeRow').style.display = 'none';
-    data = rows[0];
-  } else {
-    // 동명이인: 코드 추가 입력 필요
-    const codeRow = document.getElementById('dupCodeRow');
-    const codeInput = document.getElementById('loginCodeFallback');
-    const codeVal = (codeInput?.value||'').trim().toUpperCase();
-    if (!codeVal) {
-      codeRow.style.display = '';
-      codeInput.focus();
-      err.textContent = '';
-      return;
-    }
-    data = rows.find(r => r.code === codeVal);
-    if (!data) { err.textContent = '직원 코드가 일치하지 않습니다.'; return; }
-  }
+  // 이름+입사일 조합은 유일하므로 즉시 통과 (동명이인 코드 분기 폐지)
+  const data = rows[0];
 
   // 퇴사일 지난 경우 로그인 즉시 차단
   const loginToday = todayKST();
@@ -1158,12 +1135,10 @@ async function doLogout() {
   const hireEl = document.getElementById('loginHire');
   const pwEl   = document.getElementById('loginPw');
   const errEl  = document.getElementById('loginErr');
-  const dupRow = document.getElementById('dupCodeRow');
   if (nameEl) nameEl.value = '';
   if (hireEl) hireEl.value = '';
   if (pwEl)   pwEl.value = '';
   if (errEl)  errEl.textContent = '';
-  if (dupRow) dupRow.style.display = 'none';
 }
 
 // ── CATEGORIES ────────────────────────────────────
@@ -1464,6 +1439,7 @@ function goPage(page) {
   } else if (page === 'reqdetail') {
     renderReqDetail(area);
   } else if (page === 'reqadmin') {
+    if (!isAdminGroup()) { area.innerHTML = '<div style="text-align:center;padding:50px;color:var(--th)">접근 권한이 없습니다.</div>'; return; }
     const nb = document.getElementById('nav-reqadmin');
     if (nb) nb.classList.add('active');
     renderReqAdmin(area);
@@ -3030,6 +3006,12 @@ function togglePtFields(val) {
   // 계약직: 퇴사일(계약 종료일) 필수 표시
   const req = document.getElementById('eu_retire_req');
   if (req) req.style.display = (val === 'contract') ? 'inline' : 'none';
+  // 시급·주근무일수는 PT(시간제) 전용 — 계약직·정규직은 숨김
+  const ptOnly = (val === 'parttime') ? '' : 'none';
+  const wageW = document.getElementById('eu_wage_wrap');
+  const daysW = document.getElementById('eu_days_wrap');
+  if (wageW) wageW.style.display = ptOnly;
+  if (daysW) daysW.style.display = ptOnly;
   // 실 근로시간 자동 계산
   calcPtNet();
 }
@@ -3130,13 +3112,13 @@ async function openEditUser(userId){
           </div>
           <div style="font-size:10px;color:var(--th);margin-top:3px">= 근로+휴게 (근무조 매칭 기준)</div>
         </div>
-        <div><label class="form-label">시급 <span style="font-size:9px;color:var(--th)">(원/h)</span></label>
+        <div id="eu_wage_wrap"><label class="form-label">시급 <span style="font-size:9px;color:var(--th)">(원/h)</span></label>
           <div style="display:flex;align-items:center;gap:4px">
             <input class="form-input" type="number" id="eu_pt_wage" value="${u?.pt_hourly_wage||''}" placeholder="예: 10030" min="0" step="10" style="width:100px"/>
             <span style="font-size:12px;color:var(--ts)">원</span>
           </div>
         </div>
-        <div><label class="form-label">주 근무일수 <span style="color:var(--rd)">*</span></label>
+        <div id="eu_days_wrap"><label class="form-label">주 근무일수 <span style="color:var(--rd)">*</span></label>
           <div style="display:flex;align-items:center;gap:4px">
             <select class="form-input" id="eu_pt_days" style="width:80px">
               <option value="">선택</option>
@@ -3287,9 +3269,9 @@ async function submitEditUser(){
     pt_work_hours: ptWorkHours,
     pt_break_minutes: ptBreakMin,
     pt_hours_per_day: ptNetHours,  // 총 체류시간 → 근무조 매칭 기준
-    pt_hourly_wage: needsContractHours
+    pt_hourly_wage: employmentType === 'parttime'
       ? (parseFloat(document.getElementById('eu_pt_wage')?.value||0)||null) : null,
-    pt_weekly_days: needsContractHours
+    pt_weekly_days: employmentType === 'parttime'
       ? (parseInt(document.getElementById('eu_pt_days')?.value||0)||null) : null,
     sub_stores: window.__tempSubStores?.length ? window.__tempSubStores : null
   };
@@ -3521,7 +3503,8 @@ function toggleBulkPt(idx, val) {
   ptH.disabled = !isPT; ptH.style.background = isPT ? 'var(--cr)' : 'var(--crm)';
   brk.disabled = !isPT; brk.style.background = isPT ? 'var(--cr)' : 'var(--crm)';
   const days = document.getElementById('b_days_' + idx);
-  if (days) { days.disabled = !isPT; days.style.background = isPT ? 'var(--cr)' : 'var(--crm)'; }
+  const daysOn = (val === 'parttime');
+  if (days) { days.disabled = !daysOn; days.style.background = daysOn ? 'var(--cr)' : 'var(--crm)'; if (!daysOn) days.value = ''; }
   const rt = document.getElementById('b_retire_' + idx);
   if (val === 'contract') {
     if (!ptH.value) ptH.value = 8;
@@ -3589,9 +3572,11 @@ function fillBulkRow(rowId, cols) {
   if (ev === 'parttime' || ev === 'contract') {
     setVal('b_pth_', cols[4]);
     setVal('b_brk_', cols[5]);
-    const dEl = document.getElementById('b_days_' + rowId);
-    const dv = (cols[6] || '').replace(/[^0-9]/g, '');
-    if (dEl && dv) dEl.value = dv;
+    if (ev === 'parttime') {
+      const dEl = document.getElementById('b_days_' + rowId);
+      const dv = (cols[6] || '').replace(/[^0-9]/g, '');
+      if (dEl && dv) dEl.value = dv;
+    }
     calcBulkNet(rowId);
   }
   setVal('b_email_', cols[7]);
@@ -3656,7 +3641,7 @@ async function submitBulkAdd() {
     const needsHours = (emp === 'parttime' || emp === 'contract');
     const ptWrk = needsHours ? parseFloat(document.getElementById('b_pth_' + rowId)?.value || 0) : null;
     const ptBrk = needsHours ? parseInt(document.getElementById('b_brk_' + rowId)?.value || 30) : null;
-    const ptDays = needsHours ? (parseInt(document.getElementById('b_days_' + rowId)?.value || 0) || null) : null;
+    const ptDays = (emp === 'parttime') ? (parseInt(document.getElementById('b_days_' + rowId)?.value || 0) || null) : null;
     const retire = document.getElementById('b_retire_' + rowId)?.value || null;
     // 총 체류시간 = 계약근로 + 휴게
   const ptNet = (ptWrk && ptBrk != null) ? Math.round((ptWrk + ptBrk/60)*100)/100 : null;
@@ -6796,7 +6781,7 @@ function applyMenuPermissions() {
   show('nav-reqarchive', arcCanView);
   // 처리 통계: 신청 처리 권한자(운영팀·부서담당·부총괄·총괄)
   show('nav-reqstats', hasPerm('req_process'));
-  show('nav-reqadmin', hasPerm('req_type_manage'));
+  show('nav-reqadmin', isAdminGroup());  // 총괄·부총괄·인사팀·운영팀 전용
   // 업무 보고 섹션 — 권한 키 기반 표시
   const canSeeReports = hasPerm('report_read') || hasPerm('interview_read') || hasPerm('handover_read') || hasPerm('repair_read');
   show('interviewNav', canSeeReports);
