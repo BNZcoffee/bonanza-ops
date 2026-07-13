@@ -323,7 +323,7 @@ textarea.form-input{min-height:120px;resize:vertical}
     <div class="login-logo">Bonanza Coffee Korea</div>
     <div class="login-sub">운영 매뉴얼 시스템</div>
     <div style="font-size:11px;color:var(--th);margin-bottom:14px;line-height:1.6;text-align:left;background:var(--cr);border-radius:8px;padding:8px 11px">
-      ID : 본인 이름 &nbsp;|&nbsp; 입사일 선택<br>PW : <strong>bnz1234</strong> (첫 로그인 후 변경 필수)
+      ID : 본인 이름 &nbsp;|&nbsp; 입사일 선택<br>PW : 첫 로그인은 운영팀 안내 초기비번(bnz+코드) → 슬랙 인증 후 직접 변경
     </div>
     <input type="text" id="loginName" placeholder="이름 (예: 홍길동)" autocomplete="name" />
     <input type="date" id="loginHire" style="width:100%;border:0.5px solid var(--crd);border-radius:8px;padding:10px 14px;font-size:14px;color:var(--tm);background:var(--cr);margin-bottom:10px;outline:none;font-family:inherit" />
@@ -977,22 +977,31 @@ function showAccountGuide(acc) {
   const appUrl = 'https://bnzcoffee.github.io/bonanza-ops/';
   const hireLine = acc.hire_date ? ('입사일(' + acc.hire_date + ')부터') : '오늘부터';
   const subject = '[보난자커피] 운영 매뉴얼 앱 계정 안내';
+  const initPw = initPwFromCode(acc.code);
   const bodyLines = [
     '안녕하세요, 보난자커피 운영팀입니다.',
     '',
     '보난자커피 운영 매뉴얼 앱 계정이 생성되었습니다.',
     '',
-    '■ 내 계정 코드: ' + acc.code,
-    '■ 로그인 가능일: ' + hireLine,
+    '[ 로그인 정보 ]',
+    '· 접속 주소: ' + appUrl,
+    '· 이름: ' + (acc.name||''),
+    '· 소속 매장: ' + (acc.store||''),
+    '· 입사일: ' + (acc.hire_date||'') + ' (로그인 화면에서 달력으로 선택)',
+    '· 첫 로그인 비밀번호: ' + initPw + '  (첫 로그인 후 직접 변경)',
     '',
     '[ 처음 접속하는 방법 ]',
-    '1. 아래 주소로 접속합니다.',
-    '   ' + appUrl,
-    '2. 위 계정 코드를 입력하고, 안내에 따라 비밀번호를 직접 설정합니다. (최초 1회, 같은 비밀번호 2번 입력)',
-    '3. 설정한 비밀번호로 로그인하면 완료됩니다.',
+    '1. 위 주소 접속 → 이름 입력 + 입사일 선택 + 위 첫 비밀번호 입력 후 로그인.',
+    '2. 슬랙 멤버 ID(U로 시작) 입력 화면이 뜹니다.',
+    '3. [인증번호 발송] → 본인 슬랙 DM으로 온 6자리 인증번호 입력.',
+    '4. 새 비밀번호를 직접 설정하면 완료됩니다.',
+    '',
+    '[ 슬랙 멤버 ID 찾는 법 ]',
+    '슬랙 앱 → 본인 프로필 → 점 세 개(⋯ 더보기) → "멤버 ID 복사"',
+    '(U로 시작하는 8~11자리 영문·숫자)',
     '',
     '[ 휴대폰 홈 화면에 추가 (앱처럼 사용) ]',
-    '· 아이폰(Safari): 공유 버튼 → "웹 앱으로 열기" 체크 해제 → "홈 화면에 추가"',
+    '· 아이폰(Safari): 공유 버튼 → "홈 화면에 추가"',
     '· 안드로이드(Chrome): 점 세 개(⋮) → "홈 화면에 추가"',
     '',
     '문의는 운영팀으로 연락 주세요. 감사합니다.',
@@ -1009,10 +1018,10 @@ function showAccountGuide(acc) {
   m.className = 'modal-bg open';
   m.innerHTML = '<div class="modal-inner" style="width:440px;max-width:94vw">' +
     '<div class="modal-title"><i class="ti ti-mail"></i> 계정 등록 완료 — 본인에게 안내</div>' +
-    '<div style="font-size:13px;color:var(--ts);margin-bottom:10px;line-height:1.6">계정이 생성되었습니다. 아래 안내를 <b>' + (acc.name||'') + '</b>님 본인에게만 전달하세요. 초기 비밀번호는 없으며, 본인이 첫 접속 시 직접 설정합니다.</div>' +
+    '<div style="font-size:13px;color:var(--ts);margin-bottom:10px;line-height:1.6">계정이 생성되었습니다. 아래 안내를 <b>' + (acc.name||'') + '</b>님 본인에게만 전달하세요. <b>이름·입사일</b>로 로그인하며, 첫 로그인은 아래 <b>초기 비밀번호</b> 입력 → 슬랙 인증 → 새 비밀번호 설정 순입니다.</div>' +
     '<div style="background:var(--cr);border:0.5px solid var(--crd);border-radius:8px;padding:6px 10px;margin-bottom:10px;font-size:12px">' +
-      '<div>계정 코드: <b>' + acc.code + '</b></div>' +
-      '<div>등록 이메일: <b>' + (emailTo || '(미입력)') + '</b></div>' +
+      '<div>이름: <b>' + (acc.name||'-') + '</b> · 소속: <b>' + (acc.store||'-') + '</b></div>' +
+      '<div>입사일: <b>' + (acc.hire_date||'-') + '</b> · 첫 비밀번호: <b>' + initPw + '</b> (코드 ' + acc.code + ')</div>' +
     '</div>' +
     '<textarea id="acctGuideText" class="form-input" style="min-height:150px;font-size:12px;line-height:1.5" readonly>' + body.replace(/</g,'&lt;') + '</textarea>' +
     '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">' +
@@ -3235,7 +3244,7 @@ async function submitEditUser(){
     const tempPw = initPwFromCode(newCode);
     ({error} = await sb.from('users').insert({...payload,code:newCode,password_hash:tempPw,pw_set:false}));
     if(!error) {
-      showAccountGuide({code:newCode, name:payload.name, email:payload.email, hire_date:payload.hire_date});
+      showAccountGuide({code:newCode, name:payload.name, email:payload.email, hire_date:payload.hire_date, store:payload.store});
     }
   }
   if(error){alert('오류: '+error.message);return;}
