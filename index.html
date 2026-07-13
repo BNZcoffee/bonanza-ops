@@ -3358,8 +3358,8 @@ async function openBulkAddUser() {
       </div>
 
       <div style="font-size:12px;color:var(--ts);background:var(--crm);border-radius:8px;padding:10px 13px;margin-bottom:14px;line-height:1.7">
-        한 번에 여러 명을 등록합니다. 각 행에 직접 입력하거나, 엑셀/시트에서 <strong>10개 열을 복사해 표에 붙여넣기(Ctrl+V / Cmd+V)</strong> 하세요.<br>
-        <span style="color:var(--th)">열 순서: 이름 · 소속매장 · 직위 · 고용형태 · 계약시간 · 휴게(분) · 주근무일수 · 이메일 · 연락처 · 입사일 · 퇴사일 · 파트</span><br>
+        한 번에 여러 명을 등록합니다. 각 행에 직접 입력하거나, 엑셀/시트에서 <strong>11개 열을 복사해 표에 붙여넣기(Ctrl+V / Cmd+V)</strong> 하세요.<br>
+        <span style="color:var(--th)">열 순서: 소속매장 · 이름 · 고용형태 · 주 근무일수 · 계약시간(h) · 휴게(분) · 직위 · 입사일 · 퇴사일 · 연락처 · 파트</span><br>
         초기 비밀번호: <strong>bnz1234</strong> (공통 · 자동 부여) · <strong>입사일 필수</strong> · 계약직/PT는 계약시간 필수 · <strong>계약직은 퇴사일 필수</strong>(계약직 선택 시 8h/60분 자동입력)
       </div>
 
@@ -3367,17 +3367,16 @@ async function openBulkAddUser() {
         <table id="bulkTable" style="border-collapse:collapse;width:100%;font-size:12px">
           <thead>
             <tr style="background:var(--crm)">
-              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">이름 *</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">소속 매장 *</th>
-              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">직위 *</th>
+              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">이름 *</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">고용 형태 *</th>
+              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">주 근무일수 </th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">계약시간(h)</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">휴게(분)</th>
-              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">주 근무일수</th>
-              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">이메일</th>
-              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">연락처</th>
+              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">직위 *</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">입사일 *</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">퇴사일</th>
+              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">연락처</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">파트</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd)"></th>
             </tr>
@@ -3594,18 +3593,20 @@ function handleBulkPaste(e) {
   const cd = e.clipboardData || window.clipboardData;
   if (!cd) return;
   const raw = cd.getData('text');
-  // 표 형태(탭/줄바꿈)가 아니면 일반 붙여넣기 허용
   if (!raw || (raw.indexOf('\t') === -1 && raw.indexOf('\n') === -1)) return;
   e.preventDefault();
+
+  // 빈 줄 무시 로직 (공백만 있는 줄 스킵)
   const lines = raw.replace(/\r/g, '').split('\n').filter(l => l.trim().length > 0);
   if (lines.length === 0) return;
   const parsed = lines.map(l => l.split('\t'));
-  // 열 개수 검증 — 시스템 폼 항목(10개)과 불일치 시 차단
-  if (parsed.some(r => r.length !== BULK_COLS)) {
-    alert('항목이 일치하지 않습니다. 복사한 데이터를 확인해 주세요.\n\n필요 열(12개): 이름 · 소속매장 · 직위 · 고용형태 · 계약시간 · 휴게(분) · 주근무일수 · 이메일 · 연락처 · 입사일 · 퇴사일 · 파트');
+
+  // 11개 열이 안 될 경우 경고
+  if (parsed.some(r => r.length < 11)) {
+    alert('항목이 부족합니다. 복사한 엑셀이 11개 열인지 확인해 주세요.\n\n[필수 순서]: 소속매장 · 이름 · 고용형태 · 주근무일수 · 계약시간 · 휴게 · 직위 · 입사일 · 퇴사일 · 연락처 · 파트');
     return;
   }
-  // 시작 위치: 붙여넣기한 셀이 속한 행부터 (없으면 첫 행)
+
   let startPos = 0;
   const tr = (e.target && e.target.closest) ? e.target.closest('tr') : null;
   if (tr) {
@@ -3850,28 +3851,39 @@ async function openBulkImport(){
 
 let bulkRowCnt=0;
 // (중복 제거됨)
+function fillBulkRow(rowId, cols) {
+  const setVal = (pfx, v) => { const el = document.getElementById(pfx + rowId); if (el && v != null && String(v).trim() !== '') el.value = String(v).trim(); };
 
+  // 0:매장, 1:이름, 2:고용형태, 3:주근무일수, 4:계약시간, 5:휴게, 6:직위, 7:입사일, 8:퇴사일, 9:연락처, 10:파트
+  setSelByText(document.getElementById('b_store_' + rowId), cols[0]);
+  setVal('b_name_', cols[1]);
 
-function handleBulkPaste(e,startRow,startCol){
-  const text=e.clipboardData?.getData('text');
-  if(!text||(!text.includes('\t')&&!text.includes('\n')))return;
-  e.preventDefault();
-  const cols=['name','store','role','hire','retire'];
-  const startIdx=cols.indexOf(startCol);
-  const tbody=document.getElementById('bulkTbody');
-  const rows=Array.from(tbody.querySelectorAll('tr'));
-  const curRowEl=tbody.querySelector('[data-row="'+startRow+'"]')?.closest('tr');
-  const curRowIdx=rows.indexOf(curRowEl);
-  text.trim().split('\n').forEach((line,li)=>{
-    const cells=line.split('\t');
-    let rowEl=curRowIdx+li<rows.length?rows[curRowIdx+li]:null;
-    if(!rowEl){addBulkRow();rowEl=tbody.querySelectorAll('tr')[curRowIdx+li];}
-    cells.forEach((val,ci)=>{
-      const colIdx=startIdx+ci;if(colIdx>=cols.length)return;
-      const inp=rowEl?.querySelector('[data-col="'+cols[colIdx]+'"]');
-      if(inp)inp.value=val.trim();
-    });
-  });
+  const ev = empValFromText(cols[2]);
+  const empEl = document.getElementById('b_emp_' + rowId);
+  if (ev && empEl) { empEl.value = ev; toggleBulkPt(rowId, ev); }
+
+  if (ev === 'parttime') {
+    const dv = (cols[3] || '').replace(/[^0-9]/g, '');
+    if (dv) setVal('b_days_', dv);
+  }
+
+  if (ev === 'parttime' || ev === 'contract') {
+    setVal('b_pth_', cols[4]);
+    setVal('b_brk_', cols[5]);
+    calcBulkNet(rowId);
+  }
+
+  const rk = roleKeyFromText(cols[6]);
+  if (rk) { const re = document.getElementById('b_role_' + rowId); if (re) re.value = rk; }
+
+  const hv = normBulkDate(cols[7]);
+  if (hv) setVal('b_hire_', hv);
+
+  const rv = normBulkDate(cols[8]);
+  if (rv) setVal('b_retire_', rv);
+
+  setVal('b_phone_', cols[9]);
+  setSelByText(document.getElementById('b_part_' + rowId), cols[10]);
 }
 
 const roleMap={'대표':'ceo','이사':'executive_director','운영팀':'admin','부서담당':'dept','매니저':'manager','팀원':'member','바리스타':'member','파티쉐':'member','구매팀':'dept','인사팀':'dept'};
