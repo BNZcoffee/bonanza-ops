@@ -3026,10 +3026,23 @@ async function getNextCode(){
 // PT 필드 토글
 function togglePtFields(val) {
   const wrap = document.getElementById('eu_pt_wrap');
-  if (!wrap) return;
-  wrap.style.display = (val === 'parttime' || val === 'contract') ? 'grid' : 'none';
+  if (wrap) wrap.style.display = (val === 'parttime' || val === 'contract') ? 'grid' : 'none';
+  // 계약직: 퇴사일(계약 종료일) 필수 표시
+  const req = document.getElementById('eu_retire_req');
+  if (req) req.style.display = (val === 'contract') ? 'inline' : 'none';
   // 실 근로시간 자동 계산
   calcPtNet();
+}
+// 고용형태 '변경' 시(사용자 조작): 계약직이면 기본값 프리필(8h/60분·수정 가능)
+function onEmpChange(val) {
+  togglePtFields(val);
+  if (val === 'contract') {
+    const w = document.getElementById('eu_pt_work');
+    const b = document.getElementById('eu_pt_break');
+    if (w && !w.value) w.value = 8;
+    if (b && (!b.value || b.value === '30')) b.value = 60;
+    calcPtNet();
+  }
 }
 function calcPtNet() {
   const work  = parseFloat(document.getElementById('eu_pt_work')?.value  || 0);
@@ -3091,7 +3104,7 @@ async function openEditUser(userId){
         </select>
       </div>
       <div><label class="form-label">고용 형태 <span style="color:var(--rd)">*</span></label>
-        <select class="form-input" id="eu_employment" onchange="togglePtFields(this.value)">
+        <select class="form-input" id="eu_employment" onchange="onEmpChange(this.value)">
           <option value="fulltime"${(u?.employment_type||'fulltime')==='fulltime'?' selected':''}>정규직</option>
           <option value="contract"${u?.employment_type==='contract'?' selected':''}>계약직</option>
           <option value="parttime"${u?.employment_type==='parttime'?' selected':''}>PT (시간제)</option>
@@ -3150,7 +3163,7 @@ async function openEditUser(userId){
       <div><label class="form-label">연락처</label><input class="form-input" id="eu_phone" value="${u?.phone||''}" placeholder="010-0000-0000"/></div>
       <div><label class="form-label">이메일</label><input class="form-input" id="eu_email" value="${u?.email||''}" placeholder="email@bonanza.kr"/></div>
       <div><label class="form-label">입사일 <span style="color:var(--rd)">*</span></label><input class="form-input" type="date" id="eu_hire" value="${u?.hire_date||''}"/></div>
-      <div><label class="form-label">퇴사일 <span style="font-size:10px;color:var(--th)">(익일 자동 비활성)</span></label>
+      <div><label class="form-label">퇴사일 <span id="eu_retire_req" style="color:var(--rd);display:none">*</span><span style="font-size:10px;color:var(--th)">(익일 자동 비활성 · 계약직 필수)</span></label>
         <input class="form-input" type="date" id="eu_retire" value="${u?.retire_date||''}"/>
       </div>
       <div><label class="form-label">파트 <span style="font-size:10px;color:var(--th)">(현장·본사 공통 · 업무신청/근태 담당)</span></label>
@@ -3206,8 +3219,8 @@ async function openEditUser(userId){
     // PT 고용형태 초기화 — DOM이 그려진 후 onchange 이벤트 연결
     const empSel = document.getElementById('eu_employment');
     if (empSel) {
-      empSel.onchange = () => togglePtFields(empSel.value);
-      // 현재 값이 parttime이면 패널 표시
+      empSel.onchange = () => onEmpChange(empSel.value);
+      // 현재 값이 parttime/contract이면 패널·필수표시 초기화(프리필 없음)
       togglePtFields(empSel.value);
     }
   },80);
@@ -3261,6 +3274,9 @@ async function submitEditUser(){
 
   if (needsContractHours && (!ptWorkHours || ptWorkHours <= 0)) {
     alert('계약직·PT 직원은 계약 근로시간을 입력해주세요.'); return;
+  }
+  if (employmentType === 'contract' && !retire) {
+    alert('계약직은 퇴사일(계약 종료일)을 반드시 입력해야 합니다.'); return;
   }
 
   const payload = {
@@ -3361,8 +3377,8 @@ async function openBulkAddUser() {
 
       <div style="font-size:12px;color:var(--ts);background:var(--crm);border-radius:8px;padding:10px 13px;margin-bottom:14px;line-height:1.7">
         한 번에 여러 명을 등록합니다. 각 행에 직접 입력하거나, 엑셀/시트에서 <strong>10개 열을 복사해 표에 붙여넣기(Ctrl+V / Cmd+V)</strong> 하세요.<br>
-        <span style="color:var(--th)">열 순서: 이름 · 소속매장 · 직위 · 고용형태 · 계약시간 · 휴게(분) · 주근무일수 · 이메일 · 연락처 · 입사일 · 파트</span><br>
-        초기 비밀번호: <strong>bnz + 코드번호 4자리</strong> (자동 부여) · <strong>입사일 필수</strong> · 계약직/PT는 계약시간 필수
+        <span style="color:var(--th)">열 순서: 이름 · 소속매장 · 직위 · 고용형태 · 계약시간 · 휴게(분) · 주근무일수 · 이메일 · 연락처 · 입사일 · 퇴사일 · 파트</span><br>
+        초기 비밀번호: <strong>bnz + 코드번호 4자리</strong> (자동 부여) · <strong>입사일 필수</strong> · 계약직/PT는 계약시간 필수 · <strong>계약직은 퇴사일 필수</strong>(계약직 선택 시 8h/60분 자동입력)
       </div>
 
       <div style="overflow-x:auto">
@@ -3379,6 +3395,7 @@ async function openBulkAddUser() {
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">이메일</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">연락처</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">입사일 *</th>
+              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">퇴사일</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">파트</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd)"></th>
             </tr>
@@ -3477,6 +3494,9 @@ function addBulkRow() {
       <input class="form-input" type="date" id="b_hire_${idx}" style="padding:5px 8px;font-size:12px"/>
     </td>
     <td style="padding:4px;border:0.5px solid var(--crd)">
+      <input class="form-input" type="date" id="b_retire_${idx}" title="계약직은 필수" style="padding:5px 8px;font-size:12px"/>
+    </td>
+    <td style="padding:4px;border:0.5px solid var(--crd)">
       <select class="form-input" id="b_part_${idx}" style="padding:5px 8px;font-size:12px">
         ${partOpts}
       </select>
@@ -3502,6 +3522,12 @@ function toggleBulkPt(idx, val) {
   brk.disabled = !isPT; brk.style.background = isPT ? 'var(--cr)' : 'var(--crm)';
   const days = document.getElementById('b_days_' + idx);
   if (days) { days.disabled = !isPT; days.style.background = isPT ? 'var(--cr)' : 'var(--crm)'; }
+  const rt = document.getElementById('b_retire_' + idx);
+  if (val === 'contract') {
+    if (!ptH.value) ptH.value = 8;
+    if (!brk.value || brk.value === '30') brk.value = 60;
+    if (rt) rt.style.borderColor = 'var(--rd)';
+  } else if (rt) { rt.style.borderColor = ''; }
   if (isPT) { ptH.focus(); }
 }
 
@@ -3514,7 +3540,7 @@ function calcBulkNet(idx) {
 }
 
 // ── 엑셀/스프레드시트 붙여넣기(TSV) → 일괄 표 자동 채우기 ──
-const BULK_COLS = 11; // 이름·소속매장·직위·고용형태·계약시간·휴게·주근무일수·이메일·연락처·입사일·파트
+const BULK_COLS = 12; // 이름·소속매장·직위·고용형태·계약시간·휴게·주근무일수·이메일·연락처·입사일·퇴사일·파트
 function bulkRowIds() {
   const tbody = document.getElementById('bulkTbody');
   if (!tbody) return [];
@@ -3572,7 +3598,9 @@ function fillBulkRow(rowId, cols) {
   setVal('b_phone_', cols[8]);
   const hv = normBulkDate(cols[9]);
   if (hv) { const he = document.getElementById('b_hire_' + rowId); if (he) he.value = hv; }
-  setSelByText(document.getElementById('b_part_' + rowId), cols[10]);
+  const rv = normBulkDate(cols[10]);
+  if (rv) { const re2 = document.getElementById('b_retire_' + rowId); if (re2) re2.value = rv; }
+  setSelByText(document.getElementById('b_part_' + rowId), cols[11]);
 }
 function handleBulkPaste(e) {
   const cd = e.clipboardData || window.clipboardData;
@@ -3586,7 +3614,7 @@ function handleBulkPaste(e) {
   const parsed = lines.map(l => l.split('\t'));
   // 열 개수 검증 — 시스템 폼 항목(10개)과 불일치 시 차단
   if (parsed.some(r => r.length !== BULK_COLS)) {
-    alert('항목이 일치하지 않습니다. 복사한 데이터를 확인해 주세요.\n\n필요 열(11개): 이름 · 소속매장 · 직위 · 고용형태 · 계약시간 · 휴게(분) · 주근무일수 · 이메일 · 연락처 · 입사일 · 파트');
+    alert('항목이 일치하지 않습니다. 복사한 데이터를 확인해 주세요.\n\n필요 열(12개): 이름 · 소속매장 · 직위 · 고용형태 · 계약시간 · 휴게(분) · 주근무일수 · 이메일 · 연락처 · 입사일 · 퇴사일 · 파트');
     return;
   }
   // 시작 위치: 붙여넣기한 셀이 속한 행부터 (없으면 첫 행)
@@ -3629,6 +3657,7 @@ async function submitBulkAdd() {
     const ptWrk = needsHours ? parseFloat(document.getElementById('b_pth_' + rowId)?.value || 0) : null;
     const ptBrk = needsHours ? parseInt(document.getElementById('b_brk_' + rowId)?.value || 30) : null;
     const ptDays = needsHours ? (parseInt(document.getElementById('b_days_' + rowId)?.value || 0) || null) : null;
+    const retire = document.getElementById('b_retire_' + rowId)?.value || null;
     // 총 체류시간 = 계약근로 + 휴게
   const ptNet = (ptWrk && ptBrk != null) ? Math.round((ptWrk + ptBrk/60)*100)/100 : null;
 
@@ -3638,6 +3667,9 @@ async function submitBulkAdd() {
     if (needsHours && (!ptWrk || ptWrk <= 0)) {
       errors.push(`${name}: 계약직·PT 계약시간 미입력`); failed++; continue;
     }
+    if (emp === 'contract' && !retire) {
+      errors.push(`${name}: 계약직 퇴사일 미입력`); failed++; continue;
+    }
 
     const newCode = await getNextCode();
     const tempPw  = 'bnz' + newCode.replace('BCK-','').padStart(4,'0');
@@ -3645,7 +3677,8 @@ async function submitBulkAdd() {
       code: newCode, name, store, role,
       password_hash: tempPw, pw_set: false,
       email: email||null, phone: phone||null, hire_date: hire,
-      active: true, part,
+      retire_date: retire||null,
+      active: (!retire || retire >= todayKST()), part,
       employment_type: emp,
       pt_work_hours: ptWrk,
       pt_break_minutes: ptBrk,

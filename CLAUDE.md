@@ -17,7 +17,9 @@
 - 슬랙 발송: Supabase Edge Function `slack-notify` 경유(봇 토큰은 시크릿, 프론트 미노출).
 - 매뉴얼 본문: DB `manual_sections`(audience: user/manager/dept/admin). 코드 렌더 = renderManual().
 - 직원 등록: 단건(openEditUser)·일괄(openBulkAddUser) 입력 항목 100% 일치 유지.
-  고용형태 = 정규직/계약직/PT. 계약직·PT는 계약근로시간·주근무일수 필수.
+  고용형태 = 정규직/계약직/PT. 계약직·PT는 계약근로시간 필수.
+  계약직: 선택 시 계약근로 8h·휴게 60분 자동 프리필(수정 가능), 퇴사일(계약 종료일) 필수.
+  일괄표 열(12): 이름·소속매장·직위·고용형태·계약시간·휴게·주근무일수·이메일·연락처·입사일·퇴사일·파트.
 
 ## 배포 방법
 - 단일 파일 SPA(index.html). 인라인 <script> 추출 후 `node --check`로 검증 → git push(main).
