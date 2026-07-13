@@ -888,7 +888,7 @@ async function applyEmailChange() {
   setTimeout(()=>{ err.textContent=''; err.style.color=''; }, 2500);
 }
 
-// OTP 발송 — 슬랙 DM (notification_settings.slack_bot_token 사용)
+// OTP 발송 — 슬랙 DM (Edge Function slack-notify 경유, 봇 토큰은 서버 시크릿)
 async function sendOtp() {
   const err = document.getElementById('pwStep1Err');
   const slackId = (document.getElementById('pwSlackId').value||'').trim().toUpperCase();
@@ -907,38 +907,17 @@ async function sendOtp() {
   otpExpiry = Date.now() + 10 * 60 * 1000; // 10분
 
   try {
-    const { data: ns } = await sb.from('notification_settings').select('slack_bot_token').single();
-    if (!ns || !ns.slack_bot_token) {
-      err.textContent = '슬랙 봇 토큰이 설정되지 않았습니다. 운영팀에 문의해 주세요.';
-      otpCode = null; otpExpiry = null; return;
-    }
-    let ok = true, ecode = '';
-    try {
-      const res = await fetch('https://slack.com/api/chat.postMessage', {
-        method: 'POST',
-        headers: {
-          'Content-Type':  'application/json; charset=utf-8',
-          'Authorization': 'Bearer ' + ns.slack_bot_token
-        },
-        body: JSON.stringify({
-          channel: slackId,
-          text: '[보난자 커피 운영앱] 첫 로그인 인증번호는 *' + otpCode + '* 입니다. (10분 이내 입력)'
-        })
-      });
-      const j = await res.json();
-      ok = !!j.ok; ecode = j.error || '';
-    } catch(_) {
-      // CORS 등으로 응답 본문을 읽지 못한 경우: 발송은 되었을 수 있으므로 낙관적으로 진행
-      ok = true;
-    }
-    if (!ok) {
+    const j = await slackNotify(slackId, '[보난자 커피 운영앱] 첫 로그인 인증번호는 *' + otpCode + '* 입니다. (10분 이내 입력)');
+    if (!j || !j.ok) {
       const map = {
-        channel_not_found: '멤버 ID를 찾을 수 없습니다. ID를 다시 확인해 주세요.',
-        user_not_found:    '멤버 ID를 찾을 수 없습니다. ID를 다시 확인해 주세요.',
-        not_in_channel:    '봇이 DM을 보낼 수 없습니다. 운영팀에 문의해 주세요.',
-        account_inactive:  '슬랙 봇 토큰이 비활성 상태입니다. 운영팀에 문의해 주세요.'
+        channel_not_found:   '멤버 ID를 찾을 수 없습니다. ID를 다시 확인해 주세요.',
+        user_not_found:      '멤버 ID를 찾을 수 없습니다. ID를 다시 확인해 주세요.',
+        not_in_channel:      '봇이 DM을 보낼 수 없습니다. 운영팀에 문의해 주세요.',
+        no_session:          '세션이 만료되었습니다. 다시 로그인해 주세요.',
+        invalid_session:     '세션이 만료되었습니다. 다시 로그인해 주세요.',
+        slack_token_not_set: '슬랙 봇 토큰이 설정되지 않았습니다. 운영팀에 문의해 주세요.'
       };
-      err.textContent = '발송 실패: ' + (map[ecode] || ecode || '알 수 없는 오류');
+      err.textContent = '발송 실패: ' + (map[j && j.error] || (j && j.error) || '알 수 없는 오류 (운영팀 문의)');
       otpCode = null; otpExpiry = null; return;
     }
     // STEP2로 전환
@@ -5707,7 +5686,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-07-12';   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-07-13';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -14896,28 +14875,25 @@ async function postAttComment(id){
   renderAttComments(id);
 }
 
+// 슬랙 발송은 Edge Function(slack-notify)이 서버에서 처리 — 봇 토큰은 시크릿, 프론트 미노출
+const SLACK_FN_URL = SUPABASE_URL + '/functions/v1/slack-notify';
+async function slackNotify(channel, text){
+  const token = getSessionToken();
+  if (!token || !channel || !text) return { ok:false, error:'no_session_or_args' };
+  try {
+    // Authorization=anon 키(플랫폼 JWT 검사 통과용) · 실제 인증은 body의 session_token(서버가 검증)
+    const res = await fetch(SLACK_FN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'apikey': SUPABASE_KEY, 'Authorization':'Bearer ' + SUPABASE_KEY },
+      body: JSON.stringify({ channel, text, session_token: token })
+    });
+    return await res.json();
+  } catch(e) { return { ok:false, error:String(e) }; }
+}
+
 async function sendSlackDM(slackMemberId, msg) {
   if (!slackMemberId) return;
-  const { data: ns } = await sb.from('notification_settings')
-    .select('slack_bot_token').single();
-  if (!ns?.slack_bot_token) return;
-
-  try {
-    await fetch('https://slack.com/api/chat.postMessage', {
-      method: 'POST',
-      headers: {
-        'Content-Type':  'application/json; charset=utf-8',
-        'Authorization': 'Bearer ' + ns.slack_bot_token
-      },
-      body: JSON.stringify({
-        channel: slackMemberId,
-        text:    msg,
-        unfurl_links: true  // 링크 미리보기 활성화
-      })
-    });
-  } catch(e) {
-    console.warn('슬랙 DM 오류:', e);
-  }
+  try { await slackNotify(slackMemberId, msg); } catch(e) { console.warn('슬랙 DM 오류:', e); }
 }
 
 // createNotification 이후 슬랙 DM도 함께 발송하는 wrapper
