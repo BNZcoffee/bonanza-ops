@@ -111,6 +111,13 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--cr);color:var(
 .detail-body ul{list-style-type:disc}
 .detail-body ol{list-style-type:decimal}
 .detail-body li{margin:3px 0}
+.manual-body ul,.manual-body ol{padding-left:1.5em;margin:8px 0}
+.manual-body ul{list-style-type:disc}
+.manual-body ol{list-style-type:decimal}
+.manual-body li{margin:4px 0}
+.manual-body ul ul,.manual-body ol ol,.manual-body ul ol,.manual-body ol ul{margin:4px 0}
+.qs-card ol,.qs-card ul{padding-left:1.4em;margin:6px 0}
+.qs-card li{margin:4px 0;line-height:1.7}
 .detail-body h1{font-size:1.4em;font-weight:700;margin:10px 0 4px}
 .detail-body h2{font-size:1.2em;font-weight:700;margin:8px 0 4px}
 .detail-body h3{font-size:1.05em;font-weight:700;margin:6px 0 4px}
@@ -502,16 +509,16 @@ textarea.form-input{min-height:120px;resize:vertical}
       </div>
     </div>
 
-    <!-- 멤버 ID (선택) -->
+    <!-- 멤버 ID (필수) -->
     <div style="margin-bottom:6px">
-      <label class="form-label">슬랙 멤버 ID <span style="color:var(--th);font-weight:400">(선택 — 개인 DM 알림용)</span></label>
+      <label class="form-label">슬랙 멤버 ID <span style="color:var(--rd);font-weight:400">(필수 — 업무·근태·공지 알림 수신)</span></label>
       <input class="form-input" id="slackMemberId" placeholder="예: U012AB3CD" />
       <div style="font-size:11px;color:var(--th);margin-top:5px;line-height:1.6;background:var(--cr);border-radius:7px;padding:8px 10px">
         📱 <strong>슬랙 멤버 ID 확인 방법</strong><br>
         슬랙 앱 → 본인 프로필 클릭<br>
         → <strong>다음으로 보기</strong> 우측 <strong>···</strong> 클릭<br>
         → <strong>멤버 ID 복사</strong> (U로 시작하는 8자리)<br>
-        <span style="color:var(--th)">등록 후 공지·업무신청·스케줄 알림이 슬랙 개인 DM으로도 옵니다.</span>
+        <span style="color:var(--th)">앱의 모든 알림(공지·업무신청·근태·스케줄)이 슬랙 DM으로 전송되므로 <b>반드시 등록</b>하세요. 잘못 입력했다면 [내 정보]에서 직접 수정할 수 있습니다.</span>
       </div>
     </div>
 
@@ -3185,7 +3192,7 @@ async function openEditUser(userId){
           <i class="ti ti-calendar-check"></i> 연차 설정
         </button>
       </div>
-    </div>`:`<p style="font-size:11px;color:var(--th);margin-top:8px">직원 코드 자동 부여 · 초기 비밀번호: <strong>bonanza1234</strong></p>`}`;
+    </div>`:`<p style="font-size:11px;color:var(--th);margin-top:8px">직원 코드 자동 부여 · 초기 비밀번호: <strong>bnz1234</strong></p>`}`;
   
   document.getElementById('catModalAddBtn').style.display = 'none';
   document.getElementById('catModalOkBtn').textContent = userId?'수정 완료':'등록';
@@ -3354,7 +3361,7 @@ async function openBulkAddUser() {
 
       <div style="font-size:12px;color:var(--ts);background:var(--crm);border-radius:8px;padding:10px 13px;margin-bottom:14px;line-height:1.7">
         한 번에 여러 명을 등록합니다. 각 행에 직접 입력하거나, 엑셀/시트에서 <strong>10개 열을 복사해 표에 붙여넣기(Ctrl+V / Cmd+V)</strong> 하세요.<br>
-        <span style="color:var(--th)">열 순서: 이름 · 소속매장 · 직위 · 고용형태 · 계약시간 · 휴게(분) · 이메일 · 연락처 · 입사일 · 파트</span><br>
+        <span style="color:var(--th)">열 순서: 이름 · 소속매장 · 직위 · 고용형태 · 계약시간 · 휴게(분) · 주근무일수 · 이메일 · 연락처 · 입사일 · 파트</span><br>
         초기 비밀번호: <strong>bnz + 코드번호 4자리</strong> (자동 부여) · <strong>입사일 필수</strong> · 계약직/PT는 계약시간 필수
       </div>
 
@@ -3368,6 +3375,7 @@ async function openBulkAddUser() {
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">고용 형태 *</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">계약시간(h)</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">휴게(분)</th>
+              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">주 근무일수</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">이메일</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">연락처</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">입사일 *</th>
@@ -3453,6 +3461,13 @@ function addBulkRow() {
         oninput="calcBulkNet(${idx})"/>
     </td>
     <td style="padding:4px;border:0.5px solid var(--crd)">
+      <select class="form-input" id="b_days_${idx}" disabled style="padding:5px 8px;font-size:12px;width:72px;background:var(--crm)">
+        <option value="">선택</option>
+        <option value="1">1일</option><option value="2">2일</option><option value="3">3일</option>
+        <option value="4">4일</option><option value="5">5일</option><option value="6">6일</option>
+      </select>
+    </td>
+    <td style="padding:4px;border:0.5px solid var(--crd)">
       <input class="form-input" id="b_email_${idx}" placeholder="email@bonanza.kr" type="email" style="padding:5px 8px;font-size:12px"/>
     </td>
     <td style="padding:4px;border:0.5px solid var(--crd)">
@@ -3485,6 +3500,8 @@ function toggleBulkPt(idx, val) {
   const isPT = (val === 'parttime' || val === 'contract');
   ptH.disabled = !isPT; ptH.style.background = isPT ? 'var(--cr)' : 'var(--crm)';
   brk.disabled = !isPT; brk.style.background = isPT ? 'var(--cr)' : 'var(--crm)';
+  const days = document.getElementById('b_days_' + idx);
+  if (days) { days.disabled = !isPT; days.style.background = isPT ? 'var(--cr)' : 'var(--crm)'; }
   if (isPT) { ptH.focus(); }
 }
 
@@ -3497,7 +3514,7 @@ function calcBulkNet(idx) {
 }
 
 // ── 엑셀/스프레드시트 붙여넣기(TSV) → 일괄 표 자동 채우기 ──
-const BULK_COLS = 10; // 이름·소속매장·직위·고용형태·계약시간·휴게·이메일·연락처·입사일·파트
+const BULK_COLS = 11; // 이름·소속매장·직위·고용형태·계약시간·휴게·주근무일수·이메일·연락처·입사일·파트
 function bulkRowIds() {
   const tbody = document.getElementById('bulkTbody');
   if (!tbody) return [];
@@ -3546,13 +3563,16 @@ function fillBulkRow(rowId, cols) {
   if (ev === 'parttime' || ev === 'contract') {
     setVal('b_pth_', cols[4]);
     setVal('b_brk_', cols[5]);
+    const dEl = document.getElementById('b_days_' + rowId);
+    const dv = (cols[6] || '').replace(/[^0-9]/g, '');
+    if (dEl && dv) dEl.value = dv;
     calcBulkNet(rowId);
   }
-  setVal('b_email_', cols[6]);
-  setVal('b_phone_', cols[7]);
-  const hv = normBulkDate(cols[8]);
+  setVal('b_email_', cols[7]);
+  setVal('b_phone_', cols[8]);
+  const hv = normBulkDate(cols[9]);
   if (hv) { const he = document.getElementById('b_hire_' + rowId); if (he) he.value = hv; }
-  setSelByText(document.getElementById('b_part_' + rowId), cols[9]);
+  setSelByText(document.getElementById('b_part_' + rowId), cols[10]);
 }
 function handleBulkPaste(e) {
   const cd = e.clipboardData || window.clipboardData;
@@ -3566,7 +3586,7 @@ function handleBulkPaste(e) {
   const parsed = lines.map(l => l.split('\t'));
   // 열 개수 검증 — 시스템 폼 항목(10개)과 불일치 시 차단
   if (parsed.some(r => r.length !== BULK_COLS)) {
-    alert('항목이 일치하지 않습니다. 복사한 데이터를 확인해 주세요.\n\n필요 열(10개): 이름 · 소속매장 · 직위 · 고용형태 · 계약시간 · 휴게(분) · 이메일 · 연락처 · 입사일 · 파트');
+    alert('항목이 일치하지 않습니다. 복사한 데이터를 확인해 주세요.\n\n필요 열(11개): 이름 · 소속매장 · 직위 · 고용형태 · 계약시간 · 휴게(분) · 주근무일수 · 이메일 · 연락처 · 입사일 · 파트');
     return;
   }
   // 시작 위치: 붙여넣기한 셀이 속한 행부터 (없으면 첫 행)
@@ -3608,6 +3628,7 @@ async function submitBulkAdd() {
     const needsHours = (emp === 'parttime' || emp === 'contract');
     const ptWrk = needsHours ? parseFloat(document.getElementById('b_pth_' + rowId)?.value || 0) : null;
     const ptBrk = needsHours ? parseInt(document.getElementById('b_brk_' + rowId)?.value || 30) : null;
+    const ptDays = needsHours ? (parseInt(document.getElementById('b_days_' + rowId)?.value || 0) || null) : null;
     // 총 체류시간 = 계약근로 + 휴게
   const ptNet = (ptWrk && ptBrk != null) ? Math.round((ptWrk + ptBrk/60)*100)/100 : null;
 
@@ -3628,7 +3649,8 @@ async function submitBulkAdd() {
       employment_type: emp,
       pt_work_hours: ptWrk,
       pt_break_minutes: ptBrk,
-      pt_hours_per_day: ptNet
+      pt_hours_per_day: ptNet,
+      pt_weekly_days: ptDays
     });
 
     if (error) {
@@ -6221,6 +6243,45 @@ function availableManualAudiences() {
 // 현재 보고 있는 매뉴얼 대상 (user/admin)
 let manualAudience = 'user';
 
+// 신규 입사자 빠른 시작 가이드 (코드 렌더 · 항상 최신)
+function quickStartCard(){
+  return `
+  <div class="qs-card" style="background:#fff;border:1px solid var(--gn);border-left:4px solid var(--gn);border-radius:10px;padding:16px 18px;margin-bottom:18px">
+    <div style="font-size:15px;font-weight:700;color:#1d4d38;margin-bottom:4px"><i class="ti ti-rocket" style="vertical-align:-2px;margin-right:6px"></i>신규 입사자 빠른 시작 가이드</div>
+    <div style="font-size:12px;color:var(--th);margin-bottom:10px">앱을 처음 사용하시나요? 아래 순서대로 3분이면 준비 끝!</div>
+
+    <div style="font-size:13px;font-weight:700;color:var(--br);margin:12px 0 2px">1) 로그인</div>
+    <ol>
+      <li><b>이름</b> + <b>입사일</b>(달력에서 선택) + 초기 공통 비밀번호 <b>bnz1234</b> 를 입력합니다.</li>
+      <li>첫 로그인이면 슬랙 인증을 거쳐 <b>새 비밀번호를 직접 설정</b>합니다. (다음부터는 새 비밀번호로 로그인)</li>
+    </ol>
+
+    <div style="font-size:13px;font-weight:700;color:var(--br);margin:12px 0 2px">2) 슬랙 계정 등록 <span style="color:var(--rd);font-size:11px">(필수)</span></div>
+    <ul>
+      <li>업무 지시·근태·공지 등 <b>앱의 모든 알림이 슬랙 개인 DM으로 발송</b>됩니다. 알림을 놓치지 않으려면 슬랙 멤버 ID 등록은 <b>선택이 아니라 필수</b>입니다.</li>
+      <li>첫 로그인 과정에서 슬랙 멤버 ID(U로 시작)를 입력하고, DM으로 온 <b>6자리 인증번호</b>로 인증합니다.</li>
+    </ul>
+
+    <div style="font-size:13px;font-weight:700;color:var(--br);margin:12px 0 2px">3) 슬랙 멤버 ID 찾는 법</div>
+    <ol>
+      <li>슬랙 앱에서 본인 프로필을 엽니다.</li>
+      <li>점 세 개(⋯ 더보기) → <b>멤버 ID 복사</b>. (U로 시작하는 8~11자리)</li>
+    </ol>
+
+    <div style="font-size:13px;font-weight:700;color:var(--br);margin:12px 0 2px">4) 정보 수정은 스스로</div>
+    <ul>
+      <li>슬랙 멤버 ID를 잘못 입력해 DM 알림이 오지 않으면, <b>운영팀에 요청할 필요 없이</b> 상단 <b>[내 정보]</b>에서 직접 수정할 수 있습니다.</li>
+      <li>비밀번호·연락처·이메일·소속 매장도 [내 정보]에서 언제든 변경 가능합니다.</li>
+    </ul>
+
+    <div style="font-size:13px;font-weight:700;color:var(--br);margin:12px 0 2px">5) 휴대폰 홈 화면에 추가 (앱처럼 사용)</div>
+    <ul>
+      <li>아이폰(Safari): 공유 → "홈 화면에 추가"</li>
+      <li>안드로이드(Chrome): 점 세 개(⋮) → "홈 화면에 추가"</li>
+    </ul>
+  </div>`;
+}
+
 async function renderManual(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
   // 열람 가능한 파트 목록 (권한별)
@@ -6310,6 +6371,7 @@ async function renderManual(area) {
     </div>
     ${tabBar}
     ${webBanner}
+    ${quickStartCard()}
     ${body}`;
 }
 
