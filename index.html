@@ -3141,6 +3141,17 @@ async function openEditUser(userId){
         <label class="form-label">매장명 직접 입력</label>
         <input class="form-input" id="eu_store_custom" placeholder="매장명"/>
       </div>
+      <div id="eu_substore_box" style="grid-column:1/-1">
+        <label class="form-label">추가 관할 매장 <span style="font-size:10px;color:var(--th)">(겸직 매니저 — 2개 이상 매장 관리 시)</span></label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <select class="form-input" id="eu_sub_store_sel" style="flex:1">
+            <option value="">매장 선택...</option>
+            ${storeOpts}
+          </select>
+          <button type="button" class="btn-cancel-sm" onclick="addSubStore()" style="white-space:nowrap;font-size:12px"><i class="ti ti-plus"></i> 추가</button>
+        </div>
+        <div id="eu_sub_stores_wrap" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+      </div>
       <div><label class="form-label">연락처</label><input class="form-input" id="eu_phone" value="${u?.phone||''}" placeholder="010-0000-0000"/></div>
       <div><label class="form-label">이메일</label><input class="form-input" id="eu_email" value="${u?.email||''}" placeholder="email@bonanza.kr"/></div>
       <div><label class="form-label">입사일 <span style="color:var(--rd)">*</span></label><input class="form-input" type="date" id="eu_hire" value="${u?.hire_date||''}"/></div>
@@ -3204,6 +3215,9 @@ async function openEditUser(userId){
       // 현재 값이 parttime/contract이면 패널·필수표시 초기화(프리필 없음)
       togglePtFields(empSel.value);
     }
+    // 겸직 추가 관할 매장 초기화 (편집 시 저장값 로드, 신규는 빈 배열)
+    initSubStores(Array.isArray(u?.sub_stores) ? u.sub_stores : []);
+    renderSubStoreTags();
   },80);
   document.getElementById('catModal').classList.add('open');
 }
@@ -6132,19 +6146,9 @@ async function renderProfile(area){
       </div>
     </div>
 
-    <!-- 연차 조회 섹션 -->
-    <div style="background:#fff;border:0.5px solid var(--crd);border-radius:14px;padding:24px;max-width:480px;margin-top:16px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-        <div>
-          <div style="font-size:15px;font-weight:600;color:var(--tm)"><i class="ti ti-calendar-check" style="color:var(--brm);margin-right:6px"></i>내 연차 현황</div>
-          <div style="font-size:12px;color:var(--th);margin-top:2px">근로기준법 기준 · 스케줄 연동 자동 집계</div>
-        </div>
-        <button class="btn-cancel-sm" onclick="loadMyLeaveInfo()" style="font-size:12px"><i class="ti ti-refresh"></i> 새로고침</button>
-      </div>
-      <div id="myLeaveInfo"><div style="text-align:center;padding:20px;color:var(--th);font-size:13px"><i class="ti ti-loader spin"></i> 불러오는 중...</div></div>
-    </div>`;
-  // 연차 정보 자동 로드
-  setTimeout(() => loadMyLeaveInfo(), 100);
+    `;
+  // 연차 기능은 미완성 상태로, 개인설정(내 정보)에서 '내 연차 현황' 섹션을 숨김 처리함.
+  // (연차 기능 완성 후 재노출 예정)
 }
 async function uploadAvatar(input){
   const file = input.files[0]; if(!file) return;
