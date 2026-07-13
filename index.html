@@ -3370,15 +3370,15 @@ async function openBulkAddUser() {
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">이름 *</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">소속 매장 *</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">고용 형태 *</th>
-              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">주 근무일수 </th>
+              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">직위 *</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">계약시간(h)</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">휴게(분)</th>
-              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">직위 *</th>
+              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">계약일 수(D)</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">입사일 *</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">퇴사일</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">연락처</th>
               <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">파트</th>
-              <th style="padding:7px 8px;border:0.5px solid var(--crd)"></th>
+              <th style="padding:7px 8px;border:0.5px solid var(--crd);white-space:nowrap">파트</th>
             </tr>
           </thead>
           <tbody id="bulkTbody"></tbody>
@@ -3420,12 +3420,11 @@ function addBulkRow() {
   const partOpts  = window.__bulkPartOpts  || '';
   const roleOpts  = window.__roleOptions
     ? window.__roleOptions.map(r => `<option value="${r.key}">${r.label}</option>`).join('')
-    : `<option value="manager">매니저</option>
-       <option value="barista" selected>바리스타</option>
-       <option value="pastry">파티쉐</option>
-       <option value="purchase">구매팀</option>
-       <option value="hr">인사팀</option>
-       <option value="admin">운영팀</option>`;
+    : `<option value="ceo">대표</option>
+       <option value="executive_director" selected>이</option>
+       <option value="pdept">부서담당</option>
+       <option value="manager">매니저</option>
+       <option value="member">팀원</option>`;
 
   const tr = document.createElement('tr');
   tr.id = 'bulk-row-' + idx;
@@ -3438,16 +3437,23 @@ function addBulkRow() {
         ${storeOpts}
       </select>
     </td>
-    <td style="padding:4px;border:0.5px solid var(--crd)">
-      <select class="form-input" id="b_role_${idx}" style="padding:5px 8px;font-size:12px">
-        ${roleOpts}
-      </select>
-    </td>
-    <td style="padding:4px;border:0.5px solid var(--crd)">
+      <td style="padding:4px;border:0.5px solid var(--crd)">
       <select class="form-input" id="b_emp_${idx}" onchange="toggleBulkPt(${idx},this.value)" style="padding:5px 8px;font-size:12px">
         <option value="fulltime">정규직</option>
         <option value="contract">계약직</option>
         <option value="parttime">PT</option>
+      </select>
+    </td>
+     <td style="padding:4px;border:0.5px solid var(--crd)">
+     <select class="form-input" id="b_days_${idx}" disabled style="padding:5px 8px;font-size:12px;width:72px;background:var(--crm)">
+        <option value="">선택</option>
+        <option value="1">1일</option><option value="2">2일</option><option value="3">3일</option>
+        <option value="4">4일</option><option value="5">5일</option><option value="6">6일</option>
+      </select>
+    </td>
+    <td style="padding:4px;border:0.5px solid var(--crd)">
+      <select class="form-input" id="b_role_${idx}" style="padding:5px 8px;font-size:12px">
+        ${roleOpts}
       </select>
     </td>
     <td style="padding:4px;border:0.5px solid var(--crd)">
@@ -3459,13 +3465,6 @@ function addBulkRow() {
       <input class="form-input" type="number" id="b_brk_${idx}" placeholder="30" min="0" max="120" step="15"
         style="padding:5px 8px;font-size:12px;width:60px;background:var(--crm)" disabled
         oninput="calcBulkNet(${idx})"/>
-    </td>
-    <td style="padding:4px;border:0.5px solid var(--crd)">
-      <select class="form-input" id="b_days_${idx}" disabled style="padding:5px 8px;font-size:12px;width:72px;background:var(--crm)">
-        <option value="">선택</option>
-        <option value="1">1일</option><option value="2">2일</option><option value="3">3일</option>
-        <option value="4">4일</option><option value="5">5일</option><option value="6">6일</option>
-      </select>
     </td>
     <td style="padding:4px;border:0.5px solid var(--crd)">
       <input class="form-input" id="b_email_${idx}" placeholder="email@bonanza.kr" type="email" style="padding:5px 8px;font-size:12px"/>
