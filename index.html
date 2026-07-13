@@ -544,10 +544,16 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // 직위(role) 라벨·색상 — 기본값(폴백). 실제로는 role_options 테이블에서 로드해 덮어씀
+<<<<<<< HEAD
+let roleLbl = {ceo:'대표',executive_director:'이사',dept:'부서담당',manager:'매니저',member:'팀원'};
+let roleCls = {ceo:'role-admin',executive_director:'role-admin',dept:'role-purchase',manager:'role-manager',member:'role-barista'};
+const CORE_ROLES = ['ceo', 'executive_director', 'dept', 'manager', 'member'];
+=======
 let roleLbl = {ceo:'대표',executive_director:'이사',admin:'운영팀',dept:'부서담당',manager:'매니저',member:'팀원',barista:'바리스타',pastry:'파티쉐',purchase:'구매팀',hr:'인사팀'};
 let roleCls = {ceo:'role-admin',executive_director:'role-admin',admin:'role-admin',dept:'role-purchase',manager:'role-manager',member:'role-barista',barista:'role-barista',pastry:'role-pastry',purchase:'role-purchase',hr:'role-hr'};
 // 권한 시스템 핵심 직위(코드값 고정, 삭제 불가)
 const CORE_ROLES = ['ceo','executive_director','dept','manager','member'];
+>>>>>>> fd9ad872c17ab958fa0298964da2d34ec5c8f08d
 // 매니저급으로 취급할 직위 키 (매니저B 등 추가 시 여기에 포함). manager_로 시작하면 자동 매니저급
 // XSS 방어 — 사용자 입력 텍스트를 innerHTML로 출력할 때 이스케이프
 function esc(v){
@@ -574,12 +580,11 @@ async function loadRoleOptions() {
   } else {
     // 테이블이 비었으면 기본 6개로 간주
     roleOptions = [
-      {role_key:'admin',label:'운영팀',is_core:true,sort_order:1},
-      {role_key:'manager',label:'매니저',is_core:true,sort_order:2},
-      {role_key:'barista',label:'바리스타',is_core:false,sort_order:3},
-      {role_key:'pastry',label:'파티쉐',is_core:false,sort_order:4},
-      {role_key:'purchase',label:'구매팀',is_core:false,sort_order:5},
-      {role_key:'hr',label:'인사팀',is_core:false,sort_order:6},
+      {role_key:'ceo',label:'대표',is_core:false,sort_order:1},
+      {role_key:'executive_director',label:'이사',is_core:false,sort_order:2},
+      {role_key:'dept',label:'부서담당',is_core:true,sort_order:3},
+      {role_key:'manager',label:'매니저',is_core:true,sort_order:4},
+      {role_key:'member',label:'팀원',is_core:false,sort_order:5},
     ];
   }
 }
@@ -2790,11 +2795,10 @@ async function renderStaff(area) {
         <option value="">전체 매장</option>
         ${storeOpts}
       </select>
-      <select id="filterRole" onchange="applyStaffFilter()" style="border:0.5px solid var(--crd);border-radius:8px;padding:8px 12px;font-size:13px;background:#fff;color:var(--tm);cursor:pointer;min-width:110px">
+     <select id="filterRole" onchange="applyStaffFilter()" style="border:0.5px solid var(--crd);border-radius:8px;padding:8px 12px;font-size:13px;background:#fff;color:var(--tm);cursor:pointer;min-width:110px">
         <option value="">전체 직위</option>
         <option value="ceo">대표</option>
         <option value="executive_director">이사</option>
-        <option value="admin">운영팀</option>
         <option value="dept">부서담당</option>
         <option value="manager">매니저</option>
         <option value="member">팀원</option>
@@ -7738,8 +7742,8 @@ function selectReqType(typeId) {
     }
   });
 
-  const guideHtml = t.guide ?
-    '<div class="note" style="margin-bottom:14px"><strong>신청 방법 안내</strong><br>' + t.guide + '</div>' : '';
+const guideHtml = t.guide ?
+    '<div class="note" style="margin-bottom:14px; white-space:pre-wrap; line-height:1.6;"><strong>신청 방법 안내</strong><br>' + t.guide + '</div>' : '';
 
   document.getElementById('reqFormArea').innerHTML =
     guideHtml +
