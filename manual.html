@@ -144,19 +144,52 @@ async function doLogin(){
   render();
 }
 
+const MANUAL_BUILD_DATE='2026-07-13';  // 매뉴얼 배포일(수정 시 갱신) — 표시 날짜가 DB보다 낡아 보이지 않도록 하한선
+function quickStartHTML(){
+  return '<div style="background:#fff;border:1px solid #2D6A4F;border-left:4px solid #2D6A4F;border-radius:10px;padding:16px 18px;margin-bottom:16px">'
+  + '<div style="font-size:15px;font-weight:700;color:#1d4d38;margin-bottom:4px">\uD83D\uDE80 \uC2E0\uADDC \uC785\uC0AC\uC790 \uBE60\uB978 \uC2DC\uC791 \uAC00\uC774\uB4DC</div>'
+  + '<div style="font-size:12px;color:#8a7a68;margin-bottom:10px">\uC571\uC744 \uCC98\uC74C \uC0AC\uC6A9\uD558\uC2DC\uB098\uC694? \uC544\uB798 \uC21C\uC11C\uB300\uB85C 3\uBD84\uC774\uBA74 \uC900\uBE44 \uB05D!</div>'
+  + '<div style="font-size:13px;font-weight:700;color:#3B2314;margin:12px 0 2px">1) \uB85C\uADF8\uC778</div>'
+  + '<ol style="padding-left:1.4em;margin:6px 0;line-height:1.7">'
+  + '<li><b>\uC774\uB984</b> + <b>\uC785\uC0AC\uC77C</b>(\uB2EC\uB825 \uC120\uD0DD) + \uCD08\uAE30 \uACF5\uD1B5 \uBE44\uBC00\uBC88\uD638 <b>bnz1234</b> \uC785\uB825.</li>'
+  + '<li>\uCCAB \uB85C\uADF8\uC778\uC774\uBA74 \uC2AC\uB799 \uC778\uC99D \uD6C4 <b>\uC0C8 \uBE44\uBC00\uBC88\uD638\uB97C \uC9C1\uC811 \uC124\uC815</b>\uD569\uB2C8\uB2E4.</li>'
+  + '</ol>'
+  + '<div style="font-size:13px;font-weight:700;color:#3B2314;margin:12px 0 2px">2) \uC2AC\uB799 \uACC4\uC815 \uB4F1\uB85D <span style="color:#A0291E;font-size:11px">(\uD544\uC218)</span></div>'
+  + '<ul style="padding-left:1.4em;margin:6px 0;line-height:1.7">'
+  + '<li>\uC5C5\uBB34\u00B7\uADFC\uD0DC\u00B7\uACF5\uC9C0 \uB4F1 <b>\uC571\uC758 \uBAA8\uB4E0 \uC54C\uB9BC\uC774 \uC2AC\uB799 \uAC1C\uC778 DM\uC73C\uB85C \uBC1C\uC1A1</b>\uB418\uBBC0\uB85C \uC2AC\uB799 \uBA64\uBC84 ID \uB4F1\uB85D\uC740 <b>\uD544\uC218</b>\uC785\uB2C8\uB2E4.</li>'
+  + '<li>\uCCAB \uB85C\uADF8\uC778 \uB54C \uC2AC\uB799 \uBA64\uBC84 ID(U\uB85C \uC2DC\uC791) \uC785\uB825 \u2192 DM\uC73C\uB85C \uC628 <b>6\uC790\uB9AC \uC778\uC99D\uBC88\uD638</b> \uC785\uB825.</li>'
+  + '</ul>'
+  + '<div style="font-size:13px;font-weight:700;color:#3B2314;margin:12px 0 2px">3) \uC2AC\uB799 \uBA64\uBC84 ID \uCC3E\uB294 \uBC95</div>'
+  + '<ol style="padding-left:1.4em;margin:6px 0;line-height:1.7">'
+  + '<li>\uC2AC\uB799 \uC571\uC5D0\uC11C \uBCF8\uC778 \uD504\uB85C\uD544\uC744 \uC5FD\uB2C8\uB2E4.</li>'
+  + '<li>\uC810 \uC138 \uAC1C(\u22EF \uB354\uBCF4\uAE30) \u2192 <b>\uBA64\uBC84 ID \uBCF5\uC0AC</b>. (U\uB85C \uC2DC\uC791 8~11\uC790\uB9AC)</li>'
+  + '</ol>'
+  + '<div style="font-size:13px;font-weight:700;color:#3B2314;margin:12px 0 2px">4) \uC815\uBCF4 \uC218\uC815\uC740 \uC2A4\uC2A4\uB85C</div>'
+  + '<ul style="padding-left:1.4em;margin:6px 0;line-height:1.7">'
+  + '<li>\uC2AC\uB799 ID\uB97C \uC798\uBABB \uC785\uB825\uD574 \uC54C\uB9BC\uC774 \uC624\uC9C0 \uC54A\uC73C\uBA74, <b>\uC6B4\uC601\uD300 \uC694\uCCAD \uC5C6\uC774</b> [\uB0B4 \uC815\uBCF4]\uC5D0\uC11C \uC9C1\uC811 \uC218\uC815 \uAC00\uB2A5\uD569\uB2C8\uB2E4.</li>'
+  + '</ul>'
+  + '<div style="font-size:13px;font-weight:700;color:#3B2314;margin:12px 0 2px">5) \uD734\uB300\uD3F0 \uD648 \uD654\uBA74\uC5D0 \uCD94\uAC00</div>'
+  + '<ul style="padding-left:1.4em;margin:6px 0;line-height:1.7">'
+  + '<li>\uC544\uC774\uD3F0(Safari): \uACF5\uC720 \u2192 "\uD648 \uD654\uBA74\uC5D0 \uCD94\uAC00"</li>'
+  + '<li>\uC548\uB4DC\uB85C\uC774\uB4DC(Chrome): \u22EE \u2192 "\uD648 \uD654\uBA74\uC5D0 \uCD94\uAC00"</li>'
+  + '</ul>'
+  + '</div>';
+}
+
 async function render(){
   const c=document.getElementById('content');
   c.innerHTML='<div class="loading"><i class="ti ti-loader"></i> 불러오는 중...</div>';
   const auds=availAuds(me);
   if(!auds.find(([a])=>a===curAud)) curAud=auds[0][0];
   const {data:secs}=await sb.from('manual_sections').select('*').eq('audience',curAud).order('sort_order');
-  // 최신 업데이트 시각
-  let updated='';
-  if(secs&&secs.length){
-    const times=secs.map(s=>s.updated_at).filter(Boolean).sort();
-    if(times.length) updated=times[times.length-1].slice(0,10);
-  }
-  document.getElementById('verBadge').textContent = updated?('업데이트: '+updated):'사용 설명서';
+  // 최신 업데이트 시각 = (전체 섹션 최신 수정일, 매뉴얼 배포일) 중 더 최근 → audience 이동에도 뒤로 가지 않음
+  let updated = MANUAL_BUILD_DATE;
+  try {
+    const {data:allMeta}=await sb.from('manual_sections').select('updated_at');
+    const times=(allMeta||[]).map(s=>s.updated_at).filter(Boolean).map(t=>t.slice(0,10)).sort();
+    if(times.length && times[times.length-1] > updated) updated = times[times.length-1];
+  } catch(e){}
+  document.getElementById('verBadge').textContent = '업데이트: '+updated;
 
   const tabBar=auds.length>1?`<div class="tabbar">${auds.map(([a,l])=>`<button class="tab${curAud===a?' active':''}" onclick="curAud='${a}';render()">${l}</button>`).join('')}</div>`:'';
   const topbar=`<div class="topbar"><span><b>${me.name}</b> · ${me.store||''} · ${gradeLabel(userGrade(me))}</span><button class="logout" onclick="logout()">로그아웃</button></div>`;
@@ -179,7 +212,7 @@ async function render(){
       <div class="toc-body" id="tocBody">${toc}</div>
     </div>${sections}`;
   }
-  c.innerHTML=topbar+tabBar+`<div class="updated">이 설명서는 앱의 사용 설명서와 항상 같은 내용입니다. 여기에는 화면 예시 그림이 함께 표시됩니다.</div>`+body+`<div class="foot">보난자커피 운영 매뉴얼 · 내부 자료</div>`;
+  c.innerHTML=topbar+tabBar+`<div class="updated">이 설명서는 앱의 사용 설명서와 항상 같은 내용입니다. 여기에는 화면 예시 그림이 함께 표시됩니다.</div>`+quickStartHTML()+body+`<div class="foot">보난자커피 운영 매뉴얼 · 내부 자료</div>`;
 }
 
 function gradeLabel(g){return {master:'총괄',vice:'부총괄',dept:'부서담당',manager:'매니저',staff:'매장직원'}[g]||g;}

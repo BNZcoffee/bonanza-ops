@@ -27,6 +27,11 @@
 - 개인정보/슬랙ID/비밀번호는 사용자가 **[내 정보]** 페이지에서 직접 수정(운영팀 요청 불필요).
 - 슬랙 발송: Supabase Edge Function `slack-notify` 경유(봇 토큰은 시크릿, 프론트 미노출).
 - 매뉴얼 본문: DB `manual_sections`(audience: user/manager/dept/admin). 코드 렌더 = renderManual().
+- 웹 운영 매뉴얼 = 정적 파일 `manual.html`(화면 예시 SVG 포함). 본문은 manual_sections를 그대로 불러와 자동 동기화되지만,
+  아래는 코드라 **앱 매뉴얼을 바꾸면 manual.html도 함께 갱신**해야 함:
+  (1) 신규 입사자 빠른 시작 가이드 quickStartHTML() — index.html의 quickStartCard()와 내용 일치 유지,
+  (2) 표시 날짜 하한선 `MANUAL_BUILD_DATE` — 매뉴얼 변경 배포 시 그 날짜로 갱신,
+  (3) 새 섹션 화면 예시가 필요하면 manual.html의 IMG_MAP에 title 키로 SVG 추가.
 - 직원 등록: 단건(openEditUser)·일괄(openBulkAddUser) 입력 항목 100% 일치 유지.
   고용형태 = 정규직/계약직/PT. 계약직·PT는 계약근로시간 필수.
   계약직: 선택 시 계약근로 8h·휴게 60분 자동 프리필(수정 가능), 퇴사일(계약 종료일) 필수.
