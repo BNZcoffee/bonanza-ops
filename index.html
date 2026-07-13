@@ -323,7 +323,7 @@ textarea.form-input{min-height:120px;resize:vertical}
     <div class="login-logo">Bonanza Coffee Korea</div>
     <div class="login-sub">운영 매뉴얼 시스템</div>
     <div style="font-size:11px;color:var(--th);margin-bottom:14px;line-height:1.6;text-align:left;background:var(--cr);border-radius:8px;padding:8px 11px">
-      ID : 본인 이름 &nbsp;|&nbsp; 입사일 선택<br>PW : 첫 로그인은 운영팀 안내 초기비번(bnz+코드) → 슬랙 인증 후 직접 변경
+      ID : 본인 이름 &nbsp;|&nbsp; 입사일 선택<br>PW : <strong>bnz1234</strong> (공통 초기비번 · 첫 로그인 후 슬랙 인증+변경)
     </div>
     <input type="text" id="loginName" placeholder="이름 (예: 홍길동)" autocomplete="name" />
     <input type="date" id="loginHire" style="width:100%;border:0.5px solid var(--crd);border-radius:8px;padding:10px 14px;font-size:14px;color:var(--tm);background:var(--cr);margin-bottom:10px;outline:none;font-family:inherit" />
@@ -789,7 +789,7 @@ async function doLogin() {
   const { data: __vr, error: __ve } = await sb.rpc('verify_login_v2', { p_user_id: data.id, p_password: pw });
   if (__ve) { err.textContent = '로그인 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'; return; }
   if (!__vr || !__vr.length) {
-    err.textContent = data.pw_set ? '비밀번호가 맞지 않습니다.' : '첫 로그인 비밀번호를 확인해 주세요. (bnz + 코드 숫자 4자리)';
+    err.textContent = data.pw_set ? '비밀번호가 맞지 않습니다.' : '첫 로그인 비밀번호는 bnz1234 입니다.';
     return;
   }
   const __user = __vr[0].user_row;
@@ -988,7 +988,7 @@ function showAccountGuide(acc) {
     '· 이름: ' + (acc.name||''),
     '· 소속 매장: ' + (acc.store||''),
     '· 입사일: ' + (acc.hire_date||'') + ' (로그인 화면에서 달력으로 선택)',
-    '· 첫 로그인 비밀번호: ' + initPw + '  (첫 로그인 후 직접 변경)',
+    '· 첫 로그인 비밀번호: bnz1234  (공통 · 첫 로그인 후 직접 변경)',
     '',
     '[ 처음 접속하는 방법 ]',
     '1. 위 주소 접속 → 이름 입력 + 입사일 선택 + 위 첫 비밀번호 입력 후 로그인.',
@@ -1021,7 +1021,7 @@ function showAccountGuide(acc) {
     '<div style="font-size:13px;color:var(--ts);margin-bottom:10px;line-height:1.6">계정이 생성되었습니다. 아래 안내를 <b>' + (acc.name||'') + '</b>님 본인에게만 전달하세요. <b>이름·입사일</b>로 로그인하며, 첫 로그인은 아래 <b>초기 비밀번호</b> 입력 → 슬랙 인증 → 새 비밀번호 설정 순입니다.</div>' +
     '<div style="background:var(--cr);border:0.5px solid var(--crd);border-radius:8px;padding:6px 10px;margin-bottom:10px;font-size:12px">' +
       '<div>이름: <b>' + (acc.name||'-') + '</b> · 소속: <b>' + (acc.store||'-') + '</b></div>' +
-      '<div>입사일: <b>' + (acc.hire_date||'-') + '</b> · 첫 비밀번호: <b>' + initPw + '</b> (코드 ' + acc.code + ')</div>' +
+      '<div>입사일: <b>' + (acc.hire_date||'-') + '</b> · 첫 비밀번호: <b>bnz1234</b> (공통)</div>' +
     '</div>' +
     '<textarea id="acctGuideText" class="form-input" style="min-height:150px;font-size:12px;line-height:1.5" readonly>' + body.replace(/</g,'&lt;') + '</textarea>' +
     '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">' +
@@ -1713,7 +1713,7 @@ async function renderPostDetail(area) {
     const cmtItems = comments.map(c => {
       const isMine = c.author_id === currentUser.id;
       const isAdminUser = currentUser.role === 'admin';
-      const dispName = c.users?.nickname || c.users?.name || '?';
+      const dispName = c.users?.name || '?';
       const avatarContent = c.users?.avatar_url
         ? `<img src="${c.users.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
         : dispName.slice(0,2);
@@ -5936,7 +5936,7 @@ async function renderProfile(area){
   const storeOpts = (stores||[]).map(s=>`<option value="${s.name}"${currentUser.store===s.name?' selected':''}>${s.name}</option>`).join('');
   const avatarHtml = currentUser.avatar_url
     ? `<img src="${currentUser.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
-    : `<span style="font-size:20px;font-weight:700;color:var(--br)">${(currentUser.nickname||currentUser.name).slice(0,2)}</span>`;
+    : `<span style="font-size:20px;font-weight:700;color:var(--br)">${(currentUser.name||'').slice(0,2)}</span>`;
   area.innerHTML = `
     <div class="page-header"><div class="page-title">내 정보</div><div class="page-sub">개인정보 및 비밀번호 변경</div></div>
     <div class="profile-card" style="background:#fff;border:0.5px solid var(--crd);border-radius:14px;padding:24px;max-width:480px">
@@ -5952,10 +5952,6 @@ async function renderProfile(area){
         </div>
       </div>
       <input type="file" id="avInput" accept="image/*" style="display:none" onchange="uploadAvatar(this)"/>
-      <div style="display:flex;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--crd);gap:10px">
-        <span style="font-size:12px;color:var(--th);width:80px;flex-shrink:0;font-weight:600">닉네임</span>
-        <input class="form-input" id="p_nick" value="${currentUser.nickname||''}" placeholder="댓글 표시 이름 (미입력시 본명)" style="flex:1;padding:6px 10px;font-size:13px"/>
-      </div>
       <div style="display:flex;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--crd);gap:10px">
         <span style="font-size:12px;color:var(--th);width:80px;flex-shrink:0;font-weight:600">소속 매장</span>
         <select class="form-input" id="p_store" style="flex:1;padding:6px 10px;font-size:13px">${storeOpts||`<option value="${currentUser.store}">${currentUser.store}</option>`}</select>
@@ -6013,12 +6009,11 @@ async function saveProfile(){
   const store = document.getElementById('p_store').value;
   const phone = document.getElementById('p_phone').value.trim();
   const email = document.getElementById('p_email').value.trim();
-  const nickname = document.getElementById('p_nick')?.value.trim();
   const slackId = document.getElementById('p_slack')?.value.trim();
   const cur = document.getElementById('p_cur').value;
   const pw = document.getElementById('p_new').value;
   const con = document.getElementById('p_con').value;
-  const updates = {store, phone:phone||null, email:email||null, nickname:nickname||null, slack_id:slackId||null};
+  const updates = {store, phone:phone||null, email:email||null, slack_id:slackId||null};
   if(cur||pw||con){
     if(pw.length<4){alert('새 비밀번호는 4자 이상이어야 합니다.');return;}
     if(pw!==con){alert('새 비밀번호가 일치하지 않습니다.');return;}
