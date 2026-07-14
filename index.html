@@ -7774,32 +7774,57 @@ const guideHtml = t.guide ?
     '<div class="note" style="margin-bottom:14px; white-space:pre-wrap; line-height:1.6;"><strong>신청 방법 안내</strong><br>' + t.guide + '</div>' : '';
 
 // 현재 로그인한 사용자의 매장 정보 데이터 파싱
-        var userObj = window.currentUser || window.user || {};
-        var mainStore = userObj.store || '';
-        var subStores = userObj.stores || userObj.managed_stores || [];
-        var storeFieldHtml = '';
+var userObj = window.currentUser || window.user || {};
+var mainStore = userObj.store || '';
+var myPart = userObj.part || ''; // 본사 소속 파트
+var subStores = userObj.stores || userObj.managed_stores || [];
+var storeFieldHtml = '';
 
-        if (subStores && subStores.length > 1) {
-          // 1) 겸직 매니저일 때: 드롭다운으로 렌더링 (본소속이 기본 선택)
-          var storeOpts = '';
-          if (mainStore) {
-            storeOpts += '<option value="' + mainStore + '" selected>' + mainStore + ' (본소속)</option>';
-          } else {
-            storeOpts += '<option value="">매장을 선택해주세요</option>';
-          }
-          subStores.forEach(function(st) {
-            if (st !== mainStore) {
-              storeOpts += '<option value="' + st + '">' + st + '</option>';
-            }
-          });
-          storeFieldHtml = '<div class="form-row"><label class="form-label">요청 매장 명 <span style="color:var(--rd)">*</span></label>' +
-            '<select class="form-input" id="rfStore" style="font-weight:bold; border:1px solid var(--crd);">' + storeOpts + '</select></div>';
-        } else {
-          // 2) 일반 단일 매장 근무자일 때: 본소속 매장명 고정 및 수정 불가 처리
-          var displayStore = mainStore || '소속 매장 없음';
-          storeFieldHtml = '<div class="form-row"><label class="form-label">요청 매장 명 <span style="color:var(--rd)">*</span></label>' +
-            '<input class="form-input" id="rfStore" value="' + displayStore + '" readonly style="background-color:#f5f5f5; cursor:not-allowed; font-weight:bold;"/></div>';
-        }
+// 1) 본사 스태프 또는 전체 총괄 관리자 계정인 경우
+var isHeadquarters = (!mainStore || mainStore === '본사' || mainStore === '총괄');
+
+if (isHeadquarters) {
+  var hqStoreOpts = '';
+  // 본인 소속 파트가 있다면 가장 처음에 기본값으로 지정
+  var defaultVal = myPart ? myPart : '선택해주세요';
+  hqStoreOpts += '<option value="' + defaultVal + '" selected>' + defaultVal + ' (본소속 파트)</option>';
+  
+  // 시스템 전체 매장 목록을 가져오되, 없을 경우 '매장 미지정'만 리스트에 넣어줍니다.
+  var allSystemStores = window.stores || window.allStores || window.storeList || ['매장 미지정'];
+  
+  allSystemStores.forEach(function(st) {
+    var stName = typeof st === 'string' ? st : (st.name || st.label || '');
+    if (stName && stName !== defaultVal) {
+      hqStoreOpts += '<option value="' + stName + '">' + stName + '</option>';
+    }
+  });
+
+  // 본사 스태프는 대신 신청할 매장을 전체 목록에서 선택할 수 있도록 드롭다운 처리
+  storeFieldHtml = '<div class="form-row"><label class="form-label">요청 매장 명 <span style="color:var(--rd)">*</span></label>' +
+    '<select class="form-input" id="rfStore" style="font-weight:bold; border:1px solid var(--crd);">' + hqStoreOpts + '</select></div>';
+
+} else if (subStores && subStores.length > 1) {
+  // 2) 겸직 매장 총괄 매니저인 경우: 본인이 관리하는 매장 목록들만 드롭다운 제공
+  var storeOpts = '';
+  if (mainStore) {
+    storeOpts += '<option value="' + mainStore + '" selected>' + mainStore + ' (본소속)</option>';
+  } else {
+    storeOpts += '<option value="">매장을 선택해주세요</option>';
+  }
+  subStores.forEach(function(st) {
+    if (st !== mainStore) {
+      storeOpts += '<option value="' + st + '">' + st + '</option>';
+    }
+  });
+  storeFieldHtml = '<div class="form-row"><label class="form-label">요청 매장 명 <span style="color:var(--rd)">*</span></label>' +
+    '<select class="form-input" id="rfStore" style="font-weight:bold; border:1px solid var(--crd);">' + storeOpts + '</select></div>';
+
+} else {
+  // 3) 단일 매장 매니저인 경우: 본인 소속 매장명으로 자동 고정 및 잠금 처리
+  var displayStore = mainStore || '소속 매장 없음';
+  storeFieldHtml = '<div class="form-row"><label class="form-label">요청 매장 명 <span style="color:var(--rd)">*</span></label>' +
+    '<input class="form-input" id="rfStore" value="' + displayStore + '" readonly style="background-color:#f5f5f5; cursor:not-allowed; font-weight:bold;"/></div>';
+}
 
 document.getElementById('reqFormArea').innerHTML = 
   guideHtml +
