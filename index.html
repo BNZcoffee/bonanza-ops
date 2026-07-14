@@ -7734,26 +7734,27 @@ function selectReqType(typeId) {
       fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
         '<textarea class="form-input" id="rf-' + i + '" style="min-height:70px"></textarea></div>';
  } else if (f.type === 'repair_cat') {
-        // 우선 빈 선택창을 먼저 그려둡니다.
-        fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
-          '<select class="form-input" id="rf-' + i + '"><option value="">로딩 중...</option></select></div>';
+        var targetCats = window.cats || window.allCats || window.categories || [];
+        var catOptions = '<option value="">선택해주세요</option>';
         
-        // 데이터베이스에서 카테고리 목록을 직접 긁어와 선택창을 채웁니다.
-        // (만약 카테고리 테이블명이 'categories'라면 아래 'repair_categories'를 'categories'로 변경해주세요)
-        sb.from('repair_categories').select('*').order('name', {ascending: true}).then(function(res) {
-          const selectEl = document.getElementById('rf-' + i);
-          if (selectEl && res.data) {
-            let opts = '<option value="">선택해주세요</option>';
-            res.data.forEach(function(c) {
-              opts += '<option value="' + (c.name || c.label) + '">' + (c.name || c.label) + '</option>';
-            });
-            selectEl.innerHTML = opts;
-          }
-        }).catch(function(err) {
-          // 에러 발생 시 예외 처리
-          const selectEl = document.getElementById('rf-' + i);
-          if (selectEl) selectEl.innerHTML = '<option value="">목록 로드 실패</option>';
-        });
+        if (targetCats && targetCats.length > 0) {
+          targetCats.forEach(function(c) {
+            var nameVal = c.name || c.label || '';
+            if (nameVal) {
+              catOptions += '<option value="' + nameVal + '">' + nameVal + '</option>';
+            }
+          });
+        } else {
+          catOptions += '<option value="전기/조명">전기/조명</option>';
+          catOptions += '<option value="배관/설비">배관/설비</option>';
+          catOptions += '<option value="냉난방">냉난방</option>';
+          catOptions += '<option value="인테리어">인테리어</option>';
+          catOptions += '<option value="장비">장비</option>';
+          catOptions += '<option value="기타">기타</option>';
+        }
+
+        fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
+          '<select class="form-input" id="rf-' + i + '">' + catOptions + '</select></div>';
       fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
         '<select class="form-input" id="rf-' + i + '"><option value="">선택해주세요</option>' +
         f.options.map(function(o){ return '<option value="' + o + '">' + o + '</option>'; }).join('') +
