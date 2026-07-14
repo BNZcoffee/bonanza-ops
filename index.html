@@ -7751,9 +7751,37 @@ function selectReqType(typeId) {
         }
         fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
           '<select class="form-input" id="rf-' + i + '">' + selectOptions + '</select></div>';
-      } else {
-        fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
-          '<input class="form-input" id="rf-' + i + '"/></div>';
+} else {
+        if (f.label.indexOf('매장') > -1) {
+          var myStores = (window.currentUser && window.currentUser.stores) ? window.currentUser.stores : [];
+          var mySingleStore = (window.currentUser && window.currentUser.store) ? window.currentUser.store : '';
+          
+          if (myStores.length > 1) {
+            var storeOpts = '<option value="">선택해주세요</option>';
+            myStores.forEach(function(st) {
+              storeOpts += '<option value="' + st + '">' + st + '</option>';
+            });
+            fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
+              '<select class="form-input" id="rf-' + i + '">' + storeOpts + '</select></div>';
+          } else {
+            fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
+              '<input class="form-input" id="rf-' + i + '" value="' + mySingleStore + '" readonly style="background-color:#f5f5f5; cursor:not-allowed;"/></div>';
+          }
+        } else if (f.label.indexOf('담당자') > -1 || f.label.indexOf('면담') > -1 || f.label.indexOf('직원') > -1) {
+          // 이름 혹은 직원 검색용 datalist 자동완성 렌더링
+          var staffOpts = '';
+          if (window.users && window.users.length > 0) {
+            window.users.forEach(function(u) {
+              staffOpts += '<option value="' + u.name + '">' + (u.part || '') + ' - ' + u.name + '</option>';
+            });
+          }
+          fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
+            '<input class="form-input" list="staff-list-' + i + '" id="rf-' + i + '" placeholder="이름을 입력하거나 선택하세요"/>' +
+            '<datalist id="staff-list-' + i + '">' + staffOpts + '</datalist></div>';
+        } else {
+          fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
+            '<input class="form-input" id="rf-' + i + '"/></div>';
+        }
       }
   });
 
