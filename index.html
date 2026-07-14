@@ -5753,13 +5753,16 @@ async function renderAll(area) {
     const cc = CAT_COLORS[catIdx>=0 ? catIdx%CAT_COLORS.length : 0];
     const catName = p.categories?.name || '';
     return `<div class="post-card" onclick="openPostById(${p.id})">
-      <div class="post-card-top">
-        <span class="post-title-txt">${esc(p.title)}</span>
-        ${isNew ? '<span class="badge-new">NEW</span>' : ''}
-        <span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:${cc.bg};color:${cc.fg}">${catName}</span>
-      </div>
-      <div class="post-meta"><span>${fmtDate(p.created_at)}</span></div>
-    </div>`;
+<div class="post-card-top">
+            <span class="post-title-txt">${esc(p.title)}</span>${isNew ? '<span class="badge-new">NEW</span>' : ''}
+            <span style="font-size:9px;font-weight:700;border-radius:10px;padding:2px 8px;background:${cc.bg};color:${cc.fg}">${catName}</span>
+          </div>
+          <div class="post-card-bottom" style="display:flex; gap:8px; font-size:12px; color:#666; margin-top:6px; align-items:center;">
+            <span>${p.created_at.slice(0, 10)}</span>
+            <span style="opacity:0.4;">|</span>
+            <span style="font-weight:500; color:var(--br);">${p.users ? ((p.users.part || p.users.role || '') + ' ' + p.users.name) : '알 수 없음'}</span>
+          </div>
+        </div>`;
   }).join('') || '<div style="text-align:center;padding:40px;color:var(--th)">등록된 공지가 없습니다.</div>';
   area.innerHTML = `
     <div class="page-header"><div class="page-title">전체보기</div><div class="page-sub">모든 게시판 공지 최신순</div></div>
