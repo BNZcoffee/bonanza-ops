@@ -7752,25 +7752,49 @@ function selectReqType(typeId) {
         fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
           '<select class="form-input" id="rf-' + i + '">' + selectOptions + '</select></div>';
 } else {
-        // 오타 방지를 위해 문자열 처리를 안전하게 통일합니다.
         var labelText = f.label || '';
         
-        if (labelText.indexOf('매장') > -1) {
-          var myStores = (window.currentUser && window.currentUser.stores) ? window.currentUser.stores : [];
-          var mySingleStore = (window.currentUser && window.currentUser.store) ? window.currentUser.store : '';
+        // '매장 명' 관련 항목 조준
+        var isTargetStoreField = (labelText === '매장 명' || labelText === '매장명' || labelText.replace(/\s/g, '').indexOf('매장명') === 0);
+        
+        if (isTargetStoreField) {
+          // 인원 현황 계정 데이터에서 기본(본소속) 매장과 겸직/서브 매장 목록을 가져옵니다.
+          // 시스템 구조에 따라 window.currentUser 또는 user 오브젝트를 참조합니다.
+          var userObj = window.currentUser || window.user || {};
           
-          if (myStores && myStores.length > 1) {
-            var storeOpts = '<option value="">선택해주세요</option>';
-            myStores.forEach(function(st) {
-              storeOpts += '<option value="' + st + '">' + st + '</option>';
+          var mainStore = userObj.store || ''; // 본소속 매장
+          var subStores = userObj.stores || userObj.managed_stores || []; // 겸직/서브 매장 목록 (배열 형태)
+          
+          // 겸직 매니저인지 판단 (서브 매장이 존재하고, 목록에 본소속 외에 다른 매장이 더 있을 때)
+          if (subStores && subStores.length > 1) {
+            var storeOpts = '';
+            
+            // 본소속 매장이 있다면 최상단에 자동으로 선택(selected)되도록 처리
+            if (mainStore) {
+              storeOpts += '<option value="' + mainStore + '" selected>' + mainStore + ' (본소속)</option>';
+            } else {
+              storeOpts += '<option value="">매장을 선택해주세요</option>';
+            }
+            
+            // 서브 관리 매장들을 드롭다운 목록에 추가 (중복 제거)
+            subStores.forEach(function(st) {
+              if (st !== mainStore) {
+                storeOpts += '<option value="' + st + '">' + st + '</option>';
+              }
             });
+            
             fieldsHtml += '<div class="form-row"><label class="form-label">' + labelText + req + '</label>' +
               '<select class="form-input" id="rf-' + i + '">' + storeOpts + '</select></div>';
+              
           } else {
+            // 단일 매장 관리자/직원: 선택할 필요 없이 본소속 매장 자동 입력 및 잠금
+            var displayStore = mainStore || '소속 매장 없음';
             fieldsHtml += '<div class="form-row"><label class="form-label">' + labelText + req + '</label>' +
-              '<input class="form-input" id="rf-' + i + '" value="' + mySingleStore + '" readonly style="background-color:#f5f5f5; cursor:not-allowed;"/></div>';
+              '<input class="form-input" id="rf-' + i + '" value="' + displayStore + '" readonly style="background-color:#f5f5f5; cursor:not-allowed;"/></div>';
           }
+          
         } else if (labelText.indexOf('담당자') > -1 || labelText.indexOf('면담') > -1 || labelText.indexOf('직원') > -1) {
+          // 이름 혹은 직원 검색용 datalist 자동완성 렌더링
           var staffOpts = '';
           if (window.users && window.users.length > 0) {
             window.users.forEach(function(u) {
@@ -7781,6 +7805,7 @@ function selectReqType(typeId) {
             '<input class="form-input" list="staff-list-' + i + '" id="rf-' + i + '" placeholder="이름을 입력하거나 선택하세요"/>' +
             '<datalist id="staff-list-' + i + '">' + staffOpts + '</datalist></div>';
         } else {
+          // 그 외 일반 텍스트 입력창 처리
           fieldsHtml += '<div class="form-row"><label class="form-label">' + labelText + req + '</label>' +
             '<input class="form-input" id="rf-' + i + '"/></div>';
         }
