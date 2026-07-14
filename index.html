@@ -9171,8 +9171,8 @@ async function renderRepairNew(area, ex) {
       </div>
 
       <div class="form-row">
-        <label class="form-label">비용</label>
-        <input class="form-input" id="rpCost" value="${ex?ex.cost||'':''}" placeholder="예: 150,000원 / 견적 대기" />
+        <label class="form-label">총 비용 (원)</label>
+<input class="form-input" id="rpCost" value="${ex && ex.cost ? Number(ex.cost).toLocaleString('ko-KR') : ''}" placeholder="숫자만 입력하세요" oninput="this.value = this.value.replace(/[^0-9]/g, '').replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');" />
       </div>
 
       <div class="form-row">
@@ -9288,7 +9288,8 @@ async function saveRepair() {
   const date    = document.getElementById('rpDate')?.value;
   const title   = document.getElementById('rpTitle')?.value.trim();
   const vendor  = document.getElementById('rpVendor')?.value.trim() || null;
-  const cost    = document.getElementById('rpCost')?.value.trim() || null;
+  const rawCost = document.getElementById('rpCost')?.value.replace(/,/g, '') || '';
+  const cost = rawCost ? parseInt(rawCost, 10) : null;
   const content = document.getElementById('rpContent')?.value.trim() || null;
   if (!store)  { alert('매장을 선택해주세요.'); return; }
   if (!date)   { alert('보수일을 선택해주세요.'); return; }
