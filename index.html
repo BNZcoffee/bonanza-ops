@@ -7733,16 +7733,27 @@ function selectReqType(typeId) {
     if (f.type === 'textarea') {
       fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
         '<textarea class="form-input" id="rf-' + i + '" style="min-height:70px"></textarea></div>';
-    } else if (f.type === 'date') {
-      fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
-        '<input type="date" class="form-input" id="rf-' + i + '"/></div>';
-        } else if (f.type === 'repair_cat') {
-        const catOptions = (window.cats || []).map(function(c) { 
-          return '<option value="' + (c.label || c.name) + '">' + (c.label || c.name) + '</option>'; 
-        }).join('');
+ } else if (f.type === 'repair_cat') {
+        // 우선 빈 선택창을 먼저 그려둡니다.
         fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
-          '<select class="form-input" id="rf-' + i + '"><option value="">선택해주세요</option>' + catOptions + '</select></div>';
-    } else if (f.type === 'select' && f.options && f.options.length) {
+          '<select class="form-input" id="rf-' + i + '"><option value="">로딩 중...</option></select></div>';
+        
+        // 데이터베이스에서 카테고리 목록을 직접 긁어와 선택창을 채웁니다.
+        // (만약 카테고리 테이블명이 'categories'라면 아래 'repair_categories'를 'categories'로 변경해주세요)
+        sb.from('repair_categories').select('*').order('name', {ascending: true}).then(function(res) {
+          const selectEl = document.getElementById('rf-' + i);
+          if (selectEl && res.data) {
+            let opts = '<option value="">선택해주세요</option>';
+            res.data.forEach(function(c) {
+              opts += '<option value="' + (c.name || c.label) + '">' + (c.name || c.label) + '</option>';
+            });
+            selectEl.innerHTML = opts;
+          }
+        }).catch(function(err) {
+          // 에러 발생 시 예외 처리
+          const selectEl = document.getElementById('rf-' + i);
+          if (selectEl) selectEl.innerHTML = '<option value="">목록 로드 실패</option>';
+        });
       fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
         '<select class="form-input" id="rf-' + i + '"><option value="">선택해주세요</option>' +
         f.options.map(function(o){ return '<option value="' + o + '">' + o + '</option>'; }).join('') +
