@@ -7734,7 +7734,6 @@ function selectReqType(typeId) {
       fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
         '<textarea class="form-input" id="rf-' + i + '" style="min-height:70px"></textarea></div>';
 } else if (f.type === 'repair_cat') {
-        // 복잡한 루프를 싹 비우고 브라우저 에러를 원천 차단하는 정적 방식으로 폼을 바로 그립니다.
         fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
           '<select class="form-input" id="rf-' + i + '">' +
             '<option value="">선택해주세요</option>' +
@@ -7745,15 +7744,17 @@ function selectReqType(typeId) {
             '<option value="장비">장비</option>' +
             '<option value="기타">기타</option>' +
           '</select></div>';
-
-      fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
-        '<select class="form-input" id="rf-' + i + '"><option value="">선택해주세요</option>' +
-        f.options.map(function(o){ return '<option value="' + o + '">' + o + '</option>'; }).join('') +
-        '</select></div>';
-    } else {
-      fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
-        '<input class="form-input" id="rf-' + i + '"/></div>';
-    }
+      } else if (f.type === 'select') {
+        var selectOptions = '<option value="">선택해주세요</option>';
+        if (f.options && f.options.length > 0) {
+          selectOptions += f.options.map(function(o){ return '<option value="' + o + '">' + o + '</option>'; }).join('');
+        }
+        fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
+          '<select class="form-input" id="rf-' + i + '">' + selectOptions + '</select></div>';
+      } else {
+        fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
+          '<input class="form-input" id="rf-' + i + '"/></div>';
+      }
   });
 
 const guideHtml = t.guide ?
