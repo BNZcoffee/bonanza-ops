@@ -7733,28 +7733,41 @@ function selectReqType(typeId) {
     if (f.type === 'textarea') {
       fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
         '<textarea class="form-input" id="rf-' + i + '" style="min-height:70px"></textarea></div>';
- } else if (f.type === 'repair_cat') {
-        var targetCats = window.cats || window.allCats || window.categories || [];
-        var catOptions = '<option value="">선택해주세요</option>';
+} else if (f.type === 'repair_cat') {
+        var opts = '<option value="">선택해주세요</option>';
+        var source = [];
         
-        if (targetCats && targetCats.length > 0) {
-          targetCats.forEach(function(c) {
-            var nameVal = c.name || c.label || '';
-            if (nameVal) {
-              catOptions += '<option value="' + nameVal + '">' + nameVal + '</option>';
+        try {
+          if (window.cats && window.cats.length > 0) {
+            source = window.cats;
+          } else if (window.allCats && window.allCats.length > 0) {
+            source = window.allCats;
+          } else if (window.categories && window.categories.length > 0) {
+            source = window.categories;
+          }
+        } catch (e) {
+          source = [];
+        }
+
+        if (source && source.length > 0) {
+          for (var k = 0; k < source.length; k++) {
+            var val = source[k].name || source[k].label || '';
+            if (val) {
+              opts += '<option value="' + val + '">' + val + '</option>';
             }
-          });
+          }
         } else {
-          catOptions += '<option value="전기/조명">전기/조명</option>';
-          catOptions += '<option value="배관/설비">배관/설비</option>';
-          catOptions += '<option value="냉난방">냉난방</option>';
-          catOptions += '<option value="인테리어">인테리어</option>';
-          catOptions += '<option value="장비">장비</option>';
-          catOptions += '<option value="기타">기타</option>';
+          opts += '<option value="전기/조명">전기/조명</option>';
+          opts += '<option value="배관/설비">배관/설비</option>';
+          opts += '<option value="냉난방">냉난방</option>';
+          opts += '<option value="인테리어">인테리어</option>';
+          opts += '<option value="장비">장비</option>';
+          opts += '<option value="기타">기타</option>';
         }
 
         fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
-          '<select class="form-input" id="rf-' + i + '">' + catOptions + '</select></div>';
+          '<select class="form-input" id="rf-' + i + '">' + opts + '</select></div>';
+
       fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
         '<select class="form-input" id="rf-' + i + '"><option value="">선택해주세요</option>' +
         f.options.map(function(o){ return '<option value="' + o + '">' + o + '</option>'; }).join('') +
