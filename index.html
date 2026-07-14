@@ -1817,7 +1817,7 @@ async function renderPostDetail(area) {
       </div>
       <div class="wm-wrap">
         <div class="watermark">${wmText}&nbsp;&nbsp;&nbsp;${wmText}&nbsp;&nbsp;&nbsp;${wmText}</div>
-        <div class="detail-body" id="detailBodyContent" onselectstart="return false"></div>
+        <div class="detail-body" id="detailBodyContent" style="white-space: pre-wrap;" onselectstart="return false"></div>
       </div>
       ${attachHtml}
       ${refHtml}
@@ -5737,7 +5737,7 @@ const CAT_COLORS = [
 ];
 async function renderAll(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  let q = sb.from('posts').select('*,categories(name)').order('created_at',{ascending:false});
+  let q = sb.from('posts').select('*, categories(name), users(name, store, part, role)').order('created_at',{ascending:false});
   if (currentUser.role !== 'admin') q = q.eq('status','published');
   const {data:posts} = await q;
   const filtered = (posts||[]).filter(p=>canSee(p));
