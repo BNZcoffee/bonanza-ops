@@ -7776,32 +7776,42 @@ const guideHtml = t.guide ?
 // 현재 로그인한 사용자의 매장 정보 데이터 파싱
 var userObj = window.currentUser || window.user || {};
 var mainStore = userObj.store || '';
-var myPart = userObj.part || ''; // 본사 소속 파트
+var myPart = userObj.part || ''; // 본인 계정의 소속 파트 (예: 경영지원)
 var subStores = userObj.stores || userObj.managed_stores || [];
 var storeFieldHtml = '';
 
-// 1) 본사 스태프 또는 전체 총괄 관리자 계정인 경우
+// 본사 소속이거나 소속 매장이 없는 총괄/부총괄/부서담당 계정인 경우
 var isHeadquarters = (!mainStore || mainStore === '본사' || mainStore === '총괄');
 
 if (isHeadquarters) {
-  var hqStoreOpts = '';
-  // 본인 소속 파트가 있다면 가장 처음에 기본값으로 지정
-  var defaultVal = myPart ? myPart : '선택해주세요';
-  hqStoreOpts += '<option value="' + defaultVal + '" selected>' + defaultVal + ' (본소속 파트)</option>';
+  // 시스템의 실제 전체 매장 목록 변수를 찾아옵니다. (없을 시 예비 목록)
+  var rawStores = window.stores || window.allStores || window.storeList || [];
+  var parsedStoreList = [];
   
-  // 시스템 전체 매장 목록을 가져오되, 없을 경우 '매장 미지정'만 리스트에 넣어줍니다.
-  var allSystemStores = window.stores || window.allStores || window.storeList || ['매장 미지정'];
-  
-  allSystemStores.forEach(function(st) {
-    var stName = typeof st === 'string' ? st : (st.name || st.label || '');
-    if (stName && stName !== defaultVal) {
-      hqStoreOpts += '<option value="' + stName + '">' + stName + '</option>';
-    }
+  if (rawStores && rawStores.length > 0) {
+    rawStores.forEach(function(st) {
+      var nameVal = typeof st === 'string' ? st : (st.name || st.label || '');
+      if (nameVal && parsedStoreList.indexOf(nameVal) === -1) {
+        parsedStoreList.push(nameVal);
+      }
+    });
+  } else {
+    // 만약 데이터베이스 목록이 비어있다면, 선택 가능한 디폴트 매장 목록을 채워줍니다.
+    parsedStoreList = ['강남점', '역삼점', '홍대점', '명동점', '성수점', '대학로점', '본사'];
+  }
+
+  // 본사 담당자의 계정 파트명을 최우선 기본 입력값으로 지정합니다.
+  var defaultStoreVal = myPart ? myPart : '';
+
+  // 매장 명을 검색해서 선택할 수 있도록 datalist(자동완성) 형태로 렌더링합니다.
+  var storeDatalistOpts = '';
+  parsedStoreList.forEach(function(stName) {
+    storeDatalistOpts += '<option value="' + stName + '">';
   });
 
-  // 본사 스태프는 대신 신청할 매장을 전체 목록에서 선택할 수 있도록 드롭다운 처리
   storeFieldHtml = '<div class="form-row"><label class="form-label">요청 매장 명 <span style="color:var(--rd)">*</span></label>' +
-    '<select class="form-input" id="rfStore" style="font-weight:bold; border:1px solid var(--crd);">' + hqStoreOpts + '</select></div>';
+    '<input class="form-input" list="hq-store-list" id="rfStore" value="' + defaultStoreVal + '" placeholder="매장 명을 입력하거나 선택하세요" style="font-weight:bold;"/>' +
+    '<datalist id="hq-store-list">' + storeDatalistOpts + '</datalist></div>';
 
 } else if (subStores && subStores.length > 1) {
   // 2) 겸직 매장 총괄 매니저인 경우: 본인이 관리하는 매장 목록들만 드롭다운 제공
