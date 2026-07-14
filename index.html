@@ -7734,39 +7734,17 @@ function selectReqType(typeId) {
       fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
         '<textarea class="form-input" id="rf-' + i + '" style="min-height:70px"></textarea></div>';
 } else if (f.type === 'repair_cat') {
-        var opts = '<option value="">선택해주세요</option>';
-        var source = [];
-        
-        try {
-          if (window.cats && window.cats.length > 0) {
-            source = window.cats;
-          } else if (window.allCats && window.allCats.length > 0) {
-            source = window.allCats;
-          } else if (window.categories && window.categories.length > 0) {
-            source = window.categories;
-          }
-        } catch (e) {
-          source = [];
-        }
-
-        if (source && source.length > 0) {
-          for (var k = 0; k < source.length; k++) {
-            var val = source[k].name || source[k].label || '';
-            if (val) {
-              opts += '<option value="' + val + '">' + val + '</option>';
-            }
-          }
-        } else {
-          opts += '<option value="전기/조명">전기/조명</option>';
-          opts += '<option value="배관/설비">배관/설비</option>';
-          opts += '<option value="냉난방">냉난방</option>';
-          opts += '<option value="인테리어">인테리어</option>';
-          opts += '<option value="장비">장비</option>';
-          opts += '<option value="기타">기타</option>';
-        }
-
+        // 복잡한 루프를 싹 비우고 브라우저 에러를 원천 차단하는 정적 방식으로 폼을 바로 그립니다.
         fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
-          '<select class="form-input" id="rf-' + i + '">' + opts + '</select></div>';
+          '<select class="form-input" id="rf-' + i + '">' +
+            '<option value="">선택해주세요</option>' +
+            '<option value="전기/조명">전기/조명</option>' +
+            '<option value="배관/설비">배관/설비</option>' +
+            '<option value="냉난방">냉난방</option>' +
+            '<option value="인테리어">인테리어</option>' +
+            '<option value="장비">장비</option>' +
+            '<option value="기타">기타</option>' +
+          '</select></div>';
 
       fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
         '<select class="form-input" id="rf-' + i + '"><option value="">선택해주세요</option>' +
