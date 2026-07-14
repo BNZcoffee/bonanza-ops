@@ -7736,6 +7736,12 @@ function selectReqType(typeId) {
     } else if (f.type === 'date') {
       fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
         '<input type="date" class="form-input" id="rf-' + i + '"/></div>';
+        } else if (f.type === 'repair_cat') {
+        const catOptions = (window.cats || []).map(function(c) { 
+          return '<option value="' + (c.label || c.name) + '">' + (c.label || c.name) + '</option>'; 
+        }).join('');
+        fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
+          '<select class="form-input" id="rf-' + i + '"><option value="">선택해주세요</option>' + catOptions + '</select></div>';
     } else if (f.type === 'select' && f.options && f.options.length) {
       fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
         '<select class="form-input" id="rf-' + i + '"><option value="">선택해주세요</option>' +
@@ -15200,11 +15206,12 @@ function renderFieldEditor() {
   box.innerHTML = editingFields.map((f, i) =>
     '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">' +
       '<input class="form-input" style="flex:1;padding:6px 10px" value="' + (f.label||'') + '" placeholder="항목 이름" onchange="editingFields[' + i + '].label=this.value"/>' +
-      '<select class="form-input" style="width:90px;padding:6px" onchange="editingFields[' + i + '].type=this.value">' +
-        '<option value="text"' + (f.type==='text'?' selected':'') + '>한 줄</option>' +
-        '<option value="textarea"' + (f.type==='textarea'?' selected':'') + '>여러 줄</option>' +
-        '<option value="date"' + (f.type==='date'?' selected':'') + '>날짜</option>' +
-      '</select>' +
+      '<select class="form-input" style="width:130px;padding:6px" onchange="editingFields[' + i + '].type=this.value">' +
+              '<option value="text"' + (f.type==='text'?' selected':'') + '>한 줄</option>' +
+              '<option value="textarea"' + (f.type==='textarea'?' selected':'') + '>여러 줄</option>' +
+              '<option value="date"' + (f.type==='date'?' selected':'') + '>날짜</option>' +
+              '<option value="repair_cat"' + (f.type==='repair_cat'?' selected':'') + '>보수 카테고리 연동</option>' +
+            '</select>' +
       '<label style="font-size:11px;color:var(--ts);display:flex;align-items:center;gap:3px;white-space:nowrap">' +
         '<input type="checkbox"' + (f.required?' checked':'') + ' onchange="editingFields[' + i + '].required=this.checked" style="width:auto"/>필수</label>' +
       '<button onclick="editingFields.splice(' + i + ',1);renderFieldEditor()" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-x"></i></button>' +
