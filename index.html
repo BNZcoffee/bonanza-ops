@@ -6388,7 +6388,20 @@ function quickStartCard(){
   `;
 }
 async function renderManual(area) {
+  if (!area) return;
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  try {
+    const { data: config, error } = await sb
+      .from('app_configs')
+      .select('value')
+      .eq('key', 'quick_start_guide');
+      
+    if (!error && config && config.length > 0) {
+      cachedQuickStartHtml = config[0].value; // 전역 변수 채워넣기!
+    }
+  } catch (e) {
+    console.warn("가이드북 데이터 로드 실패:", e);
+  }
   // 열람 가능한 파트 목록 (권한별)
   const auds = availableManualAudiences();
   // 현재 선택된 파트가 열람 불가하면 첫 파트로
