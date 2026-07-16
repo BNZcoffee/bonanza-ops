@@ -6612,6 +6612,7 @@ function goManualEdit() {
   }
 }
 
+// 💡 [Quill 에디터 탑재 버전]
 async function renderManualEdit(area) {
   if (!area) return;
   
@@ -6636,7 +6637,7 @@ async function renderManualEdit(area) {
 
   let finalSecList = '<div id="manualSectionsContainer"><div style="text-align:center; padding:20px; color:var(--th);">설명서 섹션을 불러오는 중...</div></div>';
 
-  // 3. 레이아웃 렌더링 (textarea 대신 에디터가 들어갈 #quillEditorContainer 배치)
+  // 3. 레이아웃 렌더링
   area.innerHTML = `
     <div class="page-header">
       <div class="page-title">설명서 편집</div>
@@ -6655,12 +6656,11 @@ async function renderManualEdit(area) {
       <strong>편집 안내:</strong> 에디터로 편하게 가이드북을 작성하시고 <strong>"💾 변경사항 저장"</strong>을 누르면 실시간 반영됩니다.
     </div>
     
-    <!-- ✍️ 스마트 에디터 구역 -->
+    <!-- ✍️ 1. 신규 입사자 가이드북 편집 패널 (Quill 에디터) -->
     <div class="admin-guide-panel" style="background:#FFF9E6; border:0.5px solid #E8C07A; border-radius:12px; padding:20px; margin:20px 0;">
       <h3 style="font-size:14px; color:#7A5C00; margin-bottom:8px; font-weight:bold;"><i class="ti ti-edit"></i> [관리자 전용] 신규 입사자 가이드북 편집</h3>
       <p style="font-size:12px; color:#8A7A68; margin-bottom:12px;">게시판처럼 글자 굵게, 크기, 색상, 목록 메뉴를 사용하여 마우스로 편하게 수정하세요.</p>
       
-      <!-- Quill 에디터 박스 -->
       <div style="background:#fff; border-radius:8px; overflow:hidden; border:1px solid var(--crd);">
         <div id="quillEditorContainer" style="height: 320px; font-size: 14px;"></div>
       </div>
@@ -6671,14 +6671,15 @@ async function renderManualEdit(area) {
       </div>
     </div>
 
+    <!-- ✍️ 2. 하단 설명서 섹션 영역 -->
     ${finalSecList}
     <button class="btn-new" onclick="addManualSec()" style="width:100%; margin-top:6px;"><i class="ti ti-plus"></i> 새 섹션 추가</button>
   `;
 
-  // 4. Quill 에디터 생성 및 기존 가이드 HTML 바인딩
+  // 4. 가이드북 에디터 초기화
   initQuillEditor();
 
-  // 5. 설명서 섹션 로딩
+  // 5. 설명서 개별 항목들 로딩 및 에디터 적용
   try {
     const { data: sections, error } = await sb
       .from('manual_sections')
@@ -6704,14 +6705,43 @@ async function renderManualEdit(area) {
                 <button class="btn-cancel-sm" onclick="moveManualSec('${s.id}',1)">▼</button>
                 <button class="btn-cancel-sm" style="color:var(--rd);" onclick="deleteManualSec('${s.id}')">삭제</button>
               </div>
-              <textarea class="form-input" id="msec-body-${s.id}" style="min-height:140px;font-family:inherit;font-size:13px;line-height:1.7">${s.body || ''}</textarea>
+              
+              <!-- 개별 설명서 항목 전용 미니 에디터 -->
+              <div style="background:#fff; border-radius:8px; overflow:hidden; border:1px solid var(--crd); margin-bottom:8px;">
+                <div id="quill-body-${s.id}" style="height:200px; font-size:13px; line-height:1.7;"></div>
+              </div>
+
               <div style="text-align:right;margin-top:8px">
-                <button class="btn-cancel-sm" onclick="saveManualSec('${s.id}')">💾 이 섹션 저장</button>
+                <button class="btn-cancel-sm" onclick="saveManualSecWithQuill('${s.id}')">💾 이 섹션 저장</button>
               </div>
             </div>
           `;
         }
         container.innerHTML = secListHtml;
+
+        // 개별 에디터들 0.1초 뒤 순차 생성 및 기존 데이터 바인딩
+        setTimeout(() => {
+          sections.forEach(s => {
+            const editorId = `#quill-body-${s.id}`;
+            if (document.querySelector(editorId)) {
+              const miniQuill = new Quill(editorId, {
+                theme: 'snow',
+                modules: {
+                  toolbar: [
+                    ['bold', 'italic', 'underline'],
+                    [{ 'color': [] }],
+                    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                    ['clean']
+                  ]
+                },
+                placeholder: '설명서 본문 내용을 입력하세요...'
+              });
+              miniQuill.root.innerHTML = s.body || '';
+              window['quill_instance_' + s.id] = miniQuill;
+            }
+          });
+        }, 100);
+
       } else {
         container.innerHTML = '<div style="color:var(--th);padding:20px;text-align:center;">섹션이 없습니다. 우측 버튼으로 추가하세요.</div>';
       }
@@ -6721,11 +6751,11 @@ async function renderManualEdit(area) {
   }
 }
 
-// ✍️ 전역 에디터 보관용 변수
+// ✍️ 전역 가이드북 에디터 인스턴스
 let manualQuillInstance = null;
 
-// 🛠️ 에디터 생성 및 기존 가이드 불러오기 함수
-async function initQuillEditor() {
+// 🛠️ 가이드북 에디터 생성 및 기존 데이터 로드
+function initQuillEditor() {
   const container = document.getElementById('quillEditorContainer');
   if (!container) return;
 
@@ -6746,23 +6776,23 @@ async function initQuillEditor() {
     placeholder: '여기에 입사자 가이드 내용을 작성해 주세요...'
   });
 
-  try {
-    const { data: config, error } = await sb
-      .from('app_configs')
-      .select('value')
-      .eq('key', 'quick_start_guide');
+  setTimeout(async () => {
+    try {
+      const { data: config, error } = await sb
+        .from('app_configs')
+        .select('value')
+        .eq('key', 'quick_start_guide');
 
-    if (error) throw error;
-
-    if (config && config.length > 0) {
-      manualQuillInstance.root.innerHTML = config[0].value;
+      if (!error && config && config.length > 0) {
+        manualQuillInstance.root.innerHTML = config[0].value;
+      }
+    } catch (err) {
+      console.warn("가이드 데이터 로드 실패:", err);
     }
-  } catch (err) {
-    console.warn("에디터 데이터 불러오기 실패:", err);
-  }
+  }, 100);
 }
 
-// 💾 에디터 전용 저장 함수
+// 💾 1. 가이드북 저장 함수
 async function saveQuickStartGuideWithQuill() {
   if (!manualQuillInstance) return;
 
@@ -6800,6 +6830,32 @@ async function saveQuickStartGuideWithQuill() {
       resultSpan.textContent = ' ❌ 저장 실패: ' + err.message;
       resultSpan.style.color = 'var(--rd)';
     }
+  }
+}
+
+// 💾 2. 아래 항목들(개별 설명서 섹션) 전용 에디터 저장 함수
+async function saveManualSecWithQuill(id) {
+  const titleVal = document.getElementById('msec-title-' + id)?.value || '';
+  const quillInstance = window['quill_instance_' + id];
+  
+  if (!quillInstance) {
+    alert('에디터를 찾을 수 없습니다.');
+    return;
+  }
+
+  const bodyVal = quillInstance.root.innerHTML;
+
+  try {
+    const { error } = await sb
+      .from('manual_sections')
+      .update({ title: titleVal, body: bodyVal })
+      .eq('id', id);
+
+    if (error) throw error;
+    alert('이 섹션이 성공적으로 저장되었습니다!');
+  } catch (err) {
+    console.error("섹션 저장 실패:", err);
+    alert('저장 실패: ' + err.message);
   }
 }
 
