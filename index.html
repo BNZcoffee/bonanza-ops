@@ -6622,6 +6622,9 @@ async function renderManualEdit(area) {
     return;
   }
 
+  // 로딩 표시 먼저 띄우기
+  area.innerHTML = '<div class="loading" style="text-align:center; padding:40px; color:var(--th);"><i class="ti ti-loader spin"></i> 편집 환경을 구성하고 데이터를 불러오는 중...</div>';
+
   // 2. 탭바 및 뷰어 구분 설정
   const auds = [
     ['user', '팀원(매장)용'],
@@ -6629,15 +6632,63 @@ async function renderManualEdit(area) {
     ['dept', '부서담당용'],
     ['admin', '총괄·부총괄용']
   ];
-  
   const currentAudience = typeof manualEditAudience !== 'undefined' ? manualEditAudience : 'user';
   const tabBar = '<div class="tabbar" style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap;">' +
     auds.map(([a, l]) => '<button class="tab-btn' + (currentAudience === a ? ' active' : '') + '" onclick="manualEditAudience=\'' + a + '\';renderManualEdit(document.getElementById(\'contentArea\'))">' + l + '</button>').join('') +
   '</div>';
 
-  let finalSecList = '<div id="manualSectionsContainer"><div style="text-align:center; padding:20px; color:var(--th);">설명서 섹션을 불러오는 중...</div></div>';
+  // 3. [핵심] 렌더링 전에 데이터베이스에서 모든 데이터(가이드북 + 설명서 섹션들)를 병렬로 먼저 완벽하게 가져옵니다.
+  let guideHtml = '';
+  let sections = [];
+  
+  try {
+    const [guideRes, sectionsRes] = await Promise.all([
+      sb.from('app_configs').select('value').eq('key', 'quick_start_guide'),
+      sb.from('manual_sections').select('*').eq('audience', currentAudience).order('sort_order')
+    ]);
 
-  // 3. 레이아웃 렌더링
+    if (guideRes.data && guideRes.data.length > 0) {
+      guideHtml = guideRes.data[0].value;
+    }
+    if (sectionsRes.data) {
+      sections = sectionsRes.data;
+    }
+  } catch (err) {
+    console.error("데이터 로드 실패:", err);
+  }
+
+  // 4. 데이터가 준비되었으므로 레이아웃을 한 번에 그려냅니다.
+  let secListHtml = '';
+  if (sections && sections.length > 0) {
+    for (let i = 0; i < sections.length; i++) {
+      const s = sections[i];
+      const escapedTitle = (s.title || '').replace(/"/g, '&quot;');
+      secListHtml += `
+        <div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:14px;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span style="font-size:11px;color:var(--th)">#${i + 1}</span>
+            <input class="form-input" id="msec-title-${s.id}" value="${escapedTitle}" style="flex:1;padding:7px 10px;font-weight:600" placeholder="섹션 제목"/>
+            <button class="btn-cancel-sm" onclick="moveManualSec('${s.id}',-1)">▲</button>
+            <button class="btn-cancel-sm" onclick="moveManualSec('${s.id}',1)">▼</button>
+            <button class="btn-cancel-sm" style="color:var(--rd);" onclick="deleteManualSec('${s.id}')">삭제</button>
+          </div>
+          
+          <!-- 개별 설명서 항목 전용 미니 에디터 박스 -->
+          <div style="background:#fff; border-radius:8px; overflow:hidden; border:1px solid var(--crd); margin-bottom:8px;">
+            <div id="quill-body-${s.id}" style="height:200px; font-size:13px; line-height:1.7;"></div>
+          </div>
+
+          <div style="text-align:right;margin-top:8px">
+            <button class="btn-cancel-sm" onclick="saveManualSecWithQuill('${s.id}')">💾 이 섹션 저장</button>
+          </div>
+        </div>
+      `;
+    }
+  } else {
+    secListHtml = '<div style="color:var(--th);padding:20px;text-align:center;">섹션이 없습니다. 우측 버튼으로 추가하세요.</div>';
+  }
+
+  // 완성된 전체 HTML을 화면에 꽂아 넣습니다.
   area.innerHTML = `
     <div class="page-header">
       <div class="page-title">설명서 편집</div>
@@ -6672,138 +6723,57 @@ async function renderManualEdit(area) {
     </div>
 
     <!-- ✍️ 2. 하단 설명서 섹션 영역 -->
-    ${finalSecList}
+    <div id="manualSectionsContainer">${secListHtml}</div>
     <button class="btn-new" onclick="addManualSec()" style="width:100%; margin-top:6px;"><i class="ti ti-plus"></i> 새 섹션 추가</button>
   `;
 
-  // 4. 설명서 데이터베이스 조회 및 렌더링 시작
-  try {
-    const { data: sections, error } = await sb
-      .from('manual_sections')
-      .select('*')
-      .eq('audience', currentAudience)
-      .order('sort_order');
-
-    if (error) throw error;
-
-    const container = document.getElementById('manualSectionsContainer');
-    if (container) {
-      if (sections && sections.length > 0) {
-        let secListHtml = '';
-        for (let i = 0; i < sections.length; i++) {
-          const s = sections[i];
-          const escapedTitle = (s.title || '').replace(/"/g, '&quot;');
-          secListHtml += `
-            <div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:14px;margin-bottom:10px">
-              <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                <span style="font-size:11px;color:var(--th)">#${i + 1}</span>
-                <input class="form-input" id="msec-title-${s.id}" value="${escapedTitle}" style="flex:1;padding:7px 10px;font-weight:600" placeholder="섹션 제목"/>
-                <button class="btn-cancel-sm" onclick="moveManualSec('${s.id}',-1)">▲</button>
-                <button class="btn-cancel-sm" onclick="moveManualSec('${s.id}',1)">▼</button>
-                <button class="btn-cancel-sm" style="color:var(--rd);" onclick="deleteManualSec('${s.id}')">삭제</button>
-              </div>
-              
-              <!-- 개별 설명서 항목 전용 미니 에디터 -->
-              <div style="background:#fff; border-radius:8px; overflow:hidden; border:1px solid var(--crd); margin-bottom:8px;">
-                <div id="quill-body-${s.id}" style="height:200px; font-size:13px; line-height:1.7;"></div>
-              </div>
-
-              <div style="text-align:right;margin-top:8px">
-                <button class="btn-cancel-sm" onclick="saveManualSecWithQuill('${s.id}')">💾 이 섹션 저장</button>
-              </div>
-            </div>
-          `;
-        }
-        container.innerHTML = secListHtml;
-
-        // 💡 [핵심 해결] 충돌을 방지하기 위해 0.05초 간격을 두고 에디터들을 안전하게 '하나씩 순서대로' 만들어 냅니다.
-        let delay = 100;
-        
-        // (A) 가장 먼저 최상단 메인 가이드북 에디터 생성 명령
-        setTimeout(() => {
-          initQuillEditor();
-        }, delay);
-        
-        // (B) 설명서 리스트 에디터들을 하나씩 정밀 순차 생성
-        sections.forEach((s) => {
-          delay += 150; // 각 에디터 생성 간격을 벌립니다.
-          setTimeout(() => {
-            const editorId = `#quill-body-${s.id}`;
-            const targetDom = document.querySelector(editorId);
-            if (targetDom) {
-              const miniQuill = new Quill(editorId, {
-                theme: 'snow',
-                modules: {
-                  toolbar: [
-                    ['bold', 'italic', 'underline'],
-                    [{ 'color': [] }],
-                    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-                    ['clean']
-                  ]
-                },
-                placeholder: '설명서 본문 내용을 입력하세요...'
-              });
-              miniQuill.root.innerHTML = s.body || '';
-              window['quill_instance_' + s.id] = miniQuill;
-            }
-          }, delay);
-        });
-
-      } else {
-        container.innerHTML = '<div style="color:var(--th);padding:20px;text-align:center;">섹션이 없습니다. 우측 버튼으로 추가하세요.</div>';
-        // 섹션이 없을 때도 메인 가이드북은 생성
-        setTimeout(() => { initQuillEditor(); }, 100);
-      }
-    }
-  } catch (err) {
-    console.error("설명서 섹션 로드 실패:", err);
-    // 실패 시에도 가이드북 복구
-    setTimeout(() => { initQuillEditor(); }, 100);
+  // 5. DOM이 완성되었으므로 지연 시간 없이 에디터를 즉시 초기화하고 내용을 확실히 꽂아 넣습니다.
+  
+  // (A) 상단 메인 가이드북 에디터 초기화 및 내용 주입
+  const mainContainer = document.getElementById('quillEditorContainer');
+  if (mainContainer) {
+    manualQuillInstance = new Quill('#quillEditorContainer', {
+      theme: 'snow',
+      modules: {
+        toolbar: [
+          [{ 'header': [1, 2, 3, false] }],
+          ['bold', 'italic', 'underline', 'strike'],        
+          [{ 'color': [] }, { 'background': [] }],          
+          [{ 'list': 'ordered'}, { 'list': 'bullet' }],     
+          [{ 'align': [] }],                                
+          ['clean']     
+        ]
+      },
+      placeholder: '여기에 입사자 가이드 내용을 작성해 주세요...'
+    });
+    // 이미 가져온 데이터를 딜레이 없이 즉시 찔러넣음!
+    manualQuillInstance.root.innerHTML = guideHtml || '';
   }
-}
 
-// ✍ * 전역 가이드북 에디터 인스턴스
-let manualQuillInstance = null;
-
-// 🛠 * 가이드북 에디터 독립 생성 및 기존 데이터 로드
-function initQuillEditor() {
-  const container = document.getElementById('quillEditorContainer');
-  if (!container) return;
-
-  const toolbarOptions = [
-    [{ 'header': [1, 2, 3, false] }],
-    ['bold', 'italic', 'underline', 'strike'],        
-    [{ 'color': [] }, { 'background': [] }],          
-    [{ 'list': 'ordered'}, { 'list': 'bullet' }],     
-    [{ 'align': [] }],                                
-    ['clean']                                         
-  ];
-
-  // 기존 인스턴스 초기화 후 재생성
-  container.innerHTML = '';
-  manualQuillInstance = new Quill('#quillEditorContainer', {
-    theme: 'snow',
-    modules: {
-      toolbar: toolbarOptions
-    },
-    placeholder: '여기에 입사자 가이드 내용을 작성해 주세요...'
-  });
-
-  // Supabase 데이터 바인딩
-  setTimeout(async () => {
-    try {
-      const { data: config, error } = await sb
-        .from('app_configs')
-        .select('value')
-        .eq('key', 'quick_start_guide');
-
-      if (!error && config && config.length > 0) {
-        manualQuillInstance.root.innerHTML = config[0].value;
+  // (B) 설명서 리스트 에디터들 즉시 초기화 및 내용 주입
+  if (sections && sections.length > 0) {
+    sections.forEach((s) => {
+      const editorId = `#quill-body-${s.id}`;
+      const targetDom = document.querySelector(editorId);
+      if (targetDom) {
+        const miniQuill = new Quill(editorId, {
+          theme: 'snow',
+          modules: {
+            toolbar: [
+              ['bold', 'italic', 'underline'],
+              [{ 'color': [] }],
+              [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+              ['clean']
+            ]
+          },
+          placeholder: '설명서 본문 내용을 입력하세요...'
+        });
+        // 이미 가지고 있는 데이터를 딜레이 없이 즉시 찔러넣음!
+        miniQuill.root.innerHTML = s.body || '';
+        window['quill_instance_' + s.id] = miniQuill;
       }
-    } catch (err) {
-      console.warn("가이드 데이터 로드 실패:", err);
-    }
-  }, 100);
+    });
+  }
 }
 
 // 💾 1. 가이드북 저장 함수
@@ -6847,7 +6817,7 @@ async function saveQuickStartGuideWithQuill() {
   }
 }
 
-// 💾 2. 아래 항목들(개별 설명서 섹션) 전용 에디터 저장 함수
+// 💾 2. 개별 설명서 섹션 저장 함수
 async function saveManualSecWithQuill(id) {
   const titleVal = document.getElementById('msec-title-' + id)?.value || '';
   const quillInstance = window['quill_instance_' + id];
