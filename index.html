@@ -4451,7 +4451,63 @@ async function sendRemind(postId){
   alert('리마인드 발송 완료!\n\n'+cnt+'의 알림창에 이 공지가 다시 표시됩니다.');
   updateNotifDot();
 }
+// 🚨 [자동 리마인드 엔진] 설정창 스위치 확인 후 3일 미확인 직원에게 자동 발송
+async function checkAndSend3DayReminders() {
+  try {
+    // 1. 설정창(두 번째 사진)에서 자동 리마인드 스위치가 켜져 있는지 확인
+    const { data: ns } = await sb.from('notification_settings').select('remind_unread').single();
+    if (!ns || !ns.remind_unread) return; // 스위치가 꺼져있으면 조용히 종료
 
+    // 2. 하루에 한 번만 실행되도록 방어막 설정 (중복 발송 방지)
+    const today = new Date().toDateString();
+    if (localStorage.getItem('last_auto_remind_date') === today) return; 
+
+    // 3. 3일 전 시간 계산
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+
+    // 4. 3일이 지난 공지사항 모두 찾기
+    const { data: oldNotices } = await sb.from('posts')
+      .select('id, title')
+      .eq('status', 'published')
+      .lte('created_at', threeDaysAgo);
+    
+    if (!oldNotices || oldNotices.length === 0) return;
+
+    // 5. 첫 번째 사진의 완벽한 필터링 로직 적용 (admin, hr, 본사 직원 제외)
+    const { data: activeUsers } = await sb.from('users').select('id,role,is_master,is_vice_master,part,slack_member_id').eq('active', true);
+    const fieldStaffs = (activeUsers||[]).filter(u => !u.is_master && !u.is_vice_master && u.role !== 'admin' && u.role !== 'hr' && !u.part);
+    
+    if (fieldStaffs.length === 0) return;
+
+    let sentCount = 0;
+
+    // 6. 각 공지별로 안 읽은 현장 직원 찾아내서 슬랙 쏘기
+    for (const notice of oldNotices) {
+      const { data: reads } = await sb.from('post_reads').select('user_id').eq('post_id', notice.id);
+      const readUserIds = new Set((reads || []).map(r => r.user_id));
+      
+      const unreadStaffs = fieldStaffs.filter(staff => !readUserIds.has(staff.id));
+
+      for (const staff of unreadStaffs) {
+        const msg = `[자동 리마인드] '${notice.title}' 공지를 아직 확인하지 않으셨습니다.`;
+        await createNotification(staff.id, 'notice', notice.id, 'post', msg); // 앱 내 알림
+        
+        if (staff.slack_member_id && typeof sendSlackDM === 'function') {
+           const link = 'https://bnzcoffee.github.io/bonanza-ops/?post=' + notice.id;
+           await sendSlackDM(staff.slack_member_id, '🚨 ' + msg + '\n' + link); // 슬랙 알림
+        }
+        sentCount++;
+      }
+    }
+
+    // 발송 완료 후 오늘 날짜 도장 찍기 (내일 다시 실행됨)
+    localStorage.setItem('last_auto_remind_date', today);
+    if (sentCount > 0) console.log(`자동 리마인드 ${sentCount}건 발송 완료`);
+
+  } catch (error) {
+    console.error('자동 리마인드 실행 중 오류:', error);
+  }
+}
 // ── 즐겨찾기 ─────────────────────────────────────────────────────
 async function toggleFav(postId){
   const {data:existing} = await sb.from('post_favorites').select('id').eq('post_id',postId).eq('user_id',currentUser.id);
@@ -4538,6 +4594,8 @@ function notifGo(refType, refId, notifId){
 }
 // 🔔 [알림창 완벽 개편] 중복 제거 + 3단 탭 분리 + 기존 라우팅(notifGo) 완벽 연동
 async function loadNotifPanel() {
+  // 알림창을 열 때마다 자동 리마인드 조건을 검사합니다 (하루 1회만 발송됨)
+  checkAndSend3DayReminders();
   const list = document.getElementById('notifList');
   if (!list) return;
   list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--th);font-size:13px"><i class="ti ti-loader spin"></i></div>';
@@ -8225,6 +8283,15 @@ async function submitRequest() {
         '담당 파트: ' + part.name;
       await sendSlackNotify(part.slack_webhook, msg);
     }
+    // 👇 [신규 추가] 앱 내 알림 + 개인 슬랙 DM 동시 발송 (운영팀 또는 담당팀)
+    if (part && part.name) {
+      // 카테고리 이름에 '보고'가 포함되어 있으면 운영팀 전체에 발송, 아니면 해당 파트 전체에 발송
+      if (reqSelectedType.name.includes('보고')) {
+        await broadcastNotificationWithSlack('업무보고', req.id, 'request', `[업무보고] ${title} - ${currentUser.name}`);
+      } else {
+        await broadcastNotificationWithSlack('업무신청', req.id, 'request', `[${part.name}] 새로운 업무 요청: ${title}`, '', part.name);
+      }
+    }
   }
 
   // 관할 코치에게 참조 알림
@@ -8617,13 +8684,19 @@ async function markInProgress(id) {
   const due = document.getElementById('rqDue').value || null;
   if (!assignee) { alert('담당자를 먼저 지정해주세요.'); return; }
   await sb.from('requests').update({assignee_id: assignee, due_date: due, status: 'in_progress', updated_at: new Date().toISOString()}).eq('id', id);
-  // 신청자에게 알림
-  const { data: req } = await sb.from('requests').select('author_id,title').eq('id', id).single();
-  if (req?.author_id && req.author_id !== currentUser.id) {
-    await createNotification(req.author_id, 'request_inprogress', id, 'request',
-      `[업무 처리중] '${req.title}' 신청이 처리 중으로 변경되었습니다.`);
-    updateNotifDot();
-  }
+  // 💡 신청자에게 알림: store(매장명) 정보를 추가로 가져옵니다.
+    const { data: req } = await sb.from('requests').select('author_id, title, store').eq('id', id).single();
+    
+    if (req?.author_id && req.author_id !== currentUser.id) {
+      await createNotification(req.author_id, 'request_inprogress', id, 'request',
+        `[업무 처리중] '${req.title}' 신청이 처리 중으로 변경되었습니다.`);
+      updateNotifDot();
+    }
+    
+    // 👇 [신규 추가] 해당 매장 매니저들에게 진행상황 슬랙/앱 알림 동시 전송
+    if (req?.store) {
+      await broadcastNotificationWithSlack('진행상황', id, 'request', `[업무 처리중] '${req.title}' 업무가 진행 중으로 변경되었습니다.`, req.store);
+    }
   openReqById(id);
 }
 // 처리 완료 (담당자 + 완료일 필수)
@@ -8637,13 +8710,19 @@ async function completeReq(id) {
     assignee_id: assignee, due_date: due, done_date: done,
     status: 'done', updated_at: new Date().toISOString()
   }).eq('id', id);
-  // 신청자에게 완료 알림
-  const { data: req } = await sb.from('requests').select('author_id,title').eq('id', id).single();
-  if (req?.author_id && req.author_id !== currentUser.id) {
-    await createNotification(req.author_id, 'request_done', id, 'request',
-      `[업무 완료] '${req.title}' 신청이 처리 완료되었습니다. ✓`);
-    updateNotifDot();
-  }
+  // 💡 신청자에게 완료 알림: store(매장명) 정보를 추가로 가져옵니다.
+    const { data: req } = await sb.from('requests').select('author_id, title, store').eq('id', id).single();
+    
+    if (req?.author_id && req.author_id !== currentUser.id) {
+      await createNotification(req.author_id, 'request_done', id, 'request',
+        `[업무 완료] '${req.title}' 신청이 처리 완료되었습니다. ✅`);
+      updateNotifDot();
+    }
+
+    // 👇 [신규 추가] 해당 매장 매니저들에게 완료상황 슬랙/앱 알림 동시 전송
+    if (req?.store) {
+      await broadcastNotificationWithSlack('진행상황', id, 'request', `[업무 완료] '${req.title}' 업무가 최종 완료되었습니다. ✅`, req.store);
+    }
   alert('처리 완료로 변경되었습니다.');
   openReqById(id);
 }
@@ -8651,13 +8730,19 @@ async function rejectReq(id) {
   const reason = prompt('반려 사유를 입력하세요. (신청자가 확인합니다)');
   if (reason === null) return;
   await sb.from('requests').update({status: 'rejected', reject_reason: reason, updated_at: new Date().toISOString()}).eq('id', id);
-  // 신청자에게 반려 알림
-  const { data: req } = await sb.from('requests').select('author_id,title').eq('id', id).single();
-  if (req?.author_id && req.author_id !== currentUser.id) {
-    await createNotification(req.author_id, 'request_rejected', id, 'request',
-      `[업무 반려] '${req.title}' 신청이 반려되었습니다. 사유: ${reason||'없음'}`);
-    updateNotifDot();
-  }
+  //  💡 신청자에게 반려 알림: store(매장명) 정보를 추가로 가져옵니다.
+    const { data: req } = await sb.from('requests').select('author_id, title, store').eq('id', id).single();
+    
+    if (req?.author_id && req.author_id !== currentUser.id) {
+      await createNotification(req.author_id, 'request_rejected', id, 'request',
+        `[업무 반려] '${req.title}' 신청이 반려되었습니다. 사유: ${reason||'없음'}`);
+      updateNotifDot();
+    }
+
+    // 👇 [신규 추가] 해당 매장 매니저들에게 반려상황 슬랙/앱 알림 동시 전송
+    if (req?.store) {
+      await broadcastNotificationWithSlack('진행상황', id, 'request', `[업무 반려] '${req.title}' 업무가 반려되었습니다. (사유: ${reason||'없음'})`, req.store);
+    }
   openReqById(id);
 }
 async function changeAssignee(id) {
