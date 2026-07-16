@@ -315,14 +315,14 @@ textarea.form-input{min-height:120px;resize:vertical}
     <div class="logo" onclick="goPage('all')" style="cursor:pointer">Bonanza Coffee — 운영 매뉴얼</div>
   </div>
   <div class="topbar-right">
-<!-- 🔔 [Option 2] 모던 클래식 보더리스 디자인 -->
+<!-- 🔔 [최종 완성형] 모던 클래식 보더리스 디자인 / 간격 넓히고 불빛 일렬 정렬 -->
 <button class="topbar-btn" onclick="toggleNotifPanel()" aria-label="알림"
-        style="background: transparent; color: #fdfdfd; border: none; padding: 6px 12px; border-radius: 6px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 700; font-size: 13px; position: relative; transition: background 0.2s; height: 32px;"
-        onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='transparent'">
-  <i class="ti ti-bell" style="font-size: 17px; color: #ffffff;"></i> 
-  <span style="color: #ffffff;">알림</span>
-  <!-- 🟢/🟡 알림 불빛: 우측 상단에 눈에 띄게 배치 -->
-  <span class="notif-dot" id="notifDot" style="display: none; width: 14px; height: 14px; border-radius: 50%; position: absolute; top: -3px; right: -3px; border: 2px solid #3e2723; box-shadow: 0 0 8px rgba(0,0,0,0.2);"></span>
+        style="background: #ffffff; color: #2d221b; border: 1px solid #d9cecf; padding: 6px 14px; border-radius: 6px; display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 700; font-size: 13px; position: relative; box-shadow: 0 1px 2px rgba(0,0,0,0.05); height: 32px; margin-right: 12px;"> <!-- 💡 margin-right로 옆 메뉴와의 간격을 확 벌렸습니다! -->
+  <i class="ti ti-bell" style="font-size: 16px;"></i> 
+  <span>알림</span>
+  
+  <!-- 🟢/🟡 알림 불빛: 이제 공중에 뜨지 않고 글자 우측에 일렬로 자연스럽게 위치합니다! -->
+  <span class="notif-dot" id="notifDot" style="display: none; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #ffffff; box-shadow: 0 0 8px rgba(0,0,0,0.15); margin-left: 2px;"></span>
 </button>
     <div class="user-badge" id="userBadgeEl"></div>
     <button class="topbar-btn" onclick="doLogout()"><i class="ti ti-logout"></i> 로그아웃</button>
