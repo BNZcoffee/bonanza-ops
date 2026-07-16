@@ -315,10 +315,14 @@ textarea.form-input{min-height:120px;resize:vertical}
     <div class="logo" onclick="goPage('all')" style="cursor:pointer">Bonanza Coffee — 운영 매뉴얼</div>
   </div>
   <div class="topbar-right">
-    <button class="topbar-btn" onclick="toggleNotifPanel()" aria-label="알림">
-      <i class="ti ti-bell"></i>
-      <span class="notif-dot" id="notifDot"></span>
-    </button>
+<!-- 🔔 [새로운 알림 버튼] 흰색 라운드 버튼 + "종+알림" 디자인 -->
+<button onclick="toggleNotifPanel()" aria-label="알림"
+        style="background-color: #ffffff; color: #4a3a31; border: 1px solid #e0d8d0; padding: 6px 14px; border-radius: 20px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 700; font-size: 13px; position: relative; box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: all 0.2s ease;">
+  <i class="ti ti-bell" style="font-size: 16px;"></i> 
+  <span>알림</span>
+  <!-- 🟢/🟡 상태에 따라 변하는 알림 점 (기존 ID 유지하여 자동 연동) -->
+  <span class="notif-dot" id="notifDot" style="display: none; width: 8px; height: 8px; border-radius: 50%; position: absolute; top: 2px; right: 4px; border: 2px solid #ffffff;"></span>
+</button>
     <div class="user-badge" id="userBadgeEl"></div>
     <button class="topbar-btn" onclick="doLogout()"><i class="ti ti-logout"></i> 로그아웃</button>
   </div>
@@ -1256,7 +1260,8 @@ function renderCatNav() {
 
 async function updateNotifDot() {
   const dot = document.getElementById('notifDot');
-  if (!dot) return;
+  if (!dot || !currentUser) return;
+
   const week = new Date(Date.now() - 7*864e5).toISOString();
   const {data:posts} = await sb.from('posts').select('id,category_id').gte('created_at',week).eq('status','published');
   if (!posts) return;
@@ -1270,23 +1275,51 @@ async function updateNotifDot() {
     const {data:reqs} = await sb.from('requests').select('id').eq('assignee_id', currentUser.id).in('status',['submitted','in_progress']);
     myReqCount = (reqs||[]).length;
   }
+
   // 업무 신청 메뉴 배지
   const reqBadge = document.getElementById('reqNavBadge');
   if (reqBadge) reqBadge.style.display = myReqCount > 0 ? '' : 'none';
 
-  // 내 미읽음 앱 알림 카운트
+  // 🔔 내 미읽음 앱 알림 카운트 (내용까지 가져와서 리마인드 여부 확인)
   const {data:myNotifs} = await sb.from('notifications')
-    .select('id').eq('user_id', currentUser.id).eq('is_read', false);
+    .select('id, message, title').eq('user_id', currentUser.id).eq('is_read', false);
   const myNotifCount = (myNotifs||[]).length;
 
-  dot.style.display = (unread.length || myReqCount || myNotifCount) ? 'inline-block' : 'none';
-  // 알림 뱃지 숫자 표시
+  // 총 알림 개수 계산
   const totalCount = unread.length + myReqCount + myNotifCount;
   dot.title = totalCount > 0 ? `알림 ${totalCount}건` : '';
-  allCats.forEach(c => {
-    const badge = document.getElementById('newBadge-'+c.id);
-    if (badge) badge.style.display = unread.some(p=>p.category_id===c.id) ? '' : 'none';
-  });
+
+  // 🔔 유령 알림 제거 및 다이내믹 색상 적용
+  if (totalCount === 0) {
+    dot.style.display = 'none'; // 남은 알림이 아예 없으면 확실하게 점을 숨김
+  } else {
+    dot.style.display = 'inline-block';
+    
+    // 리마인드 알림 유무 확인
+    const hasRemind = (myNotifs||[]).some(n => 
+      (n.message && n.message.includes('리마인드')) || 
+      (n.title && n.title.includes('리마인드'))
+    );
+    
+    // 조건에 맞춰 색상 변경
+    if (hasRemind) {
+      // 리마인드가 있으면 노란색
+      dot.style.backgroundColor = '#FFC107';
+      dot.style.boxShadow = '0 0 6px #FFC107';
+    } else {
+      // 일반 신규 알림/공지는 눈에 띄는 초록색
+      dot.style.backgroundColor = '#4CAF50';
+      dot.style.boxShadow = '0 0 6px #4CAF50';
+    }
+  }
+
+  // 카테고리별 배지 업데이트
+  if (typeof allCats !== 'undefined') {
+    allCats.forEach(c => {
+      const badge = document.getElementById('newBadge-'+c.id);
+      if (badge) badge.style.display = unread.some(p=>p.category_id===c.id) ? '' : 'none';
+    });
+  }
 }
 async function updateDraftBadge(){
   const b = document.getElementById('draftBadge');
