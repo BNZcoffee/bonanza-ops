@@ -6610,11 +6610,11 @@ async function renderManualEdit(area) {
   ];
   
   const currentAudience = typeof manualEditAudience !== 'undefined' ? manualEditAudience : 'user';
-  const tabBar = `<div class="tabbar" style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap;">` +
-    auds.map(([a, l]) => `<button class="tab-btn${currentAudience === a ? ' active' : ''}" onclick="manualEditAudience='${a}';renderManualEdit(document.getElementById('contentArea'))">${l}</button>`).join('') +
-  `</div>`;
+  const tabBar = '<div class="tabbar" style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap;">' +
+    auds.map(([a, l]) => '<button class="tab-btn' + (currentAudience === a ? ' active' : '') + '" onclick="manualEditAudience=\'' + a + '\';renderManualEdit(document.getElementById(\'contentArea\'))">' + l + '</button>').join('') +
+  '</div>';
 
-  // 💡 [에러 원인 해결] 에러를 일으켰던 finalSecList 변수를 여기서 확실하게 안전하게 먼저 선언해 둡니다.
+  // [안전 보정] finalSecList 변수 선언
   let finalSecList = '<div id="manualSectionsContainer"><div style="text-align:center; padding:20px; color:var(--th);">설명서 섹션을 불러오는 중...</div></div>';
 
   // 3. 기본 레이아웃 및 가이드북 편집창(최상단 배치) 화면 렌더링
@@ -6647,12 +6647,12 @@ async function renderManualEdit(area) {
       </div>' +
     '</div>' +
 
-    // 설명서 기존 섹션들이 들어갈 영역
+    // 설명서 기존 섹션 영역 결합
     finalSecList +
 
     '<button class="btn-new" onclick="addManualSec()" style="width:100%; margin-top:6px;"><i class="ti ti-plus"></i> 새 섹션 추가</button>';
 
-  // 4. 비동기 호출 (에러가 나도 화면 렌더링에 절대 영향을 주지 않도록 각각 안전하게 분리)
+  // 4. 비동기 호출
   try {
     loadExistingGuide(); 
   } catch(e) { 
@@ -6671,21 +6671,21 @@ async function renderManualEdit(area) {
     const container = document.getElementById('manualSectionsContainer');
     if (container) {
       if (sections && sections.length > 0) {
-        const secListHtml = sections.map((s, i) => `
-          <div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:14px;margin-bottom:10px">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-              <span style="font-size:11px;color:var(--th)">#\${i+1}</span>
-              <input class="form-input" id="msec-title-\${s.id}" value="\${(s.title||'').replace(/"/g,'&quot;')}" style="flex:1;padding:7px 10px;font-weight:600" placeholder="섹션 제목"/>
-              <button class="btn-cancel-sm" onclick="moveManualSec('\${s.id}',-1)">▲</button>
-              <button class="btn-cancel-sm" onclick="moveManualSec('\${s.id}',1)">▼</button>
-              <button class="btn-cancel-sm" style="color:var(--rd);" onclick="deleteManualSec('\${s.id}')">삭제</button>
-            </div>
-            <textarea class="form-input" id="msec-body-\${s.id}" style="min-height:140px;font-family:inherit;font-size:13px;line-height:1.7">\${s.body||''}</textarea>
-            <div style="text-align:right;margin-top:8px">
-              <button class="btn-cancel-sm" onclick="saveManualSec('\${s.id}')">💾 이 섹션 저장</button>
-            </div>
-          </div>
-        `).join('');
+        const secListHtml = sections.map((s, i) => 
+          '<div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:14px;margin-bottom:10px">' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+              '<span style="font-size:11px;color:var(--th)">#' + (i+1) + '</span>' +
+              '<input class="form-input" id="msec-title-' + s.id + '" value="' + (s.title||'').replace(/"/g,'&quot;') + '" style="flex:1;padding:7px 10px;font-weight:600" placeholder="섹션 제목"/>' +
+              '<button class="btn-cancel-sm" onclick="moveManualSec(\'' + s.id + '\',-1)">▲</button>' +
+              '<button class="btn-cancel-sm" onclick="moveManualSec(\'' + s.id + '\',1)">▼</button>' +
+              '<button class="btn-cancel-sm" style="color:var(--rd);" onclick="deleteManualSec(\'' + s.id + '\')">삭제</button>' +
+            '</div>' +
+            '<textarea class="form-input" id="msec-body-' + s.id + '" style="min-height:140px;font-family:inherit;font-size:13px;line-height:1.7">' + (s.body||'') + '</textarea>' +
+            '<div style="text-align:right;margin-top:8px">' +
+              '<button class="btn-cancel-sm" onclick="saveManualSec(\'' + s.id + '\')">💾 이 섹션 저장</button>' +
+            </div>' +
+          '</div>'
+        ).join('');
         container.innerHTML = secListHtml;
       } else {
         container.innerHTML = '<div style="color:var(--th);padding:20px;text-align:center;">섹션이 없습니다. 우측 버튼으로 추가하세요.</div>';
