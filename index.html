@@ -6612,7 +6612,7 @@ function goManualEdit() {
   }
 }
 
-// 💡 [Quill 에디터 탑재 버전]
+// 💡 [Quill 에디터 탑재 버전] 
 async function renderManualEdit(area) {
   if (!area) return;
   
@@ -6719,11 +6719,13 @@ async function renderManualEdit(area) {
         }
         container.innerHTML = secListHtml;
 
-        // 개별 에디터들 0.1초 뒤 순차 생성 및 기존 데이터 바인딩
+        // 💡 [핵심 보정] 브라우저가 화면(HTML)을 완전히 그리고 난 후(최소 0.3초 여유) 데이터를 안전하게 찔러넣습니다.
         setTimeout(() => {
           sections.forEach(s => {
             const editorId = `#quill-body-${s.id}`;
-            if (document.querySelector(editorId)) {
+            const targetDom = document.querySelector(editorId);
+            
+            if (targetDom) {
               const miniQuill = new Quill(editorId, {
                 theme: 'snow',
                 modules: {
@@ -6736,11 +6738,13 @@ async function renderManualEdit(area) {
                 },
                 placeholder: '설명서 본문 내용을 입력하세요...'
               });
+              
+              // 데이터를 확실하게 밀어넣기
               miniQuill.root.innerHTML = s.body || '';
               window['quill_instance_' + s.id] = miniQuill;
             }
           });
-        }, 100);
+        }, 300); // 딜레이를 0.3초로 늘려 안정성을 극대화했습니다.
 
       } else {
         container.innerHTML = '<div style="color:var(--th);padding:20px;text-align:center;">섹션이 없습니다. 우측 버튼으로 추가하세요.</div>';
@@ -6751,10 +6755,10 @@ async function renderManualEdit(area) {
   }
 }
 
-// ✍️ 전역 가이드북 에디터 인스턴스
+// ✍ * 전역 가이드북 에디터 인스턴스
 let manualQuillInstance = null;
 
-// 🛠️ 가이드북 에디터 생성 및 기존 데이터 로드
+// 🛠 * 가이드북 에디터 생성 및 기존 데이터 로드
 function initQuillEditor() {
   const container = document.getElementById('quillEditorContainer');
   if (!container) return;
@@ -6789,7 +6793,7 @@ function initQuillEditor() {
     } catch (err) {
       console.warn("가이드 데이터 로드 실패:", err);
     }
-  }, 100);
+  }, 300); // 여기도 동일하게 0.3초로 보정합니다.
 }
 
 // 💾 1. 가이드북 저장 함수
