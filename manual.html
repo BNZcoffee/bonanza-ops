@@ -206,9 +206,26 @@ async function saveQuickStartGuide() {
   }
 }
 
+// render 함수 가장 윗부분에 이 비동기 데이터를 가져오는 로직이 확실하게 실행되도록 보장합니다.
 async function render(){
   const c=document.getElementById('content');
   c.innerHTML='<div class="loading"><i class="ti ti-loader"></i> 불러오는 중...</div>';
+  
+  // 💡 [추가 및 보정] 화면을 그리기 전에 Supabase에서 최신 퀵 가이드 HTML을 명확하게 긁어옵니다.
+  try {
+    const { data: config, error: configErr } = await sb
+      .from('app_configs')
+      .select('value')
+      .eq('key', 'quick_start_guide')
+      .maybeSingle();
+      
+    if (!configErr && config) {
+      cachedQuickStartHtml = config.value;
+    }
+  } catch (err) {
+    console.error("퀵 가이드 로딩 실패:", err.message);
+  }
+
   const auds=availAuds(me);
   if(!auds.find(([a])=>a===curAud)) curAud=auds[0][0];
   const {data:secs}=await sb.from('manual_sections').select('*').eq('audience',curAud).order('sort_order');
@@ -243,7 +260,7 @@ async function render(){
     </div>${sections}`;
   }
   
-  // UI 렌더링 결합 (퀵가이드 관리자 에디터 추가)
+  // 최종 화면 조합 (전역 변수에 담긴 가이드북이 안전하게 표출됩니다)
   c.innerHTML = topbar + tabBar + 
                 `<div class="updated">이 설명서는 앱의 사용 설명서와 항상 같은 내용입니다. 여기에는 화면 예시 그림이 함께 표시됩니다.</div>` + 
                 quickStartHTML() + 

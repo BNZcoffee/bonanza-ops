@@ -1659,124 +1659,124 @@ async function renderPostDetail(area) {
     }
   }
 let readListHtml = '';
-  if (isAdmin || isDeptWriter) {
-    // 1. 데이터 가공: 매장별로 데이터를 그룹핑하기 위한 객체 준비
-    const storeMap = {};
-    const readSet = new Set(reads.map(r => r.user_id));
+  // 💡 [수정] 기존 'if (isAdmin || isDeptWriter)' 조건을 삭제하여 모든 직원이 열람할 수 있도록 공개합니다.
+  
+  // 1. 데이터 가공: 매장별로 데이터를 그룹핑하기 위한 객체 준비
+  const storeMap = {};
+  const readSet = new Set(reads.map(r => r.user_id));
+  
+  let filteredTotal = 0;   // 본사를 제외한 전체 대상 인원 수
+  let filteredChecked = 0; // 본사를 제외한 전체 확인 인원 수
+
+  // 직함별 정렬 가중치 부여 (매니저/운영팀/부서담당 등은 최상위)
+  const getRolePriority = (role) => {
+    if (role === 'manager' || role === 'admin' || role === 'dept') return 1;
+    return 2; // 일반 팀원
+  };
+
+  // 고용형태 정렬 가중치 부여
+  const getEmpPriority = (type) => {
+    if (type === 'parttime') return 2; // PT는 뒤로
+    return 1; // 정규직/계약직은 앞으로
+  };
+
+  // targetUsers 리스트 정렬 적용 (스케줄표 기준)
+  const sortedTargetUsers = [...targetUsers].sort((a, b) => {
+    // 1순위: 직함 그룹 (매니저 라인 먼저)
+    const roleA = getRolePriority(a.role);
+    const roleB = getRolePriority(b.role);
+    if (roleA !== roleB) return roleA - roleB;
+
+    // 2순위: 고용 형태 (정규직/계약직 먼저, PT 나중)
+    const empA = getEmpPriority(a.employment_type);
+    const empB = getEmpPriority(b.employment_type);
+    if (empA !== empB) return empA - empB;
+
+    // 3순위: 입사일 빠른 순
+    const dateA = a.hire_date || '9999-12-31';
+    const dateB = b.hire_date || '9999-12-31';
+    return dateA.localeCompare(dateB);
+  });
+
+  // 정렬된 직원 데이터를 매장별로 분류
+  sortedTargetUsers.forEach(u => {
+    const storeName = u.store || '미지정';
     
-    let filteredTotal = 0;   // 본사를 제외한 전체 대상 인원 수
-    let filteredChecked = 0; // 본사를 제외한 전체 확인 인원 수
-
-    // 직함별 정렬 가중치 부여 (매니저/운영팀/부서담당 등은 최상위)
-    const getRolePriority = (role) => {
-      if (role === 'manager' || role === 'admin' || role === 'dept') return 1;
-      return 2; // 일반 팀원
-    };
-
-    // 고용형태 정렬 가중치 부여
-    const getEmpPriority = (type) => {
-      if (type === 'parttime') return 2; // PT는 뒤로
-      return 1; // 정규직/계약직은 앞으로
-    };
-
-    // targetUsers 리스트 정렬 적용 (스케줄표 기준)
-    const sortedTargetUsers = [...targetUsers].sort((a, b) => {
-      // 1순위: 직함 그룹 (매니저 라인 먼저)
-      const roleA = getRolePriority(a.role);
-      const roleB = getRolePriority(b.role);
-      if (roleA !== roleB) return roleA - roleB;
-
-      // 2순위: 고용 형태 (정규직/계약직 먼저, PT 나중)
-      const empA = getEmpPriority(a.employment_type);
-      const empB = getEmpPriority(b.employment_type);
-      if (empA !== empB) return empA - empB;
-
-      // 3순위: 입사일 빠른 순
-      const dateA = a.hire_date || '9999-12-31';
-      const dateB = b.hire_date || '9999-12-31';
-      return dateA.localeCompare(dateB);
+    // 소속이 '본사'인 직원은 통계 집계 대상에서 제외
+    if (storeName === '본사') return;
+    
+    if (!storeMap[storeName]) {
+      storeMap[storeName] = { total: 0, checked: 0, members: [] };
+    }
+    
+    const isChecked = readSet.has(u.id);
+    storeMap[storeName].total++;
+    filteredTotal++;
+    
+    if (isChecked) {
+      storeMap[storeName].checked++;
+      filteredChecked++;
+    }
+    
+    storeMap[storeName].members.push({
+      name: u.name || '이름없음',
+      checked: isChecked
     });
+  });
 
-    // 정렬된 직원 데이터를 매장별로 분류
-    sortedTargetUsers.forEach(u => {
-      const storeName = u.store || '미지정';
-      
-      // 소속이 '본사'인 직원은 통계 집계 대상에서 제외
-      if (storeName === '본사') return;
-      
-      if (!storeMap[storeName]) {
-        storeMap[storeName] = { total: 0, checked: 0, members: [] };
-      }
-      
-      const isChecked = readSet.has(u.id);
-      storeMap[storeName].total++;
-      filteredTotal++;
-      
-      if (isChecked) {
-        storeMap[storeName].checked++;
-        filteredChecked++;
-      }
-      
-      storeMap[storeName].members.push({
-        name: u.name || '이름없음',
-        checked: isChecked
-      });
-    });
+  // 본사를 제외하고 다시 계산하는 전체 도달률
+  const filteredRate = filteredTotal > 0 ? Math.round((filteredChecked / filteredTotal) * 100) : 0;
 
-    // 본사를 제외하고 다시 계산하는 전체 도달률
-    const filteredRate = filteredTotal > 0 ? Math.round((filteredChecked / filteredTotal) * 100) : 0;
+  // 매장 이름 오름차순 정렬
+  const sortedStores = Object.keys(storeMap).sort((a, b) => a.localeCompare(b));
 
-    // 매장 이름 오름차순 정렬
-    const sortedStores = Object.keys(storeMap).sort((a, b) => a.localeCompare(b));
-
-    // 매장별 요약 카드 HTML 생성
-    let cardsHtml = '';
-    sortedStores.forEach(stName => {
-      const data = storeMap[stName];
-      const percent = data.total > 0 ? Math.round((data.checked / data.total) * 100) : 0;
-      
-      cardsHtml += `
-        <div style="border: 1px solid var(--crm); border-radius: 8px; padding: 12px; margin-bottom: 12px; background-color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-          <div style="display: flex; align-items: center; justify-content: space-between; font-weight: bold; margin-bottom: 8px; font-size: 13px;">
-            <span style="color: var(--bl); font-weight: 700;">🏬 ${stName}</span>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="color: var(--th); font-size: 11px;">${data.checked} / ${data.total}명 (${percent}%)</span>
-              <div style="width: 60px; height: 6px; background-color: #eee; border-radius: 3px; overflow: hidden; display: inline-block;">
-                <div style="height: 100%; background-color: ${percent === 100 ? '#2E7D32' : 'var(--rd)'}; width: ${percent}%;"></div>
-              </div>
+  // 매장별 요약 카드 HTML 생성
+  let cardsHtml = '';
+  sortedStores.forEach(stName => {
+    const data = storeMap[stName];
+    const percent = data.total > 0 ? Math.round((data.checked / data.total) * 100) : 0;
+    
+    cardsHtml += `
+      <div style="border: 1px solid var(--crm); border-radius: 8px; padding: 12px; margin-bottom: 12px; background-color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <div style="display: flex; align-items: center; justify-content: space-between; font-weight: bold; margin-bottom: 8px; font-size: 13px;">
+          <span style="color: var(--bl); font-weight: 700;">🏬 ${stName}</span>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="color: var(--th); font-size: 11px;">${data.checked} / ${data.total}명 (${percent}%)</span>
+            <div style="width: 60px; height: 6px; background-color: #eee; border-radius: 3px; overflow: hidden; display: inline-block;">
+              <div style="height: 100%; background-color: ${percent === 100 ? '#2E7D32' : 'var(--rd)'}; width: ${percent}%;"></div>
             </div>
           </div>
-          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-            ${data.members.map(m => {
-              const bg = m.checked ? '#E8F5E9' : '#F5F5F5';
-              const fc = m.checked ? '#2E7D32' : '#999999';
-              const border = m.checked ? '1px solid #C8E6C9' : '1px solid #E0E0E0';
-              return `<span style="padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; background-color: ${bg}; color: ${fc}; border: ${border};">${m.name}</span>`;
-            }).join('')}
-          </div>
         </div>
-      `;
-    });
-
-    // 전체 레이아웃 바인딩 (본사 제외 도달률 및 가로 스크롤 대응)
-    readListHtml = `
-      <div style="margin-bottom:16px;">
-        <div class="section-label" style="font-weight: bold; font-size: 14px; margin-bottom: 10px;">📊 매장별 공지 확인 현황 (현장 대상)</div>
-        
-        <!-- 전체 도달률 프로그레스 바 (본사 제외) -->
-        <div class="reach-bar" style="background-color: #eee; height: 20px; border-radius: 10px; position: relative; margin-bottom: 16px; overflow: hidden;">
-          <div class="reach-fill" style="width:${filteredRate}%; height: 100%; background-color: var(--bl); transition: width 0.3s ease;"></div>
-          <div class="reach-label" style="position: absolute; width: 100%; text-align: center; top: 0; left: 0; line-height: 20px; font-size: 11px; font-weight: bold; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.5);">
-            전체 도달률 ${filteredRate}% (${filteredChecked} / ${filteredTotal}명 완료)
-          </div>
-        </div>
-
-        <div style="max-height: 450px; overflow-y: auto; padding-right: 4px;">
-          ${cardsHtml}
+        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+          ${data.members.map(m => {
+            const bg = m.checked ? '#E8F5E9' : '#F5F5F5';
+            const fc = m.checked ? '#2E7D32' : '#999999';
+            const border = m.checked ? '1px solid #C8E6C9' : '1px solid #E0E0E0';
+            return `<span style="padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; background-color: ${bg}; color: ${fc}; border: ${border};">${m.name}</span>`;
+          }).join('')}
         </div>
       </div>
     `;
-  }
+  });
+
+  // 전체 레이아웃 바인딩 (모든 직원이 볼 수 있도록 UI 결합)
+  readListHtml = `
+    <div style="margin-bottom:16px; margin-top:20px;">
+      <div class="section-label" style="font-weight: bold; font-size: 14px; margin-bottom: 10px;">📊 매장별 공지 확인 현황 (현장 대상)</div>
+      
+      <!-- 전체 도달률 프로그레스 바 (본사 제외) -->
+      <div class="reach-bar" style="background-color: #eee; height: 20px; border-radius: 10px; position: relative; margin-bottom: 16px; overflow: hidden;">
+        <div class="reach-fill" style="width:${filteredRate}%; height: 100%; background-color: var(--bl); transition: width 0.3s ease;"></div>
+        <div class="reach-label" style="position: absolute; width: 100%; text-align: center; top: 0; left: 0; line-height: 20px; font-size: 11px; font-weight: bold; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.5);">
+          전체 도달률 ${filteredRate}% (${filteredChecked} / ${filteredTotal}명 완료)
+        </div>
+      </div>
+
+      <div style="max-height: 450px; overflow-y: auto; padding-right: 4px;">
+        ${cardsHtml}
+      </div>
+    </div>
+  `;
 
   const iconMap2 = {pdf:'ti-file-type-pdf',doc:'ti-file-type-doc',docx:'ti-file-type-doc',xls:'ti-file-type-xls',xlsx:'ti-file-type-xls',ppt:'ti-file-type-ppt',pptx:'ti-file-type-ppt',txt:'ti-file-type-txt',csv:'ti-file-type-csv',hwp:'ti-file-text',hwpx:'ti-file-text',jpg:'ti-photo',jpeg:'ti-photo',png:'ti-photo',gif:'ti-photo',webp:'ti-photo',svg:'ti-photo',heic:'ti-photo',zip:'ti-file-zip'};
   let attachHtml = '';
