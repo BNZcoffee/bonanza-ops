@@ -315,13 +315,13 @@ textarea.form-input{min-height:120px;resize:vertical}
     <div class="logo" onclick="goPage('all')" style="cursor:pointer">Bonanza Coffee — 운영 매뉴얼</div>
   </div>
   <div class="topbar-right">
-<!-- 🔔 [새로운 알림 버튼] 흰색 라운드 버튼 + "종+알림" 디자인 -->
-<button onclick="toggleNotifPanel()" aria-label="알림"
-        style="background-color: #ffffff; color: #4a3a31; border: 1px solid #e0d8d0; padding: 6px 14px; border-radius: 20px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 700; font-size: 13px; position: relative; box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: all 0.2s ease;">
+<!-- 🔔 [Option 3] 비대칭 감성 디자인 -->
+<button class="topbar-btn" onclick="toggleNotifPanel()" aria-label="알림"
+        style="background: #ffffff; color: #4a3a31; border: 1px solid #dcd3cb; padding: 6px 14px; border-radius: 12px 2px 12px 2px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 700; font-size: 13px; position: relative; box-shadow: 0 2px 4px rgba(0,0,0,0.05); height: 32px;">
   <i class="ti ti-bell" style="font-size: 16px;"></i> 
   <span>알림</span>
-  <!-- 🟢/🟡 상태에 따라 변하는 알림 점 (기존 ID 유지하여 자동 연동) -->
-  <span class="notif-dot" id="notifDot" style="display: none; width: 8px; height: 8px; border-radius: 50%; position: absolute; top: 2px; right: 4px; border: 2px solid #ffffff;"></span>
+  <!-- 🟢/🟡 알림 불빛: 14px 크기로 큼직하게 강조 -->
+  <span class="notif-dot" id="notifDot" style="display: none; width: 14px; height: 14px; border-radius: 50%; position: absolute; top: -4px; right: -4px; border: 2px solid #ffffff; box-shadow: 0 0 8px rgba(0,0,0,0.15);"></span>
 </button>
     <div class="user-badge" id="userBadgeEl"></div>
     <button class="topbar-btn" onclick="doLogout()"><i class="ti ti-logout"></i> 로그아웃</button>
