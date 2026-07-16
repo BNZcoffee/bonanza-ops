@@ -1663,18 +1663,28 @@ let readListHtml = '';
     // 1. 데이터 가공: 매장별로 데이터를 그룹핑하기 위한 객체 준비
     const storeMap = {};
     const readSet = new Set(reads.map(r => r.user_id));
+    
+    let filteredTotal = 0;   // 본사를 제외한 전체 대상 인원 수
+    let filteredChecked = 0; // 본사를 제외한 전체 확인 인원 수
 
-    // targetUsers는 전체 대상 직원 목록입니다. 이 목록을 순회하며 매장별 분류를 진행합니다.
+    // targetUsers는 전체 대상 직원 목록입니다.
     targetUsers.forEach(u => {
       const storeName = u.store || '미지정';
+      
+      // 💡 [수정] 소속이 '본사'인 직원은 통계 집계 대상에서 완전히 제외합니다.
+      if (storeName === '본사') return;
+      
       if (!storeMap[storeName]) {
         storeMap[storeName] = { total: 0, checked: 0, members: [] };
       }
       
       const isChecked = readSet.has(u.id);
       storeMap[storeName].total++;
+      filteredTotal++;
+      
       if (isChecked) {
         storeMap[storeName].checked++;
+        filteredChecked++;
       }
       
       storeMap[storeName].members.push({
@@ -1683,12 +1693,11 @@ let readListHtml = '';
       });
     });
 
-    // 2. 매장 이름순 정렬 (본사는 항상 최상단에 고정)
-    const sortedStores = Object.keys(storeMap).sort((a, b) => {
-      if (a === '본사') return -1;
-      if (b === '본사') return 1;
-      return a.localeCompare(b);
-    });
+    // 💡 본사를 제외하고 다시 계산하는 전체 도달률
+    const filteredRate = filteredTotal > 0 ? Math.round((filteredChecked / filteredTotal) * 100) : 0;
+
+    // 2. 매장 이름순 정렬
+    const sortedStores = Object.keys(storeMap).sort((a, b) => a.localeCompare(b));
 
     // 3. 매장별 요약 카드 HTML 생성
     let cardsHtml = '';
@@ -1696,23 +1705,19 @@ let readListHtml = '';
       const data = storeMap[stName];
       const percent = data.total > 0 ? Math.round((data.checked / data.total) * 100) : 0;
       
-      // 개별 매장 카드 레이아웃 구성
       cardsHtml += `
         <div style="border: 1px solid var(--crm); border-radius: 8px; padding: 12px; margin-bottom: 12px; background-color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
           <div style="display: flex; align-items: center; justify-content: space-between; font-weight: bold; margin-bottom: 8px; font-size: 13px;">
             <span style="color: var(--bl); font-weight: 700;">🏬 ${stName}</span>
             <div style="display: flex; align-items: center; gap: 8px;">
               <span style="color: var(--th); font-size: 11px;">${data.checked} / ${data.total}명 (${percent}%)</span>
-              <!-- 미니 프로그레스 바 -->
               <div style="width: 60px; height: 6px; background-color: #eee; border-radius: 3px; overflow: hidden; display: inline-block;">
                 <div style="height: 100%; background-color: ${percent === 100 ? '#2E7D32' : 'var(--rd)'}; width: ${percent}%;"></div>
               </div>
             </div>
           </div>
-          <!-- 소속 직원 배지 나열 -->
           <div style="display: flex; flex-wrap: wrap; gap: 6px;">
             ${data.members.map(m => {
-              // 확인 완료는 초록 배지, 미확인은 붉은 톤의 회색 배지로 구분
               const bg = m.checked ? '#E8F5E9' : '#F5F5F5';
               const fc = m.checked ? '#2E7D32' : '#999999';
               const border = m.checked ? '1px solid #C8E6C9' : '1px solid #E0E0E0';
@@ -1723,20 +1728,19 @@ let readListHtml = '';
       `;
     });
 
-    // 4. 전체 레이아웃 바인딩 (전체 도달률 바 + 매장별 요약 카드 목록)
+    // 4. 전체 레이아웃 바인딩 (본사 제외 도달률 반영)
     readListHtml = `
       <div style="margin-bottom:16px;">
-        <div class="section-label" style="font-weight: bold; font-size: 14px; margin-bottom: 10px;">📊 매장별 공지 확인 현황</div>
+        <div class="section-label" style="font-weight: bold; font-size: 14px; margin-bottom: 10px;">📊 매장별 공지 확인 현황 (현장 대상)</div>
         
-        <!-- 전체 도달률 프로그레스 바 -->
+        <!-- 전체 도달률 프로그레스 바 (본사 제외) -->
         <div class="reach-bar" style="background-color: #eee; height: 20px; border-radius: 10px; position: relative; margin-bottom: 16px; overflow: hidden;">
-          <div class="reach-fill" style="width:${rate}%; height: 100%; background-color: var(--bl); transition: width 0.3s ease;"></div>
+          <div class="reach-fill" style="width:${filteredRate}%; height: 100%; background-color: var(--bl); transition: width 0.3s ease;"></div>
           <div class="reach-label" style="position: absolute; width: 100%; text-align: center; top: 0; left: 0; line-height: 20px; font-size: 11px; font-weight: bold; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.5);">
-            전체 도달률 ${rate}% (${reads.length} / ${total}명 완료)
+            전체 도달률 ${filteredRate}% (${filteredChecked} / ${filteredTotal}명 완료)
           </div>
         </div>
 
-        <!-- 매장별 카드 리스트 영역 -->
         <div style="max-height: 400px; overflow-y: auto; padding-right: 4px;">
           ${cardsHtml}
         </div>
