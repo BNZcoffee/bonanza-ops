@@ -1263,63 +1263,74 @@ async function updateNotifDot() {
   const dot = document.getElementById('notifDot');
   if (!dot || !currentUser) return;
 
-  const week = new Date(Date.now() - 7*864e5).toISOString();
-  const {data:posts} = await sb.from('posts').select('id,category_id').gte('created_at',week).eq('status','published');
-  if (!posts) return;
-  const {data:myReads} = await sb.from('post_reads').select('post_id').eq('user_id',currentUser.id);
-  const readIds = new Set((myReads||[]).map(r=>r.post_id));
-  const unread = posts.filter(p=>!readIds.has(p.id));
-
-  // 나에게 배정된 미완료 신청 개수
-  let myReqCount = 0;
-  if (currentUser.role === 'admin' || isManagerRole(currentUser.role) || currentUser.is_master || currentUser.part) {
-    const {data:reqs} = await sb.from('requests').select('id').eq('assignee_id', currentUser.id).in('status',['submitted','in_progress']);
-    myReqCount = (reqs||[]).length;
-  }
-
-  // 업무 신청 메뉴 배지
-  const reqBadge = document.getElementById('reqNavBadge');
-  if (reqBadge) reqBadge.style.display = myReqCount > 0 ? '' : 'none';
-
-  // 🔔 내 미읽음 앱 알림 카운트 (내용까지 가져와서 리마인드 여부 확인)
-  const {data:myNotifs} = await sb.from('notifications')
-    .select('id, message, title').eq('user_id', currentUser.id).eq('is_read', false);
-  const myNotifCount = (myNotifs||[]).length;
-
-  // 총 알림 개수 계산
-  const totalCount = unread.length + myReqCount + myNotifCount;
-  dot.title = totalCount > 0 ? `알림 ${totalCount}건` : '';
-
-  // 🔔 유령 알림 제거 및 다이내믹 색상 적용
-  if (totalCount === 0) {
-    dot.style.display = 'none'; // 남은 알림이 아예 없으면 확실하게 점을 숨김
-  } else {
-    dot.style.display = 'inline-block';
+  try {
+    const week = new Date(Date.now() - 7*864e5).toISOString();
     
-    // 리마인드 알림 유무 확인
-    const hasRemind = (myNotifs||[]).some(n => 
-      (n.message && n.message.includes('리마인드')) || 
-      (n.title && n.title.includes('리마인드'))
-    );
-    
-    // 조건에 맞춰 색상 변경
-    if (hasRemind) {
-      // 리마인드가 있으면 노란색
-      dot.style.backgroundColor = '#FFC107';
-      dot.style.boxShadow = '0 0 6px #FFC107';
-    } else {
-      // 일반 신규 알림/공지는 눈에 띄는 초록색
-      dot.style.backgroundColor = '#4CAF50';
-      dot.style.boxShadow = '0 0 6px #4CAF50';
+    // 1. 단순하게 posts 가져오기 (문법 에러 방지)
+    const { data: posts, error: postErr } = await sb.from('posts')
+      .select('id, category_id')
+      .gte('created_at', week)
+      .eq('status', 'published');
+      
+    if (postErr) throw postErr;
+    if (!posts) return;
+
+    const { data: myReads } = await sb.from('post_reads').select('post_id').eq('user_id', currentUser.id);
+    const readIds = new Set((myReads || []).map(r => r.post_id));
+    const unread = posts.filter(p => !readIds.has(p.id));
+
+    // 나에게 배정된 미완료 신청 개수
+    let myReqCount = 0;
+    if (currentUser.role === 'admin' || isManagerRole(currentUser.role) || currentUser.is_master || currentUser.part) {
+      const { data: reqs } = await sb.from('requests').select('id').eq('assignee_id', currentUser.id).in('status', ['submitted', 'in_progress']);
+      myReqCount = (reqs || []).length;
     }
-  }
 
-  // 카테고리별 배지 업데이트
-  if (typeof allCats !== 'undefined') {
-    allCats.forEach(c => {
-      const badge = document.getElementById('newBadge-'+c.id);
-      if (badge) badge.style.display = unread.some(p=>p.category_id===c.id) ? '' : 'none';
-    });
+    // 업무 신청 메뉴 배지 업데이트
+    const reqBadge = document.getElementById('reqNavBadge');
+    if (reqBadge) reqBadge.style.display = myReqCount > 0 ? '' : 'none';
+
+    // 2. notifications 테이블에서 에러 나지 않도록 id와 필드만 안전하게 select
+    const { data: myNotifs, error: notifErr } = await sb.from('notifications')
+      .select('id, message, title')
+      .eq('user_id', currentUser.id)
+      .eq('is_read', false);
+
+    if (notifErr) throw notifErr;
+    const myNotifCount = (myNotifs || []).length;
+
+    // 총 알림 개수 계산
+    const totalCount = unread.length + myReqCount + myNotifCount;
+    dot.title = totalCount > 0 ? `알림 ${totalCount}건` : '';
+
+    // 3. 점(dot) 유령 알림 제거 및 다이내믹 색상 처리
+    if (totalCount === 0) {
+      dot.style.display = 'none';
+    } else {
+      dot.style.display = 'inline-block';
+      
+      const hasRemind = (myNotifs || []).some(n => 
+        (n.message && n.message.includes('리마인드')) || 
+        (n.title && n.title.includes('리마인드'))
+      );
+      
+      if (hasRemind) {
+        dot.style.backgroundColor = '#FFC107';
+        dot.style.boxShadow = '0 0 6px #FFC107';
+      } else {
+        dot.style.backgroundColor = '#4CAF50';
+        dot.style.boxShadow = '0 0 6px #4CAF50';
+      }
+    }
+
+    if (typeof allCats !== 'undefined') {
+      allCats.forEach(c => {
+        const badge = document.getElementById('newBadge-' + c.id);
+        if (badge) badge.style.display = unread.some(p => p.category_id === c.id) ? '' : 'none';
+      });
+    }
+  } catch (err) {
+    console.error('알림 뱃지 업데이트 프로세스 일시 지연:', err.message);
   }
 }
 async function updateDraftBadge(){
@@ -4628,30 +4639,36 @@ function notifGo(refType, refId, notifId){
 }
 // 🔔 [알림창 완벽 개편] 중복 제거 + 3단 탭 분리 + 기존 라우팅(notifGo) 완벽 연동
 async function loadNotifPanel() {
-  // 알림창을 열 때마다 자동 리마인드 조건을 검사합니다 (하루 1회만 발송됨)
-  checkAndSend3DayReminders();
   const list = document.getElementById('notifList');
   if (!list) return;
   list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--th);font-size:13px"><i class="ti ti-loader spin"></i></div>';
 
   try {
-    // 1. DB에서 모든 알림 가져오기 (공지/업무 중복 렌더링 방지)
-    const { data: notis } = await sb.from('notifications')
-      .select('*')
+    // 백그라운드 리마인드 체크 실행 (에러 나더라도 전체 흐름이 깨지지 않게 예외 감싸기)
+    try {
+      if (typeof checkAndSend3DayReminders === 'function') {
+        checkAndSend3DayReminders();
+      }
+    } catch (e) {
+      console.warn("리마인드 체크 지연:", e);
+    }
+
+    // 1. DB 조회 에러 차단용 안전 쿼리 (notifications의 컬럼을 최소한으로 가져옴)
+    const { data: notis, error: dbError } = await sb.from('notifications')
+      .select('id, title, message, is_read, created_at, ref_type, ref_id')
       .eq('user_id', currentUser.id)
       .order('created_at', { ascending: false })
-      .limit(50); // 최근 50개
+      .limit(50);
 
+    if (dbError) throw dbError;
     const allNotis = notis || [];
     
     // 2. 알림 3단 분류
-    const newAllNotis = allNotis.filter(n => !n.is_read); // 새 알림 전체
-    const newWorkNotis = allNotis.filter(n => !n.is_read && (n.ref_type === 'request' || n.ref_type === 'report' || n.ref_type === 'work')); // 업무만
-    const readNotis = allNotis.filter(n => n.is_read); // 읽은 알림
+    const newAllNotis = allNotis.filter(n => !n.is_read);
+    const newWorkNotis = allNotis.filter(n => !n.is_read && (n.ref_type === 'request' || n.ref_type === 'report' || n.ref_type === 'work'));
+    const readNotis = allNotis.filter(n => n.is_read);
 
     const isManager = currentUser.role === 'admin' || currentUser.role === 'dept';
-
-    // 탭 상태 확인 (기본값은 'all')
     window._currentNotifTab = window._currentNotifTab || 'all';
 
     // 3. 탭 버튼 HTML 생성
@@ -4663,16 +4680,19 @@ async function loadNotifPanel() {
       </div>
     `;
 
-    // 4. 알림 리스트 아이템 그리기 (클릭 시 위에 있는 notifGo 함수를 호출하여 정확히 이동)
+    // 4. 리스트 렌더링 (ref_type, ref_id 백업 바인딩)
     const makeList = (items) => {
       if (items.length === 0) return '<div style="padding:20px;text-align:center;color:var(--th);font-size:13px">알림이 없습니다.</div>';
       return items.map(n => {
         const iconMap2 = { interview:'ti-message-report', post:'ti-article', schedule:'ti-calendar-event', request:'ti-clipboard-check', attendance:'ti-alarm' };
         const icon = iconMap2[n.ref_type] || 'ti-bell';
         
-        // 🚨 여기가 핵심: 클릭 시 기존 4527번 줄에 있는 notifGo 함수를 실행합니다!
+        // 데이터 누수 방지용 fallback
+        const rType = n.ref_type || '';
+        const rId = n.ref_id || '';
+        
         return `
-          <div class="notif-item" onclick="notifGo('${n.ref_type}', '${n.ref_id}', '${n.id}')" style="cursor:pointer; padding:10px; border-bottom:0.5px solid var(--crd); opacity:${n.is_read ? '0.6' : '1'};">
+          <div class="notif-item" onclick="notifGo('${rType}', '${rId}', '${n.id}')" style="cursor:pointer; padding:10px; border-bottom:0.5px solid var(--crd); opacity:${n.is_read ? '0.6' : '1'};">
             <div style="font-size:12px; color:var(--tm); margin-bottom:4px;"><i class="ti ${icon}" style="margin-right:4px;"></i>${n.title || n.message || '새 알림'}</div>
             <div style="font-size:11px; color:var(--th);">${new Date(n.created_at).toLocaleString()}</div>
           </div>
@@ -4680,22 +4700,19 @@ async function loadNotifPanel() {
       }).join('');
     };
 
-    // 현재 선택된 탭에 따라 리스트 표시
     let contentHtml = '';
     if (window._currentNotifTab === 'all') contentHtml = makeList(newAllNotis);
     else if (window._currentNotifTab === 'work') contentHtml = makeList(newWorkNotis);
     else if (window._currentNotifTab === 'read') contentHtml = makeList(readNotis);
 
-    // 5. 화면 렌더링
     list.innerHTML = tabsHtml + contentHtml + (newAllNotis.length > 0 ? `<div style="margin-top:10px;"><button class="btn-cancel-sm" onclick="markAllNotifsRead()" style="width:100%;padding:8px;">모두 읽음 처리</button></div>` : '');
 
-    // 알림 뱃지 업데이트
     const badge = document.getElementById('notifTabNewBadge');
     if (badge) badge.textContent = newAllNotis.length > 0 ? newAllNotis.length : '';
 
   } catch(e) {
-    console.error(e);
-    list.innerHTML = '<div style="padding:20px; text-align:center;">알림을 불러오는 중 오류가 발생했습니다.</div>';
+    console.error("알림창 로딩 에러:", e);
+    list.innerHTML = '<div style="padding:20px; text-align:center; color:var(--th);">알림 목록을 구성하지 못했습니다.</div>';
   }
 }
 
