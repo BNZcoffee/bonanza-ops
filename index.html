@@ -6661,46 +6661,66 @@ async function renderManualEdit(area) {
 }
 
 // 💡 [추가] 기존에 저장된 가이드를 가져와 텍스트상자에 넣어주는 함수
+// 💡 사진 2 기준 6664라인부터 6705라인까지 통째로 드래그해서 덮어씌우세요!
 async function loadExistingGuide() {
   const editArea = document.getElementById('guideEditArea');
   if (!editArea) return;
-  
+
   try {
+    // Supabase 표준 안정 체이닝 방식으로 수정하여 문법 터짐을 완벽 방지합니다.
     const { data: config, error } = await sb
       .from('app_configs')
       .select('value')
-      .eq('key', 'quick_start_guide')
-      .maybeSingle();
-      
-    if (!error && config) {
-      editArea.value = config.value; // 기존 데이터 로드 성공!
-    } else {
-      editArea.value = "기존 가이드 데이터를 불러오지 못했습니다. 테이블을 확인해 주세요.";
-    }
-  } catch (err) {
-    editArea.value = "에러 발생: " + err.message;
-  }
-}
-
-// 💾 [추가] 텍스트상자의 새로운 가이드를 Supabase에 실시간 저장하는 함수
-async function saveQuickStartGuide() {
-  const newHtml = document.getElementById('guideEditArea').value;
-  const resultSpan = document.getElementById('saveResult');
-  resultSpan.textContent = '저장 진행 중...';
-  resultSpan.style.color = 'var(--th)';
-
-  try {
-    const { error } = await sb
-      .from('app_configs')
-      .upsert({ key: 'quick_start_guide', value: newHtml, updated_at: new Date() });
+      .eq('key', 'quick_start_guide');
 
     if (error) throw error;
 
-    resultSpan.textContent = '✅ 성공적으로 저장되었습니다!';
-    resultSpan.style.color = 'var(--gn)';
+    if (config && config.length > 0) {
+      const dbValue = config[0].value;
+      cachedQuickStartHtml = dbValue; // 전역 캐시 변수 연동
+      editArea.value = dbValue;       // 편집 텍스트상자에 로드
+    } else {
+      editArea.value = "기존 가이드 데이터가 없습니다. 여기에 가이드용 HTML을 새로 기입하고 저장해 주세요.";
+    }
   } catch (err) {
-    resultSpan.textContent = '❌ 저장 실패: ' + err.message;
-    resultSpan.style.color = 'var(--rd)';
+    console.error(err);
+    editArea.value = "기존 가이드 데이터를 불러오지 못했습니다. 직접 입력하여 새로 저장해 주세요.";
+  }
+}
+
+async function saveQuickStartGuide() {
+  const newHtml = document.getElementById('guideEditArea')?.value || '';
+  const resultSpan = document.getElementById('saveResult');
+  if (resultSpan) {
+    resultSpan.textContent = ' ⏳ 저장 진행 중...';
+    resultSpan.style.color = 'var(--th)';
+  }
+
+  try {
+    // app_configs 테이블에 최신 HTML 데이터를 안전하게 덮어쓰기(upsert)합니다.
+    const { error } = await sb
+      .from('app_configs')
+      .upsert({ 
+        key: 'quick_start_guide', 
+        value: newHtml, 
+        updated_at: new Date().toISOString() 
+      }, { onConflict: 'key' });
+
+    if (error) throw error;
+
+    cachedQuickStartHtml = newHtml; // 즉시 캐시에도 동기화
+
+    if (resultSpan) {
+      resultSpan.textContent = ' 🟢 성공적으로 저장되었습니다!';
+      resultSpan.style.color = 'var(--gn)';
+    }
+    alert('신규 입사자 가이드북 소스코드가 데이터베이스에 최종 동기화되었습니다!');
+  } catch (err) {
+    console.error(err);
+    if (resultSpan) {
+      resultSpan.textContent = ' ❌ 저장 실패: ' + err.message;
+      resultSpan.style.color = 'var(--rd)';
+    }
   }
 }
 
