@@ -6628,13 +6628,72 @@ async function renderManualEdit(area) {
         <button class="btn-cancel-sm" onclick="restoreManualSections()" style="font-size:11px">
           <i class="ti ti-upload"></i> 백업 복원
         </button>
-      </div><div class="page-sub">여기서 수정하면 모든 직원이 보는 설명서가 즉시 바뀝니다</div></div>
+      </div><div class="page-sub">여기서 수정 후 저장하면 모든 직원이 보는 설명서가 즉시 바뀝니다.</div></div>
     ${tabBar}
     <div class="blue" style="background:var(--blb);border:0.5px solid var(--bl);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#143a5e">
-      <strong>편집 안내:</strong> 제목과 본문을 고친 뒤 <strong>"이 섹션 저장"</strong>을 누르면 반영됩니다. 본문에는 간단한 HTML을 쓸 수 있어요 — 줄바꿈 <b>&lt;br&gt;</b>, 굵게 <b>&lt;b&gt;글자&lt;/b&gt;</b>, 목록 <b>&lt;ul&gt;&lt;li&gt;항목&lt;/li&gt;&lt;/ul&gt;</b>.
+      <strong>편집 안내:</strong> 제목과 본문을 고친 뒤 <strong>"이 섹션 저장"</strong>을 누르면 반영됩니다. 본문에는 간단한 HTML을 쓸 수 있어요: 줄바꿈 <b>&lt;br&gt;</b>, 굵게 <b>&lt;b&gt;글자&lt;/b&gt;</b>, 목록 <b>&lt;ul&gt;&lt;li&gt;항목&lt;/li&gt;&lt;/ul&gt;</b>.
     </div>
-    ${secList || '<div style="color:var(--th);padding:20px;text-align:center">섹션이 없습니다. 아래 버튼으로 추가하세요.</div>'}
-    <button class="btn-new" onclick="addManualSec()" style="width:100%;margin-top:6px"><i class="ti ti-plus"></i> 새 섹션 추가</button>`;
+    \${secList || '<div style="color:var(--th);padding:20px;text-align:center;">섹션이 없습니다. 우측 버튼으로 추가하세요.</div>'}
+    
+    <!-- 💡 [추가] 2-1. 신규 입사자 가이드북 실시간 편집 패널 -->
+    <div class="admin-guide-panel" style="background:#FFF9E6; border:0.5px solid #E8C07A; border-radius:12px; padding:20px; margin:20px 0;">
+      <h3 style="font-size:14px; color:#7A5C00; margin-bottom:8px; font-weight:bold;"><i class="ti ti-edit"></i> [관리자 전용] 신규 입사자 가이드북 편집</h3>
+      <p style="font-size:12px; color:#8A7A68; margin-bottom:12px;">가이드북에 표시되는 실시간 HTML 소스코드입니다. 기존 내용이 아래 상자에 자동으로 로드됩니다.</p>
+      <textarea id="guideEditArea" style="width:100%; height:260px; font-family: monospace; font-size:13px; padding:12px; border:1px solid var(--crd); border-radius:8px; outline:none; background:#fff; resize:vertical;" placeholder="가이드 데이터를 불러오는 중입니다..."></textarea>
+      <div style="display: flex; align-items: center; gap: 10px; margin-top:12px;">
+        <button onclick="saveQuickStartGuide()" class="btn-cancel-sm" style="background:#2D6A4F; color:#fff; border:none; border-radius:6px; padding:8px 14px; font-size:12px; font-weight:bold; cursor:pointer;">💾 변경사항 저장</button>
+        <span id="saveResult" style="font-size:12px; font-weight:bold;"></span>
+      </div>
+    </div>
+
+    <button class="btn-new" onclick="addManualSec()" style="width:100%; margin-top:6px;"><i class="ti ti-plus"></i> 새 섹션 추가</button>
+  `;
+
+  // 💡 [추가] 설명서 편집 창이 열리자마자 Supabase에서 기존 저장된 가이드 HTML 데이터를 텍스트 상자에 불러옵니다.
+  loadExistingGuide();
+}
+// 💡 [추가] 기존에 저장된 가이드를 가져와 텍스트상자에 넣어주는 함수
+async function loadExistingGuide() {
+  const editArea = document.getElementById('guideEditArea');
+  if (!editArea) return;
+  
+  try {
+    const { data: config, error } = await sb
+      .from('app_configs')
+      .select('value')
+      .eq('key', 'quick_start_guide')
+      .maybeSingle();
+      
+    if (!error && config) {
+      editArea.value = config.value; // 기존 데이터 로드 성공!
+    } else {
+      editArea.value = "기존 가이드 데이터를 불러오지 못했습니다. 테이블을 확인해 주세요.";
+    }
+  } catch (err) {
+    editArea.value = "에러 발생: " + err.message;
+  }
+}
+
+// 💾 [추가] 텍스트상자의 새로운 가이드를 Supabase에 실시간 저장하는 함수
+async function saveQuickStartGuide() {
+  const newHtml = document.getElementById('guideEditArea').value;
+  const resultSpan = document.getElementById('saveResult');
+  resultSpan.textContent = '저장 진행 중...';
+  resultSpan.style.color = 'var(--th)';
+
+  try {
+    const { error } = await sb
+      .from('app_configs')
+      .upsert({ key: 'quick_start_guide', value: newHtml, updated_at: new Date() });
+
+    if (error) throw error;
+
+    resultSpan.textContent = '✅ 성공적으로 저장되었습니다!';
+    resultSpan.style.color = 'var(--gn)';
+  } catch (err) {
+    resultSpan.textContent = '❌ 저장 실패: ' + err.message;
+    resultSpan.style.color = 'var(--rd)';
+  }
 }
 
 async function addManualSec() {
