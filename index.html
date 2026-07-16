@@ -6622,18 +6622,10 @@ async function renderManualEdit(area) {
     return;
   }
 
-  // 2. 초기 로딩 레이아웃 먼저 강제 주입
-  area.innerHTML = `
-    <div class="page-header">
-      <div class="page-title">설명서 편집</div>
-    </div>
-    <div style="text-align:center; padding:40px; color:var(--th);">
-      <i class="ti ti-loader spin" style="font-size:24px; margin-bottom:10px; display:block;"></i>
-      설명서 편집 환경을 안전하게 구성하는 중입니다...
-    </div>
-  `;
+  // 로딩 표시
+  area.innerHTML = '<div class="loading" style="text-align:center; padding:40px; color:var(--th);"><i class="ti ti-loader spin"></i> 편집 환경을 구성하고 데이터를 불러오는 중...</div>';
 
-  // 3. 탭바 및 뷰어 설정
+  // 2. 탭바 및 뷰어 설정
   const auds = [
     ['user', '팀원(매장)용'],
     ['manager', '매니저용'],
@@ -6645,7 +6637,7 @@ async function renderManualEdit(area) {
     auds.map(([a, l]) => '<button class="tab-btn' + (currentAudience === a ? ' active' : '') + '" onclick="manualEditAudience=\'' + a + '\';renderManualEdit(document.getElementById(\'contentArea\'))">' + l + '</button>').join('') +
   '</div>';
 
-  // 4. 데이터베이스 사전 로드 (여기서 완벽하게 검증)
+  // 3. 데이터 동시 병렬 로드
   let guideHtml = '';
   let sections = [];
   
@@ -6665,7 +6657,7 @@ async function renderManualEdit(area) {
     console.error("데이터 사전 로드 실패:", err);
   }
 
-  // 5. 아래 항목별 리스트 레이아웃 생성
+  // 4. 리스트 레이아웃 생성
   let secListHtml = '';
   if (sections && sections.length > 0) {
     for (let i = 0; i < sections.length; i++) {
@@ -6682,8 +6674,19 @@ async function renderManualEdit(area) {
             <button class="btn-cancel-sm" style="color:var(--rd);" onclick="deleteManualSec('${s.id}')">삭제</button>
           </div>
           
-          <!-- 개별 에디터 영역 (공백 절대 없음) -->
-          <div style="background:#fff; border-radius:8px; overflow:hidden; border:1px solid var(--crd); margin-bottom:8px;"><div id="quill-body-${s.id}" style="height:200px; font-size:13px; line-height:1.7;"></div></div>
+          <!-- 개별 설명서 에디터 박스 (배경을 투명하게 유지하기 위해 ql-editor 내부 스타일 적용) -->
+          <style>
+            #quill-body-${s.id} .ql-editor {
+              background-color: transparent !important;
+              font-family: inherit;
+              font-size: 13px !important;
+              line-height: 1.7 !important;
+              padding: 12px !important;
+            }
+          </style>
+          <div style="background:#fff; border-radius:8px; overflow:hidden; border:1px solid var(--crd); margin-bottom:8px;">
+            <div id="quill-body-${s.id}" style="height:200px;"></div>
+          </div>
 
           <div style="text-align:right;margin-top:8px">
             <button class="btn-cancel-sm" onclick="saveManualSecWithQuill('${s.id}')">💾 이 섹션 저장</button>
@@ -6695,8 +6698,24 @@ async function renderManualEdit(area) {
     secListHtml = '<div style="color:var(--th);padding:20px;text-align:center;">섹션이 없습니다. 우측 버튼으로 추가하세요.</div>';
   }
 
-  // 6. 메인 뷰 즉시 그리기
+  // 메인 뷰 그리기 (빠른 시작 가이드 에디터 폰트 스타일 보정 CSS 추가)
   area.innerHTML = `
+    <style>
+      /* Quill 에디터 기본 배경 투명화 및 줄간격/글자 크기 원래 매뉴얼 스타일로 고정 */
+      #quillEditorContainer .ql-editor {
+        background-color: transparent !important;
+        font-family: inherit;
+        font-size: 14px !important;
+        line-height: 1.7 !important;
+        color: #333 !important;
+      }
+      /* 저장된 뷰어 화면에서도 불필요한 배경색이 묻어나지 않도록 강제 방지 */
+      .quick-start-guide-view, .quick-start-guide-view * {
+        background-color: transparent !important;
+        line-height: 1.7 !important;
+      }
+    </style>
+
     <div class="page-header">
       <div class="page-title">설명서 편집</div>
       <div style="display:flex;gap:8px;margin-top:6px">
@@ -6714,12 +6733,13 @@ async function renderManualEdit(area) {
       <strong>편집 안내:</strong> 에디터로 편하게 가이드북을 작성하시고 <strong>"💾 변경사항 저장"</strong>을 누르면 실시간 반영됩니다.
     </div>
     
-    <!-- 메인 가이드북 에디터 구역 -->
     <div class="admin-guide-panel" style="background:#FFF9E6; border:0.5px solid #E8C07A; border-radius:12px; padding:20px; margin:20px 0;">
       <h3 style="font-size:14px; color:#7A5C00; margin-bottom:8px; font-weight:bold;"><i class="ti ti-edit"></i> [관리자 전용] 신규 입사자 가이드북 편집</h3>
       <p style="font-size:12px; color:#8A7A68; margin-bottom:12px;">게시판처럼 글자 굵게, 크기, 색상, 목록 메뉴를 사용하여 마우스로 편하게 수정하세요.</p>
       
-      <div style="background:#fff; border-radius:8px; overflow:hidden; border:1px solid var(--crd);"><div id="quillEditorContainer" style="height: 320px; font-size: 14px;"></div></div>
+      <div style="background:#fff; border-radius:8px; overflow:hidden; border:1px solid var(--crd);">
+        <div id="quillEditorContainer" style="height: 320px;"></div>
+      </div>
 
       <div style="display: flex; align-items: center; gap: 10px; margin-top:12px;">
         <button onclick="saveQuickStartGuideWithQuill()" class="btn-cancel-sm" style="background:#2D6A4F; color:#fff; border:none; border-radius:6px; padding:8px 14px; font-size:12px; font-weight:bold; cursor:pointer;">💾 변경사항 저장</button>
@@ -6727,14 +6747,12 @@ async function renderManualEdit(area) {
       </div>
     </div>
 
-    <!-- 하단 리스트 구역 -->
     <div id="manualSectionsContainer">${secListHtml}</div>
     <button class="btn-new" onclick="addManualSec()" style="width:100%; margin-top:6px;"><i class="ti ti-plus"></i> 새 섹션 추가</button>
   `;
 
-  // 7. Quill 에디터 정밀 로딩 루프 실행
+  // 7. Quill 에디터 바인딩
   try {
-    // 7-1. 상단 가이드북 에디터 초기화 및 데이터 셋업
     const mainBox = document.getElementById('quillEditorContainer');
     if (mainBox) {
       mainBox.innerHTML = '';
@@ -6753,15 +6771,15 @@ async function renderManualEdit(area) {
         placeholder: '여기에 입사자 가이드 내용을 작성해 주세요...'
       });
       
-      // 순수 텍스트와 HTML 양쪽 모두 빈틈없이 지원하는 붙여넣기 메서드 사용
-      if (guideHtml.trim().startsWith('<')) {
-        manualQuillInstance.clipboard.dangerouslyPasteHTML(0, guideHtml);
+      // 본문 투명도 유지 처리를 포함하여 데이터 바인딩
+      const processedHtml = cleanInlineBackgrounds(guideHtml);
+      if (processedHtml.trim().startsWith('<')) {
+        manualQuillInstance.clipboard.dangerouslyPasteHTML(0, processedHtml);
       } else {
-        manualQuillInstance.setText(guideHtml || '');
+        manualQuillInstance.setText(processedHtml || '');
       }
     }
 
-    // 7-2. 개별 항목 에디터들 즉시 바인딩
     if (sections && sections.length > 0) {
       sections.forEach((s) => {
         const itemBox = document.getElementById(`quill-body-${s.id}`);
@@ -6780,8 +6798,7 @@ async function renderManualEdit(area) {
             placeholder: '설명서 본문 내용을 입력하세요...'
           });
 
-          // 데이터 유무 및 형식 검증 후 안전하게 삽입
-          const content = s.body || '';
+          const content = cleanInlineBackgrounds(s.body || '');
           if (content.trim().startsWith('<')) {
             miniQuill.clipboard.dangerouslyPasteHTML(0, content);
           } else {
@@ -6797,6 +6814,15 @@ async function renderManualEdit(area) {
   }
 }
 
+// 🧼 Quill 스타일 중 인라인 배경색(흰색) 강제 치환 유틸리티 함수
+function cleanInlineBackgrounds(htmlString) {
+  if (!htmlString) return '';
+  // style 속성 내부에 있는 background-color: rgb(255, 255, 255) 혹은 background-color: #ffffff 등을 투명(transparent)으로 강제 변환합니다.
+  return htmlString
+    .replace(/background-color\s*:\s*[^;"]+/gi, 'background-color: transparent !important')
+    .replace(/background\s*:\s*rgb\(255,\s*255,\s*255\)/gi, 'background: transparent !important');
+}
+
 // 💾 1. 상단 가이드북 저장 함수
 async function saveQuickStartGuideWithQuill() {
   if (!manualQuillInstance) return;
@@ -6807,7 +6833,9 @@ async function saveQuickStartGuideWithQuill() {
     resultSpan.style.color = 'var(--th)';
   }
 
-  const newHtml = manualQuillInstance.root.innerHTML;
+  // 저장하기 전 인라인 흰색 배경 제거 필터링을 거칩니다.
+  const rawHtml = manualQuillInstance.root.innerHTML;
+  const newHtml = cleanInlineBackgrounds(rawHtml);
 
   try {
     const { error } = await sb
@@ -6829,6 +6857,9 @@ async function saveQuickStartGuideWithQuill() {
       resultSpan.style.color = 'var(--gn)';
     }
     alert('작성하신 내용이 실시간 가이드북에 완벽히 저장되었습니다!');
+    
+    // 즉각적인 뷰어 갱신 반영
+    renderManualEdit(document.getElementById('contentArea'));
   } catch (err) {
     console.error("저장 실패:", err);
     if (resultSpan) {
@@ -6848,7 +6879,8 @@ async function saveManualSecWithQuill(id) {
     return;
   }
 
-  const bodyVal = quillInstance.root.innerHTML;
+  const rawHtml = quillInstance.root.innerHTML;
+  const bodyVal = cleanInlineBackgrounds(rawHtml);
 
   try {
     const { error } = await sb
