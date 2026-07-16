@@ -1266,7 +1266,7 @@ async function updateNotifDot() {
   try {
     const week = new Date(Date.now() - 7*864e5).toISOString();
     
-    // 1. 단순하게 posts 가져오기 (문법 에러 방지)
+    // 1. 단순하게 posts 가져오기
     const { data: posts, error: postErr } = await sb.from('posts')
       .select('id, category_id')
       .gte('created_at', week)
@@ -1290,9 +1290,9 @@ async function updateNotifDot() {
     const reqBadge = document.getElementById('reqNavBadge');
     if (reqBadge) reqBadge.style.display = myReqCount > 0 ? '' : 'none';
 
-    // 2. notifications 테이블에서 에러 나지 않도록 id와 필드만 안전하게 select
+    // 2. notifications 테이블에서 에러 유발하는 'title' 제외하고 message만 조회!
     const { data: myNotifs, error: notifErr } = await sb.from('notifications')
-      .select('id, message, title')
+      .select('id, message')
       .eq('user_id', currentUser.id)
       .eq('is_read', false);
 
@@ -1310,8 +1310,7 @@ async function updateNotifDot() {
       dot.style.display = 'inline-block';
       
       const hasRemind = (myNotifs || []).some(n => 
-        (n.message && n.message.includes('리마인드')) || 
-        (n.title && n.title.includes('리마인드'))
+        n.message && n.message.includes('리마인드')
       );
       
       if (hasRemind) {
@@ -4644,7 +4643,7 @@ async function loadNotifPanel() {
   list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--th);font-size:13px"><i class="ti ti-loader spin"></i></div>';
 
   try {
-    // 백그라운드 리마인드 체크 실행 (에러 나더라도 전체 흐름이 깨지지 않게 예외 감싸기)
+    // 백그라운드 리마인드 체크 실행
     try {
       if (typeof checkAndSend3DayReminders === 'function') {
         checkAndSend3DayReminders();
@@ -4653,9 +4652,9 @@ async function loadNotifPanel() {
       console.warn("리마인드 체크 지연:", e);
     }
 
-    // 1. DB 조회 에러 차단용 안전 쿼리 (notifications의 컬럼을 최소한으로 가져옴)
+    // 1. 에러 유발하는 'title' 컬럼을 빼고 'message'만 안전하게 조회!
     const { data: notis, error: dbError } = await sb.from('notifications')
-      .select('id, title, message, is_read, created_at, ref_type, ref_id')
+      .select('id, message, is_read, created_at, ref_type, ref_id')
       .eq('user_id', currentUser.id)
       .order('created_at', { ascending: false })
       .limit(50);
@@ -4680,20 +4679,24 @@ async function loadNotifPanel() {
       </div>
     `;
 
-    // 4. 리스트 렌더링 (ref_type, ref_id 백업 바인딩)
+    // 4. 리스트 렌더링 (title이 없으므로 message를 활용하여 제목 표시)
     const makeList = (items) => {
       if (items.length === 0) return '<div style="padding:20px;text-align:center;color:var(--th);font-size:13px">알림이 없습니다.</div>';
       return items.map(n => {
         const iconMap2 = { interview:'ti-message-report', post:'ti-article', schedule:'ti-calendar-event', request:'ti-clipboard-check', attendance:'ti-alarm' };
         const icon = iconMap2[n.ref_type] || 'ti-bell';
         
-        // 데이터 누수 방지용 fallback
         const rType = n.ref_type || '';
         const rId = n.ref_id || '';
         
+        // 메세지 내용을 앞부분만 살려서 제목처럼 예쁘게 가공
+        const displayText = n.message || '새 알림이 등록되었습니다.';
+        
         return `
           <div class="notif-item" onclick="notifGo('${rType}', '${rId}', '${n.id}')" style="cursor:pointer; padding:10px; border-bottom:0.5px solid var(--crd); opacity:${n.is_read ? '0.6' : '1'};">
-            <div style="font-size:12px; color:var(--tm); margin-bottom:4px;"><i class="ti ${icon}" style="margin-right:4px;"></i>${n.title || n.message || '새 알림'}</div>
+            <div style="font-size:12px; color:var(--tm); margin-bottom:4px; line-height: 1.4;">
+              <i class="ti ${icon}" style="margin-right:4px;"></i>${displayText}
+            </div>
             <div style="font-size:11px; color:var(--th);">${new Date(n.created_at).toLocaleString()}</div>
           </div>
         `;
