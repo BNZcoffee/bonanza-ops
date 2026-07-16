@@ -1,0 +1,8 @@
+{
+  "name": "보난자커피 운영 매뉴얼",
+  "short_name": "보난자매뉴얼",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#000000"
+}
