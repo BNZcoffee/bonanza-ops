@@ -6641,7 +6641,7 @@ async function renderManualEdit(area) {
       </div>
     </div>`).join('');
 
-// 💡 [버그 해결 및 안정화 버전] 백틱 변수 충돌을 완전히 예방하여 덮어씁니다.
+// 💡 [최상단 배치 보정 버전] 신규 입사자 가이드 편집 창이 가장 위로 올라옵니다.
   var finalSecList = secList ? secList : '<div style="color:var(--th);padding:20px;text-align:center;">섹션이 없습니다. 우측 버튼으로 추가하세요.</div>';
 
   area.innerHTML = 
@@ -6662,10 +6662,7 @@ async function renderManualEdit(area) {
       '<strong>편집 안내:</strong> 제목과 본문을 고친 뒤 <strong>"이 섹션 저장"</strong>을 누르면 반영됩니다. 본문에는 간단한 HTML을 쓸 수 있어요: 줄바꿈 <strong>&lt;br&gt;</strong>, 굵게 <strong>&lt;b&gt;글자&lt;/b&gt;</strong>, 목록 <strong>&lt;ul&gt;&lt;li&gt;항목&lt;/li&gt;&lt;/ul&gt;</strong>.' +
     '</div>' +
     
-    // 설명서 기존 섹션 리스트 렌더링 구역
-    finalSecList +
-    
-    // 💡 2-1. 신규 입사자 가이드북 실시간 편집 패널
+    // 💡 2-1. [위치 이동] 신규 입사자 가이드북 실시간 편집 패널을 가장 위에 배치
     '<div class="admin-guide-panel" style="background:#FFF9E6; border:0.5px solid #E8C07A; border-radius:12px; padding:20px; margin:20px 0;">' +
       '<h3 style="font-size:14px; color:#7A5C00; margin-bottom:8px; font-weight:bold;"><i class="ti ti-edit"></i> [관리자 전용] 신규 입사자 가이드북 편집</h3>' +
       '<p style="font-size:12px; color:#8A7A68; margin-bottom:12px;">가이드북에 표시되는 실시간 HTML 소스코드입니다. 기존 내용이 아래 상자에 자동으로 로드됩니다.</p>' +
@@ -6675,6 +6672,9 @@ async function renderManualEdit(area) {
         '<span id="saveResult" style="font-size:12px; font-weight:bold;"></span>' +
       '</div>' +
     '</div>' +
+
+    // 이어서 일반 설명서 목록을 아래로 렌더링
+    finalSecList +
 
     '<button class="btn-new" onclick="addManualSec()" style="width:100%; margin-top:6px;"><i class="ti ti-plus"></i> 새 섹션 추가</button>';
 
@@ -10407,37 +10407,56 @@ async function loadRetireStaffOptions() {
 }
 
 function addExtraStaff() {
-  // 지원/교육 추가는 총괄·부총괄·인사팀만
-  const canAddExtra = currentUser.is_master || currentUser.is_vice_master ||
-                      currentUser.role === 'hr' || currentUser.role === 'admin';
-  if (!canAddExtra) { alert('지원/교육 인력 추가는 총괄·부총괄·인사팀만 가능합니다.'); return; }
+  // 💡 [권한 보정] 총괄, 부총괄, 인사팀 뿐만 아니라 현장 매장 '매니저(manager)'도 추가할 수 있도록 허용
+  const uRole = currentUser.role || '';
+  const canAddExtra = currentUser.is_master || currentUser.is_vice_master || 
+                      uRole === 'admin' || uRole === 'dept' || uRole === 'manager';
+                      
+  if (!canAddExtra) { 
+    alert('지원/교육 인력 추가는 매니저급 이상만 가능합니다.'); 
+    return; 
+  }
+
   // 편집 모드 자동 진입
   if (!window.__schEditMode) {
     enterSchEditMode();
-    setTimeout(() => addExtraStaff(), 500);
+    setTimeout(() => { addExtraStaff(); }, 500);
     return;
   }
 
-  const typeSel   = document.getElementById('extraTypeSelect');
+  const typeSel = document.getElementById('extraTypeSelect');
   const extraType = typeSel?.value || '지원';
 
-  // ── 퇴사 예정 처리 ──
+  // ⚠️ 퇴사 예정 처리 ⚠️
   if (extraType === '퇴사예정') {
-    const staffSel  = document.getElementById('retireStaffSelect');
+    const staffSel = document.getElementById('retireStaffSelect');
     const dateInput = document.getElementById('retireDateInput');
-    const val       = staffSel?.value;
-    const retireDate= dateInput?.value;
+    const val = staffSel?.value;
+    const retireDate = dateInput?.value;
+
     if (!val) { alert('직원을 선택해주세요.'); return; }
     if (!retireDate) { alert('퇴사일을 선택해주세요.'); return; }
+
     const [id, name, store] = val.split('|');
+    
+    // 이미 퇴사 정보가 기입되었는지 대조
     if (curScheduleStaff.some(s => s.id === id && s._retireDate)) {
-      alert('이미 퇴사 예정으로 등록된 직원입니다.'); return;
+      alert('이미 퇴사 예정으로 등록된 직원입니다.'); 
+      return;
     }
+
+    // 💡 [안전 보정] 매니저가 추가하는 시점에는 DB에 쓰지 않고 스케줄러 임시 메모리에만 담아둡니다.
+    // 추후 운영팀이 최종 '컨펌 완료' 버튼을 누르는 트랜잭션 함수에서 이 _retireDate 값을 긁어 한 번에 DB에 저장하게 됩니다.
+    const targetIdx = curScheduleStaff.findIndex(s => s.id === id);
+    if (targetIdx > -1) {
+      curScheduleStaff[targetIdx]._retireDate = retireDate;
+      curScheduleStaff[targetIdx]._isRetirePending = true; // 운영팀 승인 대기 플래그
+    }
+
+    alert(`[${name}] 직원의 퇴사 예정일(${retireDate})이 스케줄 안안에 임시 등록되었습니다. 운영팀 컨펌 완료 시 최종 반영됩니다.`);
+    
     syncCellsToMemory();
-    // 퇴사예정은 별도 목록에 저장 (스케줄 행에 추가하지 않음)
-    // 잔여 휴무 확인
-    // 대휴 검증용 balance map 저장
-  window.__leaveBalanceMap = {};
+    window.__leaveBalanceMap = {};
   rows.forEach(r => {
     if (r.userId) window.__leaveBalanceMap[r.userId] = {carryIn: r.carryIn||0};
   });
@@ -12991,6 +13010,24 @@ async function confirmScheduleApprove() {
   await sb.from('schedules').update({
     status:'confirmed', confirmed_at: now, confirmed_by: currentUser.id, updated_at: now
   }).eq('id', curSchedule.id);
+// 💡 [추가] 운영팀 최종 승인 컨펌 완료 시점에 퇴사일자를 DB에 일괄 저장합니다.
+  try {
+    const todayStr = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10); // KST 오늘 날짜
+    const pendingRetires = curScheduleStaff.filter(s => s._isRetirePending && s._retireDate);
+
+    for (const staff of pendingRetires) {
+      const isActive = staff._retireDate > todayStr;
+      
+      await sb.from('users')
+        .update({ 
+          retire_date: staff._retireDate, 
+          active: isActive 
+        })
+        .eq('id', staff.id);
+    }
+  } catch (e) {
+    console.warn('운영팀 승인 시 퇴사 연동 오류:', e);
+  }
 
   // 퇴사일자 자동 반영 (스케줄 → 인원현황)
   await syncRetireDatesFromSchedule(curSchedule.id);
