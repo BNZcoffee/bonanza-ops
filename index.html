@@ -6593,33 +6593,31 @@ function goManualEdit() {
 }
 
 async function renderManualEdit(area) {
-  if (!canEditManual()) { area.innerHTML = '<div style="padding:40px;text-align:center;color:var(--rd)">편집 권한이 없습니다.</div>'; return; }
-  area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  if (!area) return;
+  
+  // 1. 편집 권한 체크
+  if (typeof canEditManual === 'function' && !canEditManual()) {
+    area.innerHTML = '<div style="padding:40px;text-align:center;color:var(--rd)">편집 권한이 없습니다.</div>';
+    return;
+  }
 
-  const { data: sections } = await sb.from('manual_sections')
-    .select('*').eq('audience', manualEditAudience).order('sort_order');
+  // 2. 탭바 및 뷰어 구분 설정
+  const auds = [
+    ['user', '팀원(매장)용'],
+    ['manager', '매니저용'],
+    ['dept', '부서담당용'],
+    ['admin', '총괄·부총괄용']
+  ];
+  
+  const currentAudience = typeof manualEditAudience !== 'undefined' ? manualEditAudience : 'user';
+  const tabBar = `<div class="tabbar" style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap;">` +
+    auds.map(([a, l]) => `<button class="tab-btn${currentAudience === a ? ' active' : ''}" onclick="manualEditAudience='${a}';renderManualEdit(document.getElementById('contentArea'))">${l}</button>`).join('') +
+  `</div>`;
 
-  const editParts = [['user','팀원(매장)용'],['manager','매니저용'],['dept','부서담당용'],['admin','총괄·부총괄용']];
-  const tabBar = `<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-    ${editParts.map(([a,label]) => `<button class="tab-btn${manualEditAudience===a?' active':''}" onclick="manualEditAudience='${a}';renderManualEdit(document.getElementById('contentArea'))">${label}</button>`).join('')}
-  </div>`;
+  // 💡 [에러 원인 해결] 에러를 일으켰던 finalSecList 변수를 여기서 확실하게 안전하게 먼저 선언해 둡니다.
+  let finalSecList = '<div id="manualSectionsContainer"><div style="text-align:center; padding:20px; color:var(--th);">설명서 섹션을 불러오는 중...</div></div>';
 
-  const secList = (sections||[]).map((s, i) => `
-    <div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:14px;margin-bottom:10px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <span style="font-size:11px;color:var(--th)">#${i+1}</span>
-        <input class="form-input" id="msec-title-${s.id}" value="${(s.title||'').replace(/"/g,'&quot;')}" style="flex:1;padding:7px 10px;font-weight:600" placeholder="섹션 제목"/>
-        <button class="btn-cancel-sm" style="padding:5px 8px" onclick="moveManualSec(${s.id},-1)" title="위로"><i class="ti ti-arrow-up"></i></button>
-        <button class="btn-cancel-sm" style="padding:5px 8px" onclick="moveManualSec(${s.id},1)" title="아래로"><i class="ti ti-arrow-down"></i></button>
-        <button class="btn-cancel-sm" style="padding:5px 8px;color:var(--rd);border-color:var(--rd)" onclick="deleteManualSec(${s.id})" title="삭제"><i class="ti ti-trash"></i></button>
-      </div>
-      <textarea class="form-input" id="msec-body-${s.id}" style="min-height:140px;font-family:inherit;font-size:13px;line-height:1.7" placeholder="본문 내용 (HTML 태그 사용 가능: <b>굵게</b>, <br> 줄바꿈, <ul><li>목록</li></ul> 등)">${s.body||''}</textarea>
-      <div style="text-align:right;margin-top:8px">
-        <button class="btn-cancel-sm" onclick="saveManualSec(${s.id})"><i class="ti ti-device-floppy"></i> 이 섹션 저장</button>
-      </div>
-    </div>`).join('');
-
-// 💡 [최상단 배치 보정 버전] 신규 입사자 가이드 편집 창이 가장 위로 올라옵니다.
+  // 3. 기본 레이아웃 및 가이드북 편집창(최상단 배치) 화면 렌더링
   area.innerHTML = 
     '<div class="page-header">' +
       '<div class="page-title">설명서 편집</div>' +
@@ -6635,10 +6633,10 @@ async function renderManualEdit(area) {
     '<div class="page-sub">여기서 수정 후 저장하면 모든 직원이 보는 설명서가 즉시 바뀝니다.</div>' +
     tabBar +
     '<div class="blue" style="background:var(--blb);border:0.5px solid var(--bl);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#143a5e">' +
-      '<strong>편집 안내:</strong> 제목과 본문을 고친 뒤 <strong>"이 섹션 저장"</strong>을 누르면 반영됩니다. 본문에는 간단한 HTML을 쓸 수 있어요: 줄바꿈 <strong>&lt;br&gt;</strong>, 굵게 <strong>&lt;b&gt;글자&lt;/b&gt;</strong>, 목록 <strong>&lt;ul&gt;&lt;li&gt;항목&lt;/li&gt;&lt;/ul&gt;</strong>.' +
+      '<strong>편집 안내:</strong> 제목과 본문을 고친 뒤 <strong>"이 섹션 저장"</strong>을 누르면 반영됩니다.' +
     '</div>' +
     
-    // 💡 [최상단 배치 완료] 신규 입사자 가이드북 실시간 편집 패널
+    // 신규 입사자 가이드북 편집 패널
     '<div class="admin-guide-panel" style="background:#FFF9E6; border:0.5px solid #E8C07A; border-radius:12px; padding:20px; margin:20px 0;">' +
       '<h3 style="font-size:14px; color:#7A5C00; margin-bottom:8px; font-weight:bold;"><i class="ti ti-edit"></i> [관리자 전용] 신규 입사자 가이드북 편집</h3>' +
       '<p style="font-size:12px; color:#8A7A68; margin-bottom:12px;">가이드북에 표시되는 실시간 HTML 소스코드입니다. 기존 내용이 아래 상자에 자동으로 로드됩니다.</p>' +
@@ -6646,18 +6644,60 @@ async function renderManualEdit(area) {
       '<div style="display: flex; align-items: center; gap: 10px; margin-top:12px;">' +
         '<button onclick="saveQuickStartGuide()" class="btn-cancel-sm" style="background:#2D6A4F; color:#fff; border:none; border-radius:6px; padding:8px 14px; font-size:12px; font-weight:bold; cursor:pointer;">💾 변경사항 저장</button>' +
         '<span id="saveResult" style="font-size:12px; font-weight:bold;"></span>' +
-      '</div>' +
+      </div>' +
     '</div>' +
 
-    // 이어서 일반 설명서 리스트 렌더링
+    // 설명서 기존 섹션들이 들어갈 영역
     finalSecList +
 
     '<button class="btn-new" onclick="addManualSec()" style="width:100%; margin-top:6px;"><i class="ti ti-plus"></i> 새 섹션 추가</button>';
 
-  // 가이드 데이터 로딩 호출
-  loadExistingGuide();
-  // 설명서 편집 창 로딩 직후 Supabase 가이드 데이터 호출 실행
-  loadExistingGuide();
+  // 4. 비동기 호출 (에러가 나도 화면 렌더링에 절대 영향을 주지 않도록 각각 안전하게 분리)
+  try {
+    loadExistingGuide(); 
+  } catch(e) { 
+    console.warn("가이드북 로드 실패:", e); 
+  }
+
+  try {
+    const { data: sections, error } = await sb
+      .from('manual_sections')
+      .select('*')
+      .eq('audience', currentAudience)
+      .order('sort_order');
+
+    if (error) throw error;
+
+    const container = document.getElementById('manualSectionsContainer');
+    if (container) {
+      if (sections && sections.length > 0) {
+        const secListHtml = sections.map((s, i) => `
+          <div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:14px;margin-bottom:10px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <span style="font-size:11px;color:var(--th)">#\${i+1}</span>
+              <input class="form-input" id="msec-title-\${s.id}" value="\${(s.title||'').replace(/"/g,'&quot;')}" style="flex:1;padding:7px 10px;font-weight:600" placeholder="섹션 제목"/>
+              <button class="btn-cancel-sm" onclick="moveManualSec('\${s.id}',-1)">▲</button>
+              <button class="btn-cancel-sm" onclick="moveManualSec('\${s.id}',1)">▼</button>
+              <button class="btn-cancel-sm" style="color:var(--rd);" onclick="deleteManualSec('\${s.id}')">삭제</button>
+            </div>
+            <textarea class="form-input" id="msec-body-\${s.id}" style="min-height:140px;font-family:inherit;font-size:13px;line-height:1.7">\${s.body||''}</textarea>
+            <div style="text-align:right;margin-top:8px">
+              <button class="btn-cancel-sm" onclick="saveManualSec('\${s.id}')">💾 이 섹션 저장</button>
+            </div>
+          </div>
+        `).join('');
+        container.innerHTML = secListHtml;
+      } else {
+        container.innerHTML = '<div style="color:var(--th);padding:20px;text-align:center;">섹션이 없습니다. 우측 버튼으로 추가하세요.</div>';
+      }
+    }
+  } catch (err) {
+    console.error("설명서 섹션 로드 실패:", err);
+    const container = document.getElementById('manualSectionsContainer');
+    if (container) {
+      container.innerHTML = '<div style="color:var(--rd);padding:20px;text-align:center;">설명서 목록을 불러오는 데 실패했습니다. 다시 시도해 주세요.</div>';
+    }
+  }
 }
 
 // 💡 [추가] 기존에 저장된 가이드를 가져와 텍스트상자에 넣어주는 함수
