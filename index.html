@@ -6277,6 +6277,18 @@ async function renderProfile(area){
     </div>
 
     `;
+
+    // 🔒 일반 팀원 및 매니저는 소속 매장 변경 불가 (읽기 전용 처리)
+  const pStoreSelect = document.getElementById('p_store');
+  if (pStoreSelect && currentUser) {
+    if (currentUser.role !== 'admin' && currentUser.role !== 'dept') {
+      pStoreSelect.disabled = true;
+      pStoreSelect.style.backgroundColor = '#f1f3f5';
+      pStoreSelect.style.color = '#888';
+      pStoreSelect.style.cursor = 'not-allowed';
+    }
+  }
+  
   // 연차 기능은 미완성 상태로, 개인설정(내 정보)에서 '내 연차 현황' 섹션을 숨김 처리함.
   // (연차 기능 완성 후 재노출 예정)
 }
