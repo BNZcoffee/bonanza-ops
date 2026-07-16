@@ -4536,107 +4536,77 @@ function notifGo(refType, refId, notifId){
     else goPage('all');
   } catch(e){ console.warn('알림 이동 오류:', e); } }, 60);
 }
+// 🔔 [알림창 완벽 개편] 중복 제거 + 3단 탭 분리 + 기존 라우팅(notifGo) 완벽 연동
 async function loadNotifPanel() {
-  const list  = document.getElementById('notifList');
+  const list = document.getElementById('notifList');
   if (!list) return;
   list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--th);font-size:13px"><i class="ti ti-loader spin"></i></div>';
 
-  if (currentNotifTab === 'read') {
-    // ── 확인한 알림 탭 ──────────────────────────────
-    const month = new Date(Date.now() - 30*864e5).toISOString();
-    const {data:readNotifs} = await sb.from('notifications')
-      .select('*').eq('user_id', currentUser.id).eq('is_read', true)
-      .gte('created_at', month)
-      .order('created_at', {ascending: false}).limit(50);
-    const items = readNotifs || [];
-    let html = '';
-    if (items.length) {
-      html += `<div style="font-size:10px;color:var(--th);padding:0 0 8px;letter-spacing:.5px">최근 30일 확인한 알림 ${items.length}건</div>`;
-      html += items.map(n => {
-        const iconMap2  = {interview:'ti-message-report', post:'ti-article', schedule:'ti-calendar-event', request:'ti-clipboard-check', attendance:'ti-alarm'};
-        const icon  = iconMap2[n.ref_type] || 'ti-bell';
-        return `<div class="notif-item" onclick="notifGo('${n.ref_type}',${n.ref_id},null)" style="opacity:.6;border-left:3px solid var(--crd);padding-left:10px">
-          <div class="notif-item-title" style="color:var(--ts)">
-            <i class="ti ${icon}" style="color:var(--th);margin-right:5px;font-size:12px"></i>${esc(n.message)}
+  try {
+    // 1. DB에서 모든 알림 가져오기 (공지/업무 중복 렌더링 방지)
+    const { data: notis } = await sb.from('notifications')
+      .select('*')
+      .eq('user_id', currentUser.id)
+      .order('created_at', { ascending: false })
+      .limit(50); // 최근 50개
+
+    const allNotis = notis || [];
+    
+    // 2. 알림 3단 분류
+    const newAllNotis = allNotis.filter(n => !n.is_read); // 새 알림 전체
+    const newWorkNotis = allNotis.filter(n => !n.is_read && (n.ref_type === 'request' || n.ref_type === 'report' || n.ref_type === 'work')); // 업무만
+    const readNotis = allNotis.filter(n => n.is_read); // 읽은 알림
+
+    const isManager = currentUser.role === 'admin' || currentUser.role === 'dept';
+
+    // 탭 상태 확인 (기본값은 'all')
+    window._currentNotifTab = window._currentNotifTab || 'all';
+
+    // 3. 탭 버튼 HTML 생성
+    let tabsHtml = `
+      <div style="display:flex; border-bottom:1px solid var(--crd); margin-bottom:10px;">
+        <button onclick="window._currentNotifTab='all'; loadNotifPanel();" style="flex:1; padding:10px; font-weight:bold; border:none; background:${window._currentNotifTab==='all'?'var(--br)':'#fff'}; color:${window._currentNotifTab==='all'?'#fff':'var(--th)'}; cursor:pointer;">새 알림 (${newAllNotis.length})</button>
+        ${isManager ? `<button onclick="window._currentNotifTab='work'; loadNotifPanel();" style="flex:1; padding:10px; font-weight:bold; border:none; background:${window._currentNotifTab==='work'?'var(--br)':'#fff'}; color:${window._currentNotifTab==='work'?'#fff':'var(--th)'}; cursor:pointer;">업무/보고 (${newWorkNotis.length})</button>` : ''}
+        <button onclick="window._currentNotifTab='read'; loadNotifPanel();" style="flex:1; padding:10px; font-weight:bold; border:none; background:${window._currentNotifTab==='read'?'var(--br)':'#fff'}; color:${window._currentNotifTab==='read'?'#fff':'var(--th)'}; cursor:pointer;">확인한 알림</button>
+      </div>
+    `;
+
+    // 4. 알림 리스트 아이템 그리기 (클릭 시 위에 있는 notifGo 함수를 호출하여 정확히 이동)
+    const makeList = (items) => {
+      if (items.length === 0) return '<div style="padding:20px;text-align:center;color:var(--th);font-size:13px">알림이 없습니다.</div>';
+      return items.map(n => {
+        const iconMap2 = { interview:'ti-message-report', post:'ti-article', schedule:'ti-calendar-event', request:'ti-clipboard-check', attendance:'ti-alarm' };
+        const icon = iconMap2[n.ref_type] || 'ti-bell';
+        
+        // 🚨 여기가 핵심: 클릭 시 기존 4527번 줄에 있는 notifGo 함수를 실행합니다!
+        return `
+          <div class="notif-item" onclick="notifGo('${n.ref_type}', '${n.ref_id}', '${n.id}')" style="cursor:pointer; padding:10px; border-bottom:0.5px solid var(--crd); opacity:${n.is_read ? '0.6' : '1'};">
+            <div style="font-size:12px; color:var(--tm); margin-bottom:4px;"><i class="ti ${icon}" style="margin-right:4px;"></i>${n.title || n.message || '새 알림'}</div>
+            <div style="font-size:11px; color:var(--th);">${new Date(n.created_at).toLocaleString()}</div>
           </div>
-          <div class="notif-item-meta">${fmtDateTime(n.created_at)||''} · 확인 완료</div>
-        </div>`;
+        `;
       }).join('');
-    } else {
-      html = '<div style="font-size:13px;color:var(--th);padding:20px 0;text-align:center">최근 30일간 확인한 알림이 없습니다.</div>';
-    }
-    list.innerHTML = html;
-    return;
+    };
+
+    // 현재 선택된 탭에 따라 리스트 표시
+    let contentHtml = '';
+    if (window._currentNotifTab === 'all') contentHtml = makeList(newAllNotis);
+    else if (window._currentNotifTab === 'work') contentHtml = makeList(newWorkNotis);
+    else if (window._currentNotifTab === 'read') contentHtml = makeList(readNotis);
+
+    // 5. 화면 렌더링
+    list.innerHTML = tabsHtml + contentHtml + (newAllNotis.length > 0 ? `<div style="margin-top:10px;"><button class="btn-cancel-sm" onclick="markAllNotifsRead()" style="width:100%;padding:8px;">모두 읽음 처리</button></div>` : '');
+
+    // 알림 뱃지 업데이트
+    const badge = document.getElementById('notifTabNewBadge');
+    if (badge) badge.textContent = newAllNotis.length > 0 ? newAllNotis.length : '';
+
+  } catch(e) {
+    console.error(e);
+    list.innerHTML = '<div style="padding:20px; text-align:center;">알림을 불러오는 중 오류가 발생했습니다.</div>';
   }
-
-  // ── 새 알림 탭 ───────────────────────────────────
-  const week = new Date(Date.now()-7*864e5).toISOString();
-  const [{data:posts},{data:myReads},{data:myNotifs}] = await Promise.all([
-    sb.from('posts').select('id,title,created_at,categories(name)').eq('status','published').gte('created_at',week).order('created_at',{ascending:false}).limit(10),
-    sb.from('post_reads').select('post_id').eq('user_id',currentUser.id),
-    sb.from('notifications').select('*').eq('user_id',currentUser.id).eq('is_read',false).order('created_at',{ascending:false}).limit(30)
-  ]);
-  const readIds    = new Set((myReads||[]).map(r=>r.post_id));
-  const unread     = (posts||[]).filter(p=>!readIds.has(p.id));
-  const notifItems = myNotifs || [];
-
-  let myReqs = [];
-  if (currentUser.role==='admin'||isManagerRole(currentUser.role)||currentUser.is_master||currentUser.part) {
-    const {data:reqs} = await sb.from('requests')
-      .select('id,title,status,created_at,request_types(name)')
-      .eq('assignee_id',currentUser.id).in('status',['submitted','in_progress'])
-      .order('created_at',{ascending:false}).limit(10);
-    myReqs = reqs || [];
-  }
-
-  // 탭 뱃지 숫자
-  const badge = document.getElementById('notifTabNewBadge');
-  const total = notifItems.length + myReqs.length + unread.length;
-  if (badge) badge.textContent = total > 0 ? ` (${total})` : '';
-
-  const guide = `<div style="font-size:11px;color:var(--th);padding:8px 0 0;border-top:0.5px solid var(--crd);margin-top:8px;line-height:1.5">게시글에서 <strong>확인했습니다</strong>를 누르면 공지 알림이 해제됩니다.</div>`;
-  let html = '';
-
-  if (notifItems.length) {
-    html += `<div style="font-size:10px;font-weight:700;color:var(--rd);letter-spacing:1px;padding:4px 0 6px">업무 알림 ${notifItems.length}건</div>`;
-    html += notifItems.map(n => {
-      const iconMap  = {interview:'ti-message-report', post:'ti-article', schedule:'ti-calendar-event', request:'ti-clipboard-check', attendance:'ti-alarm'};
-      const colorMap = {interview:'var(--pu)', post:'var(--bl)', schedule:'var(--gd)', request:'var(--gn)', attendance:'var(--rd)'};
-      const icon  = iconMap[n.ref_type] || 'ti-bell';
-      const color = colorMap[n.ref_type] || 'var(--gn)';
-      return `<div class="notif-item" onclick="notifGo('${n.ref_type}',${n.ref_id},${n.id})" style="border-left:3px solid ${color};padding-left:10px">
-        <div class="notif-item-title">
-          <i class="ti ${icon}" style="color:${color};margin-right:5px;font-size:13px"></i>${esc(n.message)}
-        </div>
-        <div class="notif-item-meta">${fmtDateTime(n.created_at)||''}</div>
-      </div>`;
-    }).join('');
-    html += `<button onclick="markAllNotifsRead()" style="width:100%;background:none;border:0.5px solid var(--crd);border-radius:6px;padding:6px;font-size:11px;color:var(--th);cursor:pointer;margin:4px 0 8px">모두 읽음 처리 → 확인한 알림으로 이동</button>`;
-  }
-
-  if (myReqs.length) {
-    const sep = notifItems.length ? 'border-top:0.5px solid var(--crd);margin-top:4px;padding-top:6px;' : '';
-    html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding-bottom:6px;${sep}">담당 배정된 업무 신청</div>`;
-    html += myReqs.map(r=>`<div class="notif-item" onclick="openReqById(${r.id});closeNotifPanel()">
-      <div class="notif-item-title"><span class="notif-dot-item" style="background:var(--gd)"></span>${esc(r.title)}</div>
-      <div class="notif-item-meta">${r.request_types?.name||'신청'} · ${REQ_STATUS[r.status]?.label||''} · ${fmtDate(r.created_at)}</div>
-    </div>`).join('');
-  }
-
-  if (unread.length) {
-    const sep = (notifItems.length||myReqs.length) ? 'border-top:0.5px solid var(--crd);margin-top:8px;padding-top:6px;' : '';
-    html += `<div style="font-size:10px;font-weight:700;color:var(--brm);letter-spacing:1px;padding-bottom:6px;${sep}">읽지 않은 공지</div>`;
-    html += unread.map(p=>`<div class="notif-item" onclick="openPostById(${p.id});closeNotifPanel()">
-      <div class="notif-item-title"><span class="notif-dot-item"></span>${esc(p.title)}</div>
-      <div class="notif-item-meta">${p.categories?.name||''} · ${fmtDate(p.created_at)}</div>
-    </div>`).join('');
-  }
-
-  if (!notifItems.length && !myReqs.length && !unread.length) {
-    html = '<div style="font-size:13px;color:var(--th);padding:20px 0;text-align:center">새 알림이 없습니다.<br><span style="font-size:11px;color:var(--th)">확인한 알림은 오른쪽 탭에서 볼 수 있습니다.</span></div>';
-  }
-  list.innerHTML = html + (unread.length ? guide : '');
 }
+
 // 알림 읽음 처리
 async function markNotifRead(id) {
   await sb.from('notifications').update({is_read: true}).eq('id', id);
