@@ -1658,26 +1658,90 @@ async function renderPostDetail(area) {
       confirmHtml = `<div class="confirm-section"><button class="btn-confirm" onclick="confirmRead(${p.id})"><i class="ti ti-check"></i> 확인했습니다</button></div>`;
     }
   }
-
-  let readListHtml = '';
+let readListHtml = '';
   if (isAdmin || isDeptWriter) {
-    readListHtml = `<div style="margin-bottom:16px">
-      <div class="section-label">직원별 확인 현황</div>
-      <div class="reach-bar"><div class="reach-fill" style="width:${rate}%"></div></div>
-      <div class="reach-label"><span>전체 도달률 ${rate}%</span><span>${reads.length}/${total}명</span></div>
-      <div style="margin-top:8px">
-        ${reads.map(r=>`<div class="read-row"><div><span style="font-weight:600;font-size:12px">${r.users?.name||''}</span> <span style="color:var(--th);font-size:11px">${r.users?.store||''}</span></div><span style="color:var(--th);font-size:11px">${fmtDateTime(r.read_at)||''}</span></div>`).join('')}
-        ${(() => {
-          const readSet = new Set(reads.map(r=>r.user_id));
-          const unread = targetUsers.filter(u => !readSet.has(u.id));
-          return unread.length > 0
-            ? '<div style="margin-top:8px;padding:10px;background:var(--crm);border-radius:8px">' +
-              '<div style="font-size:11px;font-weight:600;color:var(--rd);margin-bottom:6px">미확인 ' + unread.length + '명</div>' +
-              unread.map(u => '<span style="font-size:11px;color:var(--th);margin-right:10px">' + u.store + ' ' + u.name + '</span>').join('') +
-              '</div>' : '';
-        })()}
+    // 1. 데이터 가공: 매장별로 데이터를 그룹핑하기 위한 객체 준비
+    const storeMap = {};
+    const readSet = new Set(reads.map(r => r.user_id));
+
+    // targetUsers는 전체 대상 직원 목록입니다. 이 목록을 순회하며 매장별 분류를 진행합니다.
+    targetUsers.forEach(u => {
+      const storeName = u.store || '미지정';
+      if (!storeMap[storeName]) {
+        storeMap[storeName] = { total: 0, checked: 0, members: [] };
+      }
+      
+      const isChecked = readSet.has(u.id);
+      storeMap[storeName].total++;
+      if (isChecked) {
+        storeMap[storeName].checked++;
+      }
+      
+      storeMap[storeName].members.push({
+        name: u.name || '이름없음',
+        checked: isChecked
+      });
+    });
+
+    // 2. 매장 이름순 정렬 (본사는 항상 최상단에 고정)
+    const sortedStores = Object.keys(storeMap).sort((a, b) => {
+      if (a === '본사') return -1;
+      if (b === '본사') return 1;
+      return a.localeCompare(b);
+    });
+
+    // 3. 매장별 요약 카드 HTML 생성
+    let cardsHtml = '';
+    sortedStores.forEach(stName => {
+      const data = storeMap[stName];
+      const percent = data.total > 0 ? Math.round((data.checked / data.total) * 100) : 0;
+      
+      // 개별 매장 카드 레이아웃 구성
+      cardsHtml += `
+        <div style="border: 1px solid var(--crm); border-radius: 8px; padding: 12px; margin-bottom: 12px; background-color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+          <div style="display: flex; align-items: center; justify-content: space-between; font-weight: bold; margin-bottom: 8px; font-size: 13px;">
+            <span style="color: var(--bl); font-weight: 700;">🏬 ${stName}</span>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="color: var(--th); font-size: 11px;">${data.checked} / ${data.total}명 (${percent}%)</span>
+              <!-- 미니 프로그레스 바 -->
+              <div style="width: 60px; height: 6px; background-color: #eee; border-radius: 3px; overflow: hidden; display: inline-block;">
+                <div style="height: 100%; background-color: ${percent === 100 ? '#2E7D32' : 'var(--rd)'}; width: ${percent}%;"></div>
+              </div>
+            </div>
+          </div>
+          <!-- 소속 직원 배지 나열 -->
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            ${data.members.map(m => {
+              // 확인 완료는 초록 배지, 미확인은 붉은 톤의 회색 배지로 구분
+              const bg = m.checked ? '#E8F5E9' : '#F5F5F5';
+              const fc = m.checked ? '#2E7D32' : '#999999';
+              const border = m.checked ? '1px solid #C8E6C9' : '1px solid #E0E0E0';
+              return `<span style="padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; background-color: ${bg}; color: ${fc}; border: ${border};">${m.name}</span>`;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    });
+
+    // 4. 전체 레이아웃 바인딩 (전체 도달률 바 + 매장별 요약 카드 목록)
+    readListHtml = `
+      <div style="margin-bottom:16px;">
+        <div class="section-label" style="font-weight: bold; font-size: 14px; margin-bottom: 10px;">📊 매장별 공지 확인 현황</div>
+        
+        <!-- 전체 도달률 프로그레스 바 -->
+        <div class="reach-bar" style="background-color: #eee; height: 20px; border-radius: 10px; position: relative; margin-bottom: 16px; overflow: hidden;">
+          <div class="reach-fill" style="width:${rate}%; height: 100%; background-color: var(--bl); transition: width 0.3s ease;"></div>
+          <div class="reach-label" style="position: absolute; width: 100%; text-align: center; top: 0; left: 0; line-height: 20px; font-size: 11px; font-weight: bold; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.5);">
+            전체 도달률 ${rate}% (${reads.length} / ${total}명 완료)
+          </div>
+        </div>
+
+        <!-- 매장별 카드 리스트 영역 -->
+        <div style="max-height: 400px; overflow-y: auto; padding-right: 4px;">
+          ${cardsHtml}
+        </div>
       </div>
-    </div>`;
+    `;
   }
 
   const iconMap2 = {pdf:'ti-file-type-pdf',doc:'ti-file-type-doc',docx:'ti-file-type-doc',xls:'ti-file-type-xls',xlsx:'ti-file-type-xls',ppt:'ti-file-type-ppt',pptx:'ti-file-type-ppt',txt:'ti-file-type-txt',csv:'ti-file-type-csv',hwp:'ti-file-text',hwpx:'ti-file-text',jpg:'ti-photo',jpeg:'ti-photo',png:'ti-photo',gif:'ti-photo',webp:'ti-photo',svg:'ti-photo',heic:'ti-photo',zip:'ti-file-zip'};
