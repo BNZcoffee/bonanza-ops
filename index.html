@@ -6398,6 +6398,13 @@ async function renderManual(area) {
       
     if (!error && config && config.length > 0) {
       cachedQuickStartHtml = config[0].value; // 전역 변수 채워넣기!
+      
+      // 💡 [여기에 추가] 이미 화면에 그려져 있는 가이드 영역을 찾아서 실시간으로 최신 HTML을 덮어씌워 줍니다!
+      const qsCard = document.querySelector('.qs-card');
+      if (qsCard && qsCard.parentNode) {
+        // 부모 요소를 찾아서 최신 가이드 내용으로 즉시 바꿉니다.
+        qsCard.parentNode.innerHTML = cachedQuickStartHtml;
+      }
     }
   } catch (e) {
     console.warn("가이드북 데이터 로드 실패:", e);
