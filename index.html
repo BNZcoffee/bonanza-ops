@@ -6613,15 +6613,17 @@ function goManualEdit() {
 }
 
 // 💡 [Quill 에디터 탑재 버전] 
-// 🌟 [글로벌 스타일 즉시 실행] 설명서 뷰어와 에디터 전체에 투명 배경, 들여쓰기 정렬, 띄어쓰기 공백을 강제 적용합니다.
+// 🌟 [글로벌 스타일 즉시 실행] 뷰어에는 표준 공백/리스트를 적용하고, 에디터는 Quill 고유 기능을 유지하도록 완벽 분리합니다.
 (function injectGlobalManualStyles() {
   const styleId = 'global-manual-style-patch';
-  if (document.getElementById(styleId)) return;
-  
-  const style = document.createElement('style');
-  style.id = styleId;
+  let style = document.getElementById(styleId);
+  if (!style) {
+    style = document.createElement('style');
+    style.id = styleId;
+    document.head.appendChild(style);
+  }
   style.innerHTML = `
-    /* 1. 기본 폰트, 줄간격, 연속 띄어쓰기(스페이스바 공백) 완벽 보존 */
+    /* 1. 뷰어 및 에디터 공통: 폰트 세팅 및 스페이스바 공백(띄어쓰기) 그대로 보존 */
     #contentArea, 
     #contentArea p,
     #contentArea div,
@@ -6632,10 +6634,10 @@ function goManualEdit() {
       font-size: 14px !important;
       line-height: 1.8 !important;
       color: #333 !important;
-      white-space: pre-wrap !important; /* 👈 연속 스페이스바(띄어쓰기) 및 줄바꿈 그대로 화면에 노출 */
+      white-space: pre-wrap !important; /* 👈 스페이스바 여러 번 입력한 공백과 들여쓰기가 그대로 화면에 유지됩니다. */
     }
 
-    /* 2. 텍스트 뒤 보기 싫은 흰색 배경 무조건 박멸 */
+    /* 2. 텍스트 뒤 흰색 배경 무조건 박멸 */
     #contentArea span, 
     .admin-guide-panel span,
     #quillEditorContainer span,
@@ -6645,64 +6647,44 @@ function goManualEdit() {
       background: transparent !important;
     }
 
-    /* 3. 리스트 영역 기본값 초기화 */
-    #contentArea ol, #contentArea ul,
-    .ql-editor ol, .ql-editor ul {
-      padding-left: 0 !important;
+    /* 3. 일반 직원용 뷰어(설명서) 화면용 리스트 표준 설정 */
+    #contentArea ol {
+      list-style-type: decimal !important;
+      padding-left: 24px !important;
       margin: 12px 0 !important;
     }
-
-    #contentArea li, .ql-editor li {
-      position: relative !important;
-      padding-left: 1.8em !important;
+    #contentArea ul {
+      list-style-type: disc !important;
+      padding-left: 24px !important;
+      margin: 12px 0 !important;
+    }
+    #contentArea li {
       margin-bottom: 8px !important;
       line-height: 1.8 !important;
-      list-style-type: none !important; /* 브라우저 기본 이중 기호 강제 숨김 */
     }
 
-    /* 4. 순서 없는 리스트 (ul - 가운데 점 기호 •) 강제 지정 */
-    #contentArea ul li::before,
-    .ql-editor ul li::before {
-      content: "•" !important;
-      position: absolute !important;
-      left: 0.6em !important;
-      top: 0 !important;
-      color: #555 !important;
-      font-size: 16px !important;
-      font-weight: bold !important;
+    /* 4. 에디터 내부의 리스트는 Quill 고유 기능(이중기호 방지 스타일)이 작동하도록 원복 */
+    .ql-editor ol, .ql-editor ul {
+      list-style-type: none !important;
+      padding-left: 0 !important;
+      margin: 0 !important;
+    }
+    .ql-editor li {
+      list-style-type: none !important;
     }
 
-    /* 5. 순서 있는 리스트 (ol - 숫자 기호 1. 2.) 강제 지정 */
-    #contentArea ol, .ql-editor ol {
-      counter-reset: bnz-counter !important;
-    }
-    #contentArea ol li, .ql-editor ol li {
-      counter-increment: bnz-counter !important;
-    }
-    #contentArea ol li::before,
-    .ql-editor ol li::before {
-      content: counter(bnz-counter) "." !important;
-      position: absolute !important;
-      left: 0.3em !important;
-      top: 0 !important;
-      font-weight: bold !important;
-      color: #555 !important;
-    }
+    /* 5. 일반 직원용 뷰어(설명서) 화면용 들여쓰기 여백 보정 */
+    #contentArea .ql-indent-1 { padding-left: 40px !important; }
+    #contentArea .ql-indent-2 { padding-left: 60px !important; }
+    #contentArea .ql-indent-3 { padding-left: 80px !important; }
+    #contentArea .ql-indent-4 { padding-left: 100px !important; }
 
-    /* 6. 들여쓰기(Indentation) 계층 여백 정밀 제어 (일반 문단 및 목록 공통 적용) */
-    #contentArea .ql-indent-1, .ql-editor .ql-indent-1 { padding-left: 3.3em !important; }
-    #contentArea li.ql-indent-1::before, .ql-editor li.ql-indent-1::before { left: 1.8em !important; }
-
-    #contentArea .ql-indent-2, .ql-editor .ql-indent-2 { padding-left: 4.8em !important; }
-    #contentArea li.ql-indent-2::before, .ql-editor li.ql-indent-2::before { left: 3.3em !important; }
-
-    #contentArea .ql-indent-3, .ql-editor .ql-indent-3 { padding-left: 6.3em !important; }
-    #contentArea li.ql-indent-3::before, .ql-editor li.ql-indent-3::before { left: 4.8em !important; }
-
-    #contentArea .ql-indent-4, .ql-editor .ql-indent-4 { padding-left: 7.8em !important; }
-    #contentArea li.ql-indent-4::before, .ql-editor li.ql-indent-4::before { left: 6.3em !important; }
+    /* 에디터 내부의 들여쓰기는 Quill 기본 세팅값 유지 */
+    .ql-editor .ql-indent-1 { padding-left: 3em !important; }
+    .ql-editor .ql-indent-2 { padding-left: 6em !important; }
+    .ql-editor .ql-indent-3 { padding-left: 9em !important; }
+    .ql-editor .ql-indent-4 { padding-left: 12em !important; }
   `;
-  document.head.appendChild(style);
 })();
 
 async function renderManualEdit(area) {
