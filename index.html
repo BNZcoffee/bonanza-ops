@@ -6661,13 +6661,17 @@ async function renderManualEdit(area) {
 }
 
 // 💡 [추가] 기존에 저장된 가이드를 가져와 텍스트상자에 넣어주는 함수
-// 💡 사진 2 기준 6664라인부터 6705라인까지 통째로 드래그해서 덮어씌우세요!
-async function loadExistingGuide() {
-  const editArea = document.getElementById('guideEditArea');
-  if (!editArea) return;
+// 전역 변수가 없을 경우를 대비해 안전하게 한 번 더 선언해 둡니다.
+if (typeof cachedQuickStartHtml === 'undefined') {
+  var cachedQuickStartHtml = '';
+}
 
+async function loadExistingGuide() {
   try {
-    // Supabase 표준 안정 체이닝 방식으로 수정하여 문법 터짐을 완벽 방지합니다.
+    const editArea = document.getElementById('guideEditArea');
+    if (!editArea) return;
+
+    // Supabase 안전 호출
     const { data: config, error } = await sb
       .from('app_configs')
       .select('value')
@@ -6677,27 +6681,31 @@ async function loadExistingGuide() {
 
     if (config && config.length > 0) {
       const dbValue = config[0].value;
-      cachedQuickStartHtml = dbValue; // 전역 캐시 변수 연동
-      editArea.value = dbValue;       // 편집 텍스트상자에 로드
+      cachedQuickStartHtml = dbValue; 
+      editArea.value = dbValue;       
     } else {
       editArea.value = "기존 가이드 데이터가 없습니다. 여기에 가이드용 HTML을 새로 기입하고 저장해 주세요.";
     }
   } catch (err) {
-    console.error(err);
-    editArea.value = "기존 가이드 데이터를 불러오지 못했습니다. 직접 입력하여 새로 저장해 주세요.";
+    console.warn("가이드 불러오기 실패 (화면은 정상 동작합니다):", err);
+    const editArea = document.getElementById('guideEditArea');
+    if (editArea) {
+      editArea.value = "기존 가이드 데이터를 불러오지 못했습니다. 직접 입력하여 새로 저장해 주세요.";
+    }
   }
 }
 
 async function saveQuickStartGuide() {
-  const newHtml = document.getElementById('guideEditArea')?.value || '';
-  const resultSpan = document.getElementById('saveResult');
-  if (resultSpan) {
-    resultSpan.textContent = ' ⏳ 저장 진행 중...';
-    resultSpan.style.color = 'var(--th)';
-  }
-
   try {
-    // app_configs 테이블에 최신 HTML 데이터를 안전하게 덮어쓰기(upsert)합니다.
+    const newHtml = document.getElementById('guideEditArea')?.value || '';
+    const resultSpan = document.getElementById('saveResult');
+    
+    if (resultSpan) {
+      resultSpan.textContent = ' ⏳ 저장 진행 중...';
+      resultSpan.style.color = 'var(--th)';
+    }
+
+    // app_configs 테이블에 최신 HTML 데이터를 안전하게 덮어쓰기
     const { error } = await sb
       .from('app_configs')
       .upsert({ 
@@ -6708,7 +6716,7 @@ async function saveQuickStartGuide() {
 
     if (error) throw error;
 
-    cachedQuickStartHtml = newHtml; // 즉시 캐시에도 동기화
+    cachedQuickStartHtml = newHtml; 
 
     if (resultSpan) {
       resultSpan.textContent = ' 🟢 성공적으로 저장되었습니다!';
@@ -6716,7 +6724,8 @@ async function saveQuickStartGuide() {
     }
     alert('신규 입사자 가이드북 소스코드가 데이터베이스에 최종 동기화되었습니다!');
   } catch (err) {
-    console.error(err);
+    console.error("가이드 저장 실패:", err);
+    const resultSpan = document.getElementById('saveResult');
     if (resultSpan) {
       resultSpan.textContent = ' ❌ 저장 실패: ' + err.message;
       resultSpan.style.color = 'var(--rd)';
