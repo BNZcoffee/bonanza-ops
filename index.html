@@ -969,7 +969,7 @@ const DEFAULT_ACCT_GUIDE =
 '2. 슬랙 멤버 ID(U로 시작) 입력 화면 → [인증번호 발송] → 슬랙 DM 6자리 인증번호 입력.\n' +
 '3. 새 비밀번호를 직접 설정하면 완료됩니다.\n\n' +
 '[ 슬랙 멤버 ID 찾는 법 ]\n' +
-'슬랙 앱 → 본인 프로필 → 점 세 개(⋯ 더보기) → "멤버 ID 복사"\n' +
+'슬랙 앱 → DM 또는 채널에서 /슬랙id 입력 후 전송 → "멤버 ID 복사"\n' +
 '(U로 시작하는 8~11자리 영문·숫자)\n\n' +
 '[ 휴대폰 홈 화면에 추가 ]\n' +
 '· 아이폰(Safari): 공유 → "홈 화면에 추가"\n' +
@@ -6612,7 +6612,6 @@ function goManualEdit() {
   }
 }
 
-// 💡 [초안전 백틱 버전] 6595번 줄부터 6734번 줄(saveQuickStartGuide 끝나는 중괄호)까지 드래그해서 덮어쓰세요!
 async function renderManualEdit(area) {
   if (!area) return;
   
@@ -6631,14 +6630,13 @@ async function renderManualEdit(area) {
   ];
   
   const currentAudience = typeof manualEditAudience !== 'undefined' ? manualEditAudience : 'user';
-  const tabBar = `<div class="tabbar" style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap;">` +
-    auds.map(([a, l]) => `<button class="tab-btn${currentAudience === a ? ' active' : ''}" onclick="manualEditAudience='${a}';renderManualEdit(document.getElementById('contentArea'))">${l}</button>`).join('') +
-  `</div>`;
+  const tabBar = '<div class="tabbar" style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap;">' +
+    auds.map(([a, l]) => '<button class="tab-btn' + (currentAudience === a ? ' active' : '') + '" onclick="manualEditAudience=\'' + a + '\';renderManualEdit(document.getElementById(\'contentArea\'))">' + l + '</button>').join('') +
+  '</div>';
 
-  // [안전 보정] finalSecList 변수 선언
   let finalSecList = '<div id="manualSectionsContainer"><div style="text-align:center; padding:20px; color:var(--th);">설명서 섹션을 불러오는 중...</div></div>';
 
-  // 3. 기본 레이아웃 및 가이드북 편집창(최상단 배치) 화면 렌더링
+  // 3. 레이아웃 렌더링 (textarea 대신 에디터가 들어갈 #quillEditorContainer 배치)
   area.innerHTML = `
     <div class="page-header">
       <div class="page-title">설명서 편집</div>
@@ -6654,29 +6652,33 @@ async function renderManualEdit(area) {
     <div class="page-sub">여기서 수정 후 저장하면 모든 직원이 보는 설명서가 즉시 바뀝니다.</div>
     ${tabBar}
     <div class="blue" style="background:var(--blb);border:0.5px solid var(--bl);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#143a5e">
-      <strong>편집 안내:</strong> 제목과 본문을 고친 뒤 <strong>"이 섹션 저장"</strong>을 누르면 반영됩니다.
+      <strong>편집 안내:</strong> 에디터로 편하게 가이드북을 작성하시고 <strong>"💾 변경사항 저장"</strong>을 누르면 실시간 반영됩니다.
     </div>
     
+    <!-- ✍️ 스마트 에디터 구역 -->
     <div class="admin-guide-panel" style="background:#FFF9E6; border:0.5px solid #E8C07A; border-radius:12px; padding:20px; margin:20px 0;">
       <h3 style="font-size:14px; color:#7A5C00; margin-bottom:8px; font-weight:bold;"><i class="ti ti-edit"></i> [관리자 전용] 신규 입사자 가이드북 편집</h3>
-      <p style="font-size:12px; color:#8A7A68; margin-bottom:12px;">가이드북에 표시되는 실시간 HTML 소스코드입니다. 기존 내용이 아래 상자에 자동으로 로드됩니다.</p>
-      <textarea id="guideEditArea" style="width:100%; height:260px; font-family: monospace; font-size:13px; padding:12px; border:1px solid var(--crd); border-radius:8px; outline:none; background:#fff; resize:vertical;" placeholder="가이드 데이터를 불러오는 중입니다..."></textarea>
+      <p style="font-size:12px; color:#8A7A68; margin-bottom:12px;">게시판처럼 글자 굵게, 크기, 색상, 목록 메뉴를 사용하여 마우스로 편하게 수정하세요.</p>
+      
+      <!-- Quill 에디터 박스 -->
+      <div style="background:#fff; border-radius:8px; overflow:hidden; border:1px solid var(--crd);">
+        <div id="quillEditorContainer" style="height: 320px; font-size: 14px;"></div>
+      </div>
+
       <div style="display: flex; align-items: center; gap: 10px; margin-top:12px;">
-        <button onclick="saveQuickStartGuide()" class="btn-cancel-sm" style="background:#2D6A4F; color:#fff; border:none; border-radius:6px; padding:8px 14px; font-size:12px; font-weight:bold; cursor:pointer;">💾 변경사항 저장</button>
+        <button onclick="saveQuickStartGuideWithQuill()" class="btn-cancel-sm" style="background:#2D6A4F; color:#fff; border:none; border-radius:6px; padding:8px 14px; font-size:12px; font-weight:bold; cursor:pointer;">💾 변경사항 저장</button>
         <span id="saveResult" style="font-size:12px; font-weight:bold;"></span>
       </div>
     </div>
+
     ${finalSecList}
     <button class="btn-new" onclick="addManualSec()" style="width:100%; margin-top:6px;"><i class="ti ti-plus"></i> 새 섹션 추가</button>
   `;
 
-  // 4. 비동기 호출
-  try {
-    loadExistingGuide(); 
-  } catch(e) { 
-    console.warn("가이드북 로드 실패:", e); 
-  }
+  // 4. Quill 에디터 생성 및 기존 가이드 HTML 바인딩
+  initQuillEditor();
 
+  // 5. 설명서 섹션 로딩
   try {
     const { data: sections, error } = await sb
       .from('manual_sections')
@@ -6716,19 +6718,35 @@ async function renderManualEdit(area) {
     }
   } catch (err) {
     console.error("설명서 섹션 로드 실패:", err);
-    const container = document.getElementById('manualSectionsContainer');
-    if (container) {
-      container.innerHTML = '<div style="color:var(--rd);padding:20px;text-align:center;">설명서 목록을 불러오는 데 실패했습니다. 다시 시도해 주세요.</div>';
-    }
   }
 }
 
-// 가이드북 로드 함수 정의
-async function loadExistingGuide() {
-  try {
-    const editArea = document.getElementById('guideEditArea');
-    if (!editArea) return;
+// ✍️ 전역 에디터 보관용 변수
+let manualQuillInstance = null;
 
+// 🛠️ 에디터 생성 및 기존 가이드 불러오기 함수
+async function initQuillEditor() {
+  const container = document.getElementById('quillEditorContainer');
+  if (!container) return;
+
+  const toolbarOptions = [
+    [{ 'header': [1, 2, 3, false] }],
+    ['bold', 'italic', 'underline', 'strike'],        
+    [{ 'color': [] }, { 'background': [] }],          
+    [{ 'list': 'ordered'}, { 'list': 'bullet' }],     
+    [{ 'align': [] }],                                
+    ['clean']                                         
+  ];
+
+  manualQuillInstance = new Quill('#quillEditorContainer', {
+    theme: 'snow',
+    modules: {
+      toolbar: toolbarOptions
+    },
+    placeholder: '여기에 입사자 가이드 내용을 작성해 주세요...'
+  });
+
+  try {
     const { data: config, error } = await sb
       .from('app_configs')
       .select('value')
@@ -6737,30 +6755,26 @@ async function loadExistingGuide() {
     if (error) throw error;
 
     if (config && config.length > 0) {
-      const dbValue = config[0].value;
-      if (typeof cachedQuickStartHtml !== 'undefined') {
-        cachedQuickStartHtml = dbValue;
-      }
-      editArea.value = dbValue;
-    } else {
-      editArea.value = "기존 가이드 데이터가 없습니다.";
+      manualQuillInstance.root.innerHTML = config[0].value;
     }
   } catch (err) {
-    console.warn("가이드 불러오기 실패:", err);
+    console.warn("에디터 데이터 불러오기 실패:", err);
   }
 }
 
-// 가이드북 저장 함수 정의
-async function saveQuickStartGuide() {
-  try {
-    const newHtml = document.getElementById('guideEditArea')?.value || '';
-    const resultSpan = document.getElementById('saveResult');
-    
-    if (resultSpan) {
-      resultSpan.textContent = ' ⏳ 저장 중...';
-      resultSpan.style.color = 'var(--th)';
-    }
+// 💾 에디터 전용 저장 함수
+async function saveQuickStartGuideWithQuill() {
+  if (!manualQuillInstance) return;
 
+  const resultSpan = document.getElementById('saveResult');
+  if (resultSpan) {
+    resultSpan.textContent = ' ⏳ 저장 중...';
+    resultSpan.style.color = 'var(--th)';
+  }
+
+  const newHtml = manualQuillInstance.root.innerHTML;
+
+  try {
     const { error } = await sb
       .from('app_configs')
       .upsert({ 
@@ -6779,9 +6793,13 @@ async function saveQuickStartGuide() {
       resultSpan.textContent = ' 🟢 저장 완료!';
       resultSpan.style.color = 'var(--gn)';
     }
-    alert('신규 입사자 가이드북이 실시간으로 최종 반영되었습니다!');
+    alert('작성하신 내용이 실시간 가이드북에 완벽히 저장되었습니다!');
   } catch (err) {
-    console.error("가이드 저장 실패:", err);
+    console.error("저장 실패:", err);
+    if (resultSpan) {
+      resultSpan.textContent = ' ❌ 저장 실패: ' + err.message;
+      resultSpan.style.color = 'var(--rd)';
+    }
   }
 }
 
