@@ -4565,9 +4565,9 @@ async function loadNotifPanel() {
     // 3. 탭 버튼 HTML 생성
     let tabsHtml = `
       <div style="display:flex; border-bottom:1px solid var(--crd); margin-bottom:10px;">
-        <button onclick="window._currentNotifTab='all'; loadNotifPanel();" style="flex:1; padding:10px; font-weight:bold; border:none; background:${window._currentNotifTab==='all'?'var(--br)':'#fff'}; color:${window._currentNotifTab==='all'?'#fff':'var(--th)'}; cursor:pointer;">새 알림 (${newAllNotis.length})</button>
-        ${isManager ? `<button onclick="window._currentNotifTab='work'; loadNotifPanel();" style="flex:1; padding:10px; font-weight:bold; border:none; background:${window._currentNotifTab==='work'?'var(--br)':'#fff'}; color:${window._currentNotifTab==='work'?'#fff':'var(--th)'}; cursor:pointer;">업무/보고 (${newWorkNotis.length})</button>` : ''}
-        <button onclick="window._currentNotifTab='read'; loadNotifPanel();" style="flex:1; padding:10px; font-weight:bold; border:none; background:${window._currentNotifTab==='read'?'var(--br)':'#fff'}; color:${window._currentNotifTab==='read'?'#fff':'var(--th)'}; cursor:pointer;">확인한 알림</button>
+        <button onclick="event.stopPropagation(); window._currentNotifTab='all'; loadNotifPanel();" style="flex:1; padding:10px; font-weight:bold; border:none; background:${window._currentNotifTab==='all'?'var(--br)':'#fff'}; color:${window._currentNotifTab==='all'?'#fff':'var(--th)'}; cursor:pointer;">새 알림 (${newAllNotis.length})</button>
+        ${isManager ? `<button onclick="event.stopPropagation(); window._currentNotifTab='work'; loadNotifPanel();" style="flex:1; padding:10px; font-weight:bold; border:none; background:${window._currentNotifTab==='work'?'var(--br)':'#fff'}; color:${window._currentNotifTab==='work'?'#fff':'var(--th)'}; cursor:pointer;">업무/보고 (${newWorkNotis.length})</button>` : ''}
+        <button onclick="event.stopPropagation(); window._currentNotifTab='read'; loadNotifPanel();" style="flex:1; padding:10px; font-weight:bold; border:none; background:${window._currentNotifTab==='read'?'var(--br)':'#fff'}; color:${window._currentNotifTab==='read'?'#fff':'var(--th)'}; cursor:pointer;">확인한 알림</button>
       </div>
     `;
 
@@ -15538,20 +15538,49 @@ async function sendSlackDM(slackMemberId, msg) {
   try { await slackNotify(slackMemberId, msg); } catch(e) { console.warn('슬랙 DM 오류:', e); }
 }
 
-// createNotification 이후 슬랙 DM도 함께 발송하는 wrapper
+// 1. 단일 사용자용 기존 슬랙 DM 발송 함수
 async function createNotificationWithSlack(userId, type, refId, refType, msg) {
   await createNotification(userId, type, refId, refType, msg);
-  const { data: u } = await sb.from('users')
-    .select('slack_member_id').eq('id', userId).maybeSingle();
-  if (u?.slack_member_id) {
-    // refType에 따라 딥링크 생성
+  const { data: u } = await sb.from('users').select('slack_member_id').eq('id', userId).maybeSingle();
+  if (u && u.slack_member_id) {
     const BASE = 'https://bnzcoffee.github.io/bonanza-ops/';
-    let link = BASE;
-    if (refType === 'post')    link = BASE + '?post='     + refId;
-    if (refType === 'request') link = BASE + '?request='  + refId;
-    if (refType === 'schedule')link = BASE + '?schedule=' + refId;
+    let link = BASE + '?' + (refType === 'post' ? 'post=' : refType === 'request' ? 'request=' : refType === 'schedule' ? 'schedule=' : '') + refId;
     const dmMsg = '🔔 ' + msg + '\n' + link;
     await sendSlackDM(u.slack_member_id, dmMsg);
+  }
+}
+
+// 🌟 2. [신규 추가] 다수 대상 조건부 슬랙 발송 마스터 함수 (운영팀, 담당팀, 매니저 등)
+async function broadcastNotificationWithSlack(actionType, refId, refType, msg, storeName = '', targetPart = '') {
+  let query = sb.from('users').select('id, slack_member_id');
+
+  // 조건에 따른 알림 대상자 필터링
+  if (actionType === '업무보고') {
+    // 1) 운영팀 전원에게 알림 (직급이 admin이거나 소속 부서가 운영팀인 사람)
+    query = query.or('role.eq.admin,part.eq.운영팀');
+  } else if (actionType === '업무신청' && targetPart) {
+    // 2) 처리 담당 팀 소속 전원에게 알림
+    query = query.eq('part', targetPart);
+  } else if (actionType === '진행상황' && storeName) {
+    // 3) 요청한 소속 매장의 '매니저'들에게만 알림
+    query = query.eq('store', storeName).eq('role', 'manager');
+  } else {
+    return; // 조건에 맞지 않으면 취소
+  }
+
+  const { data: targetUsers } = await query;
+  if (!targetUsers || targetUsers.length === 0) return;
+
+  const BASE = 'https://bnzcoffee.github.io/bonanza-ops/';
+  let link = BASE + '?' + (refType === 'post' ? 'post=' : refType === 'request' ? 'request=' : refType === 'schedule' ? 'schedule=' : '') + refId;
+  const dmMsg = '🔔 ' + msg + '\n' + link;
+
+  // 필터링된 모든 대상자에게 앱 내 알림 생성 + 슬랙 DM 동시 발송
+  for (const u of targetUsers) {
+    await createNotification(u.id, refType, refId, refType, msg);
+    if (u.slack_member_id) {
+      await sendSlackDM(u.slack_member_id, dmMsg);
+    }
   }
 }
 
