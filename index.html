@@ -6675,7 +6675,7 @@ async function renderManualEdit(area) {
           '<div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:14px;margin-bottom:10px">' +
             '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
               '<span style="font-size:11px;color:var(--th)">#' + (i+1) + '</span>' +
-              '<input class="form-input" id="msec-title-' + s.id + '" value="' + (s.title||'').replace(/"/g,'&quot;') + '" style="flex:1;padding:7px 10px;font-weight:600" placeholder="섹션 제목"/>' +
+              '<input class="form-input" id="msec-title-' + s.id + '" value="' + (s.title||'').replace(/"/g,\'&quot;\') + '" style="flex:1;padding:7px 10px;font-weight:600" placeholder="섹션 제목"/>' +
               '<button class="btn-cancel-sm" onclick="moveManualSec(\'' + s.id + '\',-1)">▲</button>' +
               '<button class="btn-cancel-sm" onclick="moveManualSec(\'' + s.id + '\',1)">▼</button>' +
               '<button class="btn-cancel-sm" style="color:var(--rd);" onclick="deleteManualSec(\'' + s.id + '\')">삭제</button>' +
@@ -6700,18 +6700,12 @@ async function renderManualEdit(area) {
   }
 }
 
-// 💡 [추가] 기존에 저장된 가이드를 가져와 텍스트상자에 넣어주는 함수
-// 전역 변수가 없을 경우를 대비해 안전하게 한 번 더 선언해 둡니다.
-if (typeof cachedQuickStartHtml === 'undefined') {
-  var cachedQuickStartHtml = '';
-}
-
+// 가이드북 로드 함수 정의
 async function loadExistingGuide() {
   try {
     const editArea = document.getElementById('guideEditArea');
     if (!editArea) return;
 
-    // Supabase 안전 호출
     const { data: config, error } = await sb
       .from('app_configs')
       .select('value')
@@ -6721,31 +6715,29 @@ async function loadExistingGuide() {
 
     if (config && config.length > 0) {
       const dbValue = config[0].value;
-      cachedQuickStartHtml = dbValue; 
-      editArea.value = dbValue;       
+      if (typeof cachedQuickStartHtml !== 'undefined') {
+        cachedQuickStartHtml = dbValue;
+      }
+      editArea.value = dbValue;
     } else {
-      editArea.value = "기존 가이드 데이터가 없습니다. 여기에 가이드용 HTML을 새로 기입하고 저장해 주세요.";
+      editArea.value = "기존 가이드 데이터가 없습니다.";
     }
   } catch (err) {
-    console.warn("가이드 불러오기 실패 (화면은 정상 동작합니다):", err);
-    const editArea = document.getElementById('guideEditArea');
-    if (editArea) {
-      editArea.value = "기존 가이드 데이터를 불러오지 못했습니다. 직접 입력하여 새로 저장해 주세요.";
-    }
+    console.warn("가이드 불러오기 실패:", err);
   }
 }
 
+// 가이드북 저장 함수 정의
 async function saveQuickStartGuide() {
   try {
     const newHtml = document.getElementById('guideEditArea')?.value || '';
     const resultSpan = document.getElementById('saveResult');
     
     if (resultSpan) {
-      resultSpan.textContent = ' ⏳ 저장 진행 중...';
+      resultSpan.textContent = ' ⏳ 저장 중...';
       resultSpan.style.color = 'var(--th)';
     }
 
-    // app_configs 테이블에 최신 HTML 데이터를 안전하게 덮어쓰기
     const { error } = await sb
       .from('app_configs')
       .upsert({ 
@@ -6756,20 +6748,17 @@ async function saveQuickStartGuide() {
 
     if (error) throw error;
 
-    cachedQuickStartHtml = newHtml; 
+    if (typeof cachedQuickStartHtml !== 'undefined') {
+      cachedQuickStartHtml = newHtml;
+    }
 
     if (resultSpan) {
-      resultSpan.textContent = ' 🟢 성공적으로 저장되었습니다!';
+      resultSpan.textContent = ' 🟢 저장 완료!';
       resultSpan.style.color = 'var(--gn)';
     }
-    alert('신규 입사자 가이드북 소스코드가 데이터베이스에 최종 동기화되었습니다!');
+    alert('신규 입사자 가이드북이 실시간으로 최종 반영되었습니다!');
   } catch (err) {
     console.error("가이드 저장 실패:", err);
-    const resultSpan = document.getElementById('saveResult');
-    if (resultSpan) {
-      resultSpan.textContent = ' ❌ 저장 실패: ' + err.message;
-      resultSpan.style.color = 'var(--rd)';
-    }
   }
 }
 
