@@ -8047,15 +8047,8 @@ if (isHeadquarters) {
       console.error("매장 목록 로드 실패:", err.message);
     }
 
-    // 본인의 파트(부서)명이 목록에 없다면 최상단 순위로 추가
-    if (myPart && parsedStoreList.indexOf(myPart) === -1) {
-      parsedStoreList.unshift(myPart);
-    }
-
-    // 만약 데이터가 완전히 비어있을 경우를 대비한 최소한의 안전장치
-    if (parsedStoreList.length === 0) {
-      parsedStoreList = ['매장 미지정'];
-    }
+    // (요청) 요청 매장은 '등록된 매장 목록'만 허용 — 임의 문자열 금지, 유효성 검사용 전역 저장
+    window.__reqStoreList = parsedStoreList.slice();
 
     // 💡 [검색 및 드롭다운 동시 지원] Datalist 옵션 구성
     var datalistOpts = '';
@@ -8063,12 +8056,11 @@ if (isHeadquarters) {
       datalistOpts += '<option value="' + stName + '">';
     });
 
-    // 기본값은 본인의 소속 부서(myPart) 혹은 목록의 첫 번째 매장으로 자동 세팅됩니다.
-    var defaultVal = myPart || parsedStoreList[0] || '';
+    // 기본값 없음(미지정) — 반드시 목록에서 선택하도록 강제
+    var defaultVal = '';
 
-    // 일반 드롭다운 대신, 사용자가 직접 타이핑하여 검색하거나 우측 화살표를 눌러 선택할 수 있는 구조로 렌더링합니다.
     storeFieldHtml = '<div class="form-row"><label class="form-label">요청 매장 명 <span style="color:var(--rd)">*</span></label>' +
-      '<input class="form-input" id="rfStore" list="storeDatalist" value="' + defaultVal + '" placeholder="매장명을 입력하거나 선택하세요" style="font-weight:bold; border:1px solid var(--crd); height: 40px; width: 100%; padding: 0 10px;"/>' +
+      '<input class="form-input" id="rfStore" list="storeDatalist" value="' + defaultVal + '" placeholder="매장 선택 (목록에서 검색·선택)" autocomplete="off" style="border:1px solid var(--crd); height: 40px; width: 100%; padding: 0 10px;"/>' +
       '<datalist id="storeDatalist">' + datalistOpts + '</datalist></div>';
 
 } else if (subStores && subStores.length > 1) {
@@ -8136,6 +8128,18 @@ async function submitRequest() {
   const title = document.getElementById('rfTitle').value.trim();
   if (!title) { alert('제목을 입력해주세요.'); return; }
 
+  // 요청 매장: 필수 + 등록된 매장 목록과 일치해야 저장 (임의 입력 차단)
+  const __rfStoreEl = document.getElementById('rfStore');
+  const reqStore = __rfStoreEl ? __rfStoreEl.value.trim() : '';
+  if (!reqStore) { alert('요청 매장을 선택해주세요.'); if(__rfStoreEl) __rfStoreEl.focus(); return; }
+  const { data: __validStoreRows } = await sb.from('store_options').select('name');
+  const __validStores = (__validStoreRows||[]).map(function(s){ return s.name; });
+  if (!__validStores.includes(reqStore) && reqStore !== currentUser.store) {
+    alert('요청 매장 명이 등록된 매장 목록과 일치하지 않습니다.\n목록에서 매장을 선택해 주세요.');
+    if(__rfStoreEl) __rfStoreEl.focus();
+    return;
+  }
+
   const fields = reqSelectedType.form_fields || [];
   const formData = {};
   for (let i = 0; i < fields.length; i++) {
@@ -8147,7 +8151,7 @@ async function submitRequest() {
 
   const { data: req, error } = await sb.from('requests').insert({
     type_id: reqSelectedType.id,
-    store: currentUser.store,
+    store: reqStore,
     part_id: reqSelectedType.part_id,
     title: title,
     author_id: currentUser.id,
@@ -8171,7 +8175,7 @@ async function submitRequest() {
       const msg = '[신규 업무 신청]\n' +
         '유형: ' + reqSelectedType.name + '\n' +
         '제목: ' + title + '\n' +
-        '요청 매장: ' + currentUser.store + '\n' +
+        '요청 매장: ' + reqStore + '\n' +
         '신청자: ' + currentUser.name + '\n' +
         '담당 파트: ' + part.name;
       await sendSlackNotify(part.slack_webhook, msg);
