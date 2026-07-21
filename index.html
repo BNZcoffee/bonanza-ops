@@ -30,7 +30,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--cr);color:var(
 #app{display:flex;flex-direction:column;min-height:100vh}
 
 /* TOPBAR */
-.topbar{background:var(--br);color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 20px;height:50px;position:sticky;top:0;z-index:100;display:none}
+.topbar{background:var(--br);color:#fff;display:flex;align-items:center;justify-content:space-between;height:calc(50px + env(safe-area-inset-top));padding:env(safe-area-inset-top) calc(20px + env(safe-area-inset-right)) 0 calc(20px + env(safe-area-inset-left));box-sizing:border-box;position:sticky;top:0;z-index:100;display:none}
 .logo{font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;opacity:.9}
 .topbar-right{display:flex;align-items:center;gap:10px}
 .user-badge{background:rgba(255,255,255,.15);border-radius:20px;padding:4px 10px;font-size:12px;display:flex;align-items:center;gap:6px}
@@ -271,7 +271,7 @@ textarea.form-input{min-height:120px;resize:vertical}
   .content{padding:14px;width:100%}
   .board-tabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
   .tab-btn{white-space:nowrap;flex-shrink:0}
-  .topbar{padding:0 12px}
+  .topbar{padding:env(safe-area-inset-top) calc(12px + env(safe-area-inset-right)) 0 calc(12px + env(safe-area-inset-left))}
   .logo{font-size:13px}
   .user-badge{display:none}
   .topbar-btn{padding:4px 8px}
@@ -5895,7 +5895,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-07-20';   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-07-21';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -7572,8 +7572,12 @@ function canSeeReq(r) {
   if (!currentUser) return false;
   if (currentUser.is_master) return true;            // 마스터: 전체
   if (currentUser.role === 'admin') return true;     // 운영팀(관리자): 전체
-  // 매장 매니저: 자기 매장 신청 전부
-  if (isManagerRole(currentUser.role) && (r.store === currentUser.store || (currentUser.sub_stores||[]).includes(r.store))) return true;
+  // 작성자(신청자) 본인 — 진행현황·반려의견 확인을 위해 항상 열람 가능
+  if (r.author_id && r.author_id === currentUser.id) return true;
+  // 매장 매니저: 자기 매장(겸직 포함) 신청 전부 (공백 정규화)
+  const __rStore = (r.store||'').trim();
+  const __myStore = (currentUser.store||'').trim();
+  if (isManagerRole(currentUser.role) && (__rStore === __myStore || (currentUser.sub_stores||[]).map(function(x){return (x||'').trim();}).includes(__rStore))) return true;
   // 본사 담당자: 자기 파트 신청 전부
   if (currentUser.part && r.part_name === currentUser.part) return true;
   // 공동 진행 파트: 신청 유형에 공동 파트로 지정된 파트의 담당자도 열람·처리
@@ -8149,6 +8153,9 @@ async function submitRequest() {
     formData[fields[i].label] = val;
   }
 
+  // 중복 접수 방지 (연타/재시도로 같은 신청 여러 건 생성되는 문제 차단)
+  if (window.__reqSubmitting) return;
+  window.__reqSubmitting = true;
   const { data: req, error } = await sb.from('requests').insert({
     type_id: reqSelectedType.id,
     store: reqStore,
@@ -8159,6 +8166,7 @@ async function submitRequest() {
     status: 'submitted',
     form_data: formData
   }).select().single();
+  window.__reqSubmitting = false;
 
   if (error) { alert('접수 오류: ' + error.message); return; }
 
