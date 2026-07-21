@@ -5362,7 +5362,7 @@ async function deleteRequest(reqId) {
   const isMaster = currentUser.is_master;
 
   if (!isAuthor && !isMaster) { alert('작성자 또는 총괄만 삭제할 수 있습니다.'); return; }
-  if (isAuthor && !isMaster && req.status !== 'received') {
+  if (isAuthor && !isMaster && req.status !== 'submitted') {
     alert('접수됨 상태에서만 삭제할 수 있습니다.\n\n현재 상태: ' + req.status + '\n진행/반려된 건은 삭제할 수 없습니다.');
     return;
   }
@@ -5378,6 +5378,94 @@ async function deleteRequest(reqId) {
   if (error) { alert('삭제 오류: '+error.message); return; }
   alert('삭제 완료');
   goPage('requests');
+}
+
+// ── 업무 신청 수정 (접수됨 단계 · 작성자 본인/총괄) ──
+async function editRequest(reqId) {
+  const r = curReq;
+  if (!r || r.id !== reqId) { alert('신청 정보를 불러올 수 없습니다.'); return; }
+  const canEdit = (r.author_id === currentUser.id && r.status === 'submitted') || currentUser.is_master;
+  if (!canEdit) { alert('접수됨 단계의 본인 신청만 수정할 수 있습니다.\n(진행 중·완료·반려 건은 수정 불가)'); return; }
+
+  const fields = r.request_types ? (r.request_types.form_fields || []) : [];
+  const fd = r.form_data || {};
+  const { data: stoRows } = await sb.from('store_options').select('name').order('sort_order');
+  const storeDL = (stoRows||[]).map(function(x){ return '<option value="'+esc(x.name)+'">'; }).join('');
+
+  const fieldsHtml = fields.map(function(f, i){
+    const val = fd[f.label] != null ? String(fd[f.label]) : '';
+    const req = f.required ? ' <span style="color:var(--rd)">*</span>' : '';
+    let input;
+    if (f.type === 'textarea') {
+      input = '<textarea id="erf-'+i+'" class="form-input" style="min-height:70px">'+esc(val)+'</textarea>';
+    } else if (f.type === 'date') {
+      input = '<input type="date" id="erf-'+i+'" class="form-input" value="'+esc(val)+'"/>';
+    } else if (f.type === 'number') {
+      input = '<input type="number" id="erf-'+i+'" class="form-input" value="'+esc(val)+'"/>';
+    } else if (f.type === 'select' || f.type === 'ox' || f.type === 'repair_cat') {
+      let list = f.type === 'ox' ? ['O','X'] : (f.type === 'repair_cat' ? ['전기/조명','배관/설비','냉난방','인테리어','장비','기타'] : (f.options || []));
+      let opts = '<option value="">선택</option>' + list.map(function(o){ return '<option'+(val===String(o)?' selected':'')+'>'+esc(o)+'</option>'; }).join('');
+      input = '<select id="erf-'+i+'" class="form-input">'+opts+'</select>';
+    } else if (f.type === 'store') {
+      input = '<input id="erf-'+i+'" class="form-input" list="erfStoreDL" value="'+esc(val)+'" autocomplete="off"/>';
+    } else {
+      input = '<input id="erf-'+i+'" class="form-input" value="'+esc(val)+'"/>';
+    }
+    return '<div class="form-row"><label class="form-label">'+esc(f.label)+req+'</label>'+input+'</div>';
+  }).join('');
+
+  const old = document.getElementById('reqEditModal'); if (old) old.remove();
+  const m = document.createElement('div'); m.id = 'reqEditModal'; m.className = 'modal-bg open';
+  m.innerHTML =
+    '<div class="modal-inner" style="width:min(96vw,560px);max-height:92vh;overflow:auto">' +
+      '<div class="modal-title"><i class="ti ti-edit"></i> 신청 수정 <span style="font-size:11px;color:var(--th);font-weight:400">(접수됨 단계만)</span></div>' +
+      '<div class="form-row"><label class="form-label">제목 <span style="color:var(--rd)">*</span></label><input id="erfTitle" class="form-input" value="'+esc(r.title||'')+'"/></div>' +
+      '<div class="form-row"><label class="form-label">요청 매장 <span style="color:var(--rd)">*</span></label><input id="erfStore" class="form-input" list="erfStoreDL" value="'+esc(r.store||'')+'" autocomplete="off" placeholder="매장 선택"/></div>' +
+      '<datalist id="erfStoreDL">'+storeDL+'</datalist>' +
+      fieldsHtml +
+      '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">' +
+        '<button class="btn-cancel-sm" onclick="document.getElementById(\'reqEditModal\').remove()">취소</button>' +
+        '<button class="btn-submit" onclick="saveRequestEdit('+reqId+')"><i class="ti ti-device-floppy"></i> 저장</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(m);
+}
+
+async function saveRequestEdit(reqId) {
+  const r = curReq;
+  if (!r || r.id !== reqId) return;
+  const canEdit = (r.author_id === currentUser.id && r.status === 'submitted') || currentUser.is_master;
+  if (!canEdit) { alert('수정 권한이 없습니다.'); return; }
+
+  const title = (document.getElementById('erfTitle')?.value || '').trim();
+  if (!title) { alert('제목을 입력해주세요.'); return; }
+  const store = (document.getElementById('erfStore')?.value || '').trim();
+  if (!store) { alert('요청 매장을 선택해주세요.'); return; }
+  const { data: vs } = await sb.from('store_options').select('name');
+  const validStores = (vs||[]).map(function(x){ return x.name; });
+  if (!validStores.includes(store)) { alert('요청 매장 명이 등록된 매장 목록과 일치하지 않습니다.\n목록에서 선택해 주세요.'); return; }
+
+  const fields = r.request_types ? (r.request_types.form_fields || []) : [];
+  const formData = {};
+  for (let i = 0; i < fields.length; i++) {
+    const el = document.getElementById('erf-' + i);
+    const v = el ? el.value.trim() : '';
+    if (fields[i].required && !v) { alert('"' + fields[i].label + '" 항목을 입력해주세요.'); return; }
+    formData[fields[i].label] = v;
+  }
+
+  let q = sb.from('requests').update({ title: title, store: store, form_data: formData }).eq('id', reqId);
+  if (!currentUser.is_master) q = q.eq('status', 'submitted');   // 작성자는 접수됨 단계에서만 반영(진행 중이면 무효)
+  const { error } = await q;
+  if (error) { alert('수정 오류: ' + error.message); return; }
+
+  document.getElementById('reqEditModal')?.remove();
+  const { data } = await sb.from('requests')
+    .select('*, request_types(name, form_fields, guide), parts(name), author:users!requests_author_id_fkey(name, store), assignee:users!requests_assignee_id_fkey(name)')
+    .eq('id', reqId).single();
+  if (data) { data.part_name = data.parts ? data.parts.name : null; curReq = data; }
+  renderReqDetail(document.getElementById('contentArea'));
+  alert('수정되었습니다.');
 }
 
 
@@ -8312,13 +8400,18 @@ async function renderReqDetail(area) {
   const assigneeName = r.assignee ? r.assignee.name : '(배정 대기)';
 
   // 삭제 가능 여부: 작성자=접수됨만, 총괄=전 상태
-  const canDelete = (r.author_id === currentUser.id && r.status === 'received') || currentUser.is_master;
+  const canDelete = (r.author_id === currentUser.id && r.status === 'submitted') || currentUser.is_master;
   const deleteBtn = canDelete
     ? '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteRequest('+r.id+')"><i class="ti ti-trash"></i> 삭제</button>'
     : '';
+  // 수정: 접수됨 단계의 작성자 본인(또는 총괄)만 — 진행 중/완료/반려는 수정 불가
+  const canEditReq = (r.author_id === currentUser.id && r.status === 'submitted') || currentUser.is_master;
+  const editBtn = canEditReq
+    ? '<button class="btn-cancel-sm" style="margin-left:8px" onclick="editRequest('+r.id+')"><i class="ti ti-edit"></i> 수정</button>'
+    : '';
 
   area.innerHTML =
-    '<div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage(\'requests\')"><i class="ti ti-arrow-left"></i> 목록</button>' + deleteBtn + '</div>' +
+    '<div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage(\'requests\')"><i class="ti ti-arrow-left"></i> 목록</button>' + editBtn + deleteBtn + '</div>' +
     '<div class="post-detail">' +
       '<div style="display:flex;gap:8px;margin-bottom:8px">' +
         '<span style="font-size:10px;font-weight:700;border-radius:8px;padding:3px 10px;background:#EAF0FA;color:#1A4B7A">' + typeName + '</span>' +
