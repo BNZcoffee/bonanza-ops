@@ -6382,6 +6382,7 @@ async function renderOpsBoard(area){
   if(!window.__allActiveUsers || !window.__allActiveUsers.length){ const {data}=await sb.from('users').select('id,name,store,role,active').eq('active',true).order('name'); window.__allActiveUsers=data||[]; }
   { const {data:__op}=await sb.from('users').select('id,name,store,role,part,is_master,is_vice_master,active').eq('active',true).order('name'); window.__opsPeople=__op||[]; }
   await opsLoadAllowed();
+  opsPruneDrafts();
   // 보드 목록
   let { data:boards, error:bErr } = await sb.from('ops_boards').select('*').order('sort_order').order('id');
   if(bErr){ area.innerHTML='<div style="padding:40px;text-align:center;color:var(--th);line-height:1.7">운영 보드 준비가 필요합니다.<br>총괄에게 문의해 초기 설정(DB)을 완료해주세요.<br><span style="font-size:11px">('+esc(bErr.message||'')+')</span></div>'; return; }
@@ -6410,6 +6411,7 @@ async function opsLoadBoardData(){
   ]);
   window.__ops.groups = groups||[];
   window.__ops.cards = cards||[];
+  try{ (window.__ops.cards||[]).forEach(function(c){ const k='opsDraft_'+bid+'_'+c.id; const raw=localStorage.getItem(k); if(raw){ try{ const d=JSON.parse(raw); const ut=c.updated_at?new Date(c.updated_at).getTime():0; if(!d||!d.ts||d.ts<=ut) localStorage.removeItem(k); }catch(e){ localStorage.removeItem(k); } } }); }catch(e){}
   if(!window.__ops.groups.length && opsCanManage()){
     const {data:g}=await sb.from('ops_groups').insert({board_id:bid,name:'할 일',sort_order:0}).select().single();
     if(g) window.__ops.groups=[g];
@@ -6719,6 +6721,7 @@ function opsAutosave(){
   const info=document.getElementById('opsDraftInfo'); if(info){ const d=new Date(); info.textContent='임시 저장됨 '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
 }
 function opsClearDraft(c){ if(!c||!window.__ops) return; try{ localStorage.removeItem('opsDraft_'+window.__ops.boardId+'_'+(c.id?c.id:('new_'+c.group_id))); }catch(e){} }
+function opsPruneDrafts(){ try{ const now=Date.now(), MAX=3*24*60*60*1000; for(let i=localStorage.length-1;i>=0;i--){ const k=localStorage.key(i); if(k&&k.indexOf('opsDraft_')===0){ try{ const d=JSON.parse(localStorage.getItem(k)); if(!d||!d.ts||(now-d.ts)>MAX) localStorage.removeItem(k); }catch(e){ localStorage.removeItem(k); } } } }catch(e){} }
 function opsEligiblePeople(){ const allowed=(window.__ops.allowed||[]).map(String); return (window.__opsPeople||[]).filter(u=>u.active!==false && (u.part==='운영팀'||u.is_master||u.is_vice_master||u.role==='admin'||allowed.includes(String(u.id)))); }
 function opsGroupDragStart(e,gid){ e.dataTransfer.setData('ops-group',String(gid)); e.dataTransfer.effectAllowed='move'; }
 async function opsReorderGroup(dragId,targetId){
