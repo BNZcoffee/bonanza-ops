@@ -230,6 +230,9 @@ textarea.form-input{min-height:120px;resize:vertical}
 .modal-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 /* 운영 프로젝트 보드 */
 .ops-wrap{padding:14px 16px 40px}
+.ops-parts{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--crm);border-radius:10px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:var(--ts)}
+.ops-parts span{color:var(--tm);font-weight:500}
+.ops-parts-edit{margin-left:auto;background:#fff;border:0.5px solid var(--crd);border-radius:8px;padding:5px 10px;font-size:11px;color:var(--ts);cursor:pointer;display:inline-flex;align-items:center;gap:4px}
 .ops-header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}
 .ops-tabs{display:flex;gap:4px;flex-wrap:wrap}
 .ops-tab{background:#fff;border:0.5px solid var(--crd);border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;color:var(--ts);cursor:pointer}
@@ -1176,6 +1179,8 @@ async function loginAs(user) {
   const params = new URLSearchParams(location.search);
   const postId = params.get('post');
   if (postId) openPostById(parseInt(postId));
+  const opsB = params.get('opsboard');
+  if (opsB) { setTimeout(function(){ try{ if(typeof opsCanSee==='function' && opsCanSee()){ window.__ops.boardId=parseInt(opsB); goPage('opsboard'); const oc=params.get('opscard'); if(oc){ setTimeout(function(){ try{ opsOpenCard(parseInt(oc)); }catch(e){} }, 1300); } } }catch(e){} }, 700); }
 
   // 슬랙 계정 미등록 시 안내 팝업
   checkSlackSetup();
@@ -6384,16 +6389,15 @@ window.__ops = window.__ops || { boardId:null, boards:[], groups:[], cards:[], f
 
 function opsCanSee(u){
   u = u || currentUser; if(!u) return false;
-  if (u.is_master || u.is_vice_master || u.role==='admin') return true;
-  if (u.part === '운영팀') return true;
-  const allowed = (window.__ops.allowed||[]);
-  return allowed.map(String).includes(String(u.id));
+  if (u.is_master) return true; // 총괄만 항상
+  return (window.__ops.allowed||[]).map(String).includes(String(u.id));
 }
 function opsCanManage(){
   const u = currentUser; if(!u) return false;
-  return !!(u.is_master || u.is_vice_master || u.role==='admin' || u.part==='운영팀');
+  if (u.is_master) return true;
+  return (window.__ops.allowed||[]).map(String).includes(String(u.id));
 }
-function opsIsMaster(){ const u=currentUser; return !!(u && (u.is_master || u.role==='admin')); }
+function opsIsMaster(){ const u=currentUser; return !!(u && u.is_master); }
 
 const OPS_DEFAULT_FIELDS = [
   {key:'_status',label:'상태',type:'select',options:['대기','진행중','완료','보류'],core:true},
@@ -6479,12 +6483,14 @@ function opsRender(area){
   const isMind = board && board.type==='mind';
   const boardBtns = opsCanManage()?`<button class="btn-cancel-sm" onclick="opsRenameBoard()"><i class="ti ti-edit"></i> 이름</button>`:'';
   const delBoardBtn = opsIsMaster()?`<button class="btn-cancel-sm" style="color:var(--rd)" onclick="opsDeleteBoard()" title="이 항목 삭제(총괄)"><i class="ti ti-trash"></i></button>`:'';
-  const permBtn = opsIsMaster()?`<button class="btn-cancel-sm" onclick="opsPermMgr()"><i class="ti ti-users"></i> 담당자·권한</button>`:'';
+  const __parts=(window.__opsPeople||[]).filter(u=>u.active!==false && (u.is_master||(O.allowed||[]).map(String).includes(String(u.id))));
+  const partStrip = `<div class="ops-parts"><i class="ti ti-users"></i> <b>참여</b> <span>${__parts.map(u=>esc(u.name)).join(', ')||'(총괄만)'}</span> ${opsIsMaster()?`<button class="ops-parts-edit" onclick="opsPermMgr()"><i class="ti ti-settings"></i> 참여 인원 관리</button>`:''}</div>`;
   area.innerHTML = `
   <div class="ops-wrap">
+    ${partStrip}
     <div class="ops-header">
       <div class="ops-tabs">${tabs}${addBoardBtn}</div>
-      <div class="ops-actions">${isMind?'':(manageBtns+masterBtns)}${permBtn}${boardBtns}${delBoardBtn}</div>
+      <div class="ops-actions">${isMind?'':(manageBtns+masterBtns)}${boardBtns}${delBoardBtn}</div>
     </div>
     ${isMind ? opsMindShell() : `
     <div class="ops-toolbar">
@@ -6543,7 +6549,7 @@ function opsCardMini(c){
   const tcolor=opsCardColor(c);
   return `<div class="ops-card" draggable="true" ondragstart="opsDragStart(event,${c.id})" ondragover="opsDragOver(event)" ondrop="opsCardDrop(event,${c.id})" onclick="opsOpenCard(${c.id})" style="border-left:4px solid ${tcolor}">
     ${c.card_type?`<span class="ops-type" style="background:${tcolor};color:#fff;border-color:${tcolor}">${esc(c.card_type)}</span>`:''}
-    <div class="ops-card-title">${esc(c.title||'(제목 없음)')}</div>
+    <div class="ops-card-title">${(c.data&&c.data._locked)?'<i class="ti ti-lock" style="color:#c98a3a;font-size:12px"></i> ':''}${esc(c.title||'(제목 없음)')}</div>
     ${(c.data&&c.data._doc)?`<div class="ops-card-snip">${esc(c.data._doc.replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim().slice(0,70))}</div>`:''}
     <div class="ops-card-meta">
       ${st?`<span class="ops-chip">${esc(st)}</span>`:''}
@@ -6753,6 +6759,8 @@ async function opsSaveCard(){
   const visKeys=opsFieldsForCard(c);
   const dueField=O.fields.find(f=>f.key==='_due'&&f.required&&visKeys.includes('_due'));
   if(dueField && !(c.data&&c.data._due)){ alert('마감일을 입력해주세요.'); return; }
+  const __prevCard=c.id?O.cards.find(x=>x.id===c.id):null;
+  const __prevA=(__prevCard&&__prevCard.data&&__prevCard.data._assignees)||[];
   const payload={ board_id:O.boardId, group_id:c.group_id, card_type:c.card_type, title:c.title, data:c.data||{}, attachments:c.attachments||[], updated_by:currentUser.id, updated_at:new Date().toISOString() };
   let saved;
   if(c.id){ const {data,error}=await sb.from('ops_cards').update(payload).eq('id',c.id).select().single(); if(error){alert('오류: '+error.message);return;} saved=data; }
@@ -6764,6 +6772,7 @@ async function opsSaveCard(){
   opsCloseCard();
   document.getElementById('opsBoard').innerHTML=opsGroupsHtml();
   opsSyncSheet(saved).catch(()=>{});
+  opsNotifyAssignees(saved,__prevA).catch(()=>{});
 }
 async function opsDeleteCard(id){
   if(!confirm('이 카드를 삭제할까요?')) return;
@@ -6780,6 +6789,41 @@ function opsCloseCard(){
   window.__opsModalOpen=false; window.__opsEditingCard=null; window.__opsQuill=null;
   document.getElementById('opsCardModal')?.remove();
   if(window.__opsPendingReload){ window.__opsPendingReload=false; opsReloadSoft(); }
+}
+
+// ── 운영 카드 잠금 · 담당자 배정 알림 ──
+async function opsLockCard(id){
+  const c=window.__ops.cards.find(x=>x.id===id); if(!c) return;
+  if(!confirm('이 문서를 잠글까요?\n잠근 뒤에는 비밀번호로 해제해야 수정할 수 있습니다.(실수 변경 방지)')) return;
+  c.data=c.data||{}; c.data._locked=true; c.data._lockedBy=currentUser.id; c.data._lockedAt=new Date().toISOString();
+  await sb.from('ops_cards').update({data:c.data,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',id);
+  document.getElementById('opsCardModal')?.remove();
+  const b=document.getElementById('opsBoard'); if(b) b.innerHTML=opsGroupsHtml();
+}
+async function opsUnlockEdit(id){
+  const pw=prompt('잠금 해제 비밀번호(본인 비밀번호)를 입력하세요.'); if(!pw) return;
+  if(!(await reauth(pw))){ alert('비밀번호가 일치하지 않습니다.'); return; }
+  const c=window.__ops.cards.find(x=>x.id===id);
+  if(c){ c.data=c.data||{}; c.data._locked=false; await sb.from('ops_cards').update({data:c.data,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',id); }
+  document.getElementById('opsCardModal')?.remove();
+  opsEditCard(id);
+}
+async function opsNotifyAssignees(card, prevAssignees){
+  try{
+    const prev=new Set((prevAssignees||[]).map(String));
+    const now=(card.data&&card.data._assignees)||[];
+    const newly=now.filter(a=>typeof a==='string'&&a.indexOf('m:')!==0&&!prev.has(String(a)));
+    if(!newly.length) return;
+    const O=window.__ops; const board=O.boards.find(b=>b.id===O.boardId);
+    const link='https://bnzcoffee.github.io/bonanza-ops/?opsboard='+O.boardId+'&opscard='+card.id;
+    const msg='[운영 프로젝트] "'+(card.title||'')+'" 업무에 담당자로 지정되었습니다.'+(board?' ('+board.name+')':'');
+    for(const uid of newly){
+      if(String(uid)===String(currentUser.id)) continue;
+      try{ await createNotification(uid,'ops_assign',card.id,'ops',msg); }catch(e){}
+      try{ const {data:u}=await sb.from('users').select('slack_member_id').eq('id',uid).maybeSingle(); if(u&&u.slack_member_id) await sendSlackDM(u.slack_member_id,'🔔 '+msg+'\n'+link); }catch(e){}
+    }
+    try{ updateNotifDot(); }catch(e){}
+  }catch(e){}
 }
 
 // ── 운영 보드 v2 헬퍼 (카드 뷰/색상/속성구성/묶음메뉴/마인드 검색·연결) ──
@@ -6824,12 +6868,17 @@ function opsOpenCard(cardId, groupId){
   const attHtml=(c.attachments||[]).length?`<div class="ops-viewrow"><div class="ops-viewlabel">첨부</div><div class="ops-viewval">${c.attachments.map(a=>`<a href="${esc(a.url)}" target="_blank"><i class="ti ti-paperclip"></i> ${esc(a.name)}</a>`).join('<br>')}</div></div>`:'';
   const tcolor=opsCardColor(c);
   const meta=`작성: <b>${esc(opsPersonName(c.created_by))}</b> · 최종 편집: <b>${esc(opsPersonName(c.updated_by||c.created_by))}</b> · ${c.updated_at?fmtDateTime(c.updated_at):(c.created_at?fmtDateTime(c.created_at):'-')}`;
-  const editBtn=opsCanManage()||String(c.created_by)===String(currentUser.id)?`<button class="btn-submit" onclick="document.getElementById('opsCardModal').remove();opsEditCard(${cardId})"><i class="ti ti-edit"></i> 편집</button>`:'';
+  const locked=!!(c.data&&c.data._locked);
+  const lockBadge=locked?`<span style="font-size:11px;color:#c98a3a;font-weight:600"><i class="ti ti-lock"></i> 잠김${c.data._lockedBy?' · '+esc(opsPersonName(c.data._lockedBy)):''}</span>`:'';
+  let actionBtns='';
+  if(opsCanSee()){ actionBtns = locked
+    ? `<button class="btn-submit" onclick="opsUnlockEdit(${cardId})"><i class="ti ti-lock-open"></i> 잠금 해제하고 편집</button>`
+    : `<button class="btn-cancel-sm" onclick="opsLockCard(${cardId})"><i class="ti ti-lock"></i> 잠그기</button><button class="btn-submit" onclick="document.getElementById('opsCardModal').remove();opsEditCard(${cardId})"><i class="ti ti-edit"></i> 편집</button>`; }
   const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='opsCardModal';
   modal.innerHTML=`<div class="modal-box" style="max-width:560px">
     <div class="modal-head"><span style="display:flex;align-items:center;gap:8px">${c.card_type?`<span class="ops-type" style="background:${tcolor};color:#fff;border-color:${tcolor}">${esc(c.card_type)}</span>`:''}<b>${esc(c.title||'(제목 없음)')}</b></span><button onclick="document.getElementById('opsCardModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
-    <div class="modal-body" style="max-height:66vh;overflow-y:auto">${fieldsHtml}${(c.data&&c.data._doc&&c.data._doc.replace(/<[^>]+>/g,'').trim())?`<div class="ops-doc">${c.data._doc}</div>`:''}${(!fieldsHtml&&!(c.data&&c.data._doc))?'<div style="color:var(--th);font-size:13px">내용이 없습니다.</div>':''}${attHtml}<div style="margin-top:14px;font-size:11px;color:var(--th);border-top:0.5px solid var(--crd);padding-top:10px">${meta}</div></div>
-    <div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('opsCardModal').remove()">닫기</button>${editBtn}</div>
+    <div class="modal-body" style="max-height:66vh;overflow-y:auto">${fieldsHtml}${(c.data&&c.data._doc&&c.data._doc.replace(/<[^>]+>/g,'').trim())?`<div class="ops-doc">${c.data._doc}</div>`:''}${(!fieldsHtml&&!(c.data&&c.data._doc))?'<div style="color:var(--th);font-size:13px">내용이 없습니다.</div>':''}${attHtml}<div style="margin-top:14px;font-size:11px;color:var(--th);border-top:0.5px solid var(--crd);padding-top:10px">${meta}${lockBadge?' · '+lockBadge:''}</div></div>
+    <div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('opsCardModal').remove()">닫기</button>${actionBtns}</div>
   </div>`;
   document.body.appendChild(modal);
 }
@@ -6867,14 +6916,14 @@ function opsAutosave(){
 }
 function opsClearDraft(c){ if(!c||!window.__ops) return; try{ localStorage.removeItem('opsDraft_'+window.__ops.boardId+'_'+(c.id?c.id:('new_'+c.group_id))); }catch(e){} }
 function opsPruneDrafts(){ try{ const now=Date.now(), MAX=3*24*60*60*1000; for(let i=localStorage.length-1;i>=0;i--){ const k=localStorage.key(i); if(k&&k.indexOf('opsDraft_')===0){ try{ const d=JSON.parse(localStorage.getItem(k)); if(!d||!d.ts||(now-d.ts)>MAX) localStorage.removeItem(k); }catch(e){ localStorage.removeItem(k); } } } }catch(e){} }
-function opsEligiblePeople(){ const allowed=(window.__ops.allowed||[]).map(String); return (window.__opsPeople||[]).filter(u=>u.active!==false && (u.role==='admin'||u.is_master||u.is_vice_master||(u.part&&u.part.indexOf('운영')>=0)||allowed.includes(String(u.id)))); }
-function opsPermAuto(u){ return u.role==='admin'||u.is_master||u.is_vice_master||(u.part&&u.part.indexOf('운영')>=0); }
+function opsEligiblePeople(){ const allowed=(window.__ops.allowed||[]).map(String); return (window.__opsPeople||[]).filter(u=>u.active!==false && (u.is_master||allowed.includes(String(u.id)))); }
+function opsPermAuto(u){ return !!u.is_master; }
 function opsPermMgr(){
   if(!opsIsMaster()){ alert('총괄만 설정할 수 있습니다.'); return; }
   const allowed=(window.__ops.allowed||[]).map(String);
-  const rows=(window.__opsPeople||[]).slice().sort((a,b)=>(opsPermAuto(b)?1:0)-(opsPermAuto(a)?1:0)).map(u=>{ const isAuto=opsPermAuto(u); const checked=isAuto||allowed.includes(String(u.id)); return `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)"><input type="checkbox" class="ops-permck" data-id="${u.id}" ${checked?'checked':''} ${isAuto?'disabled':''}> <span style="flex:1">${esc(u.name)} <span style="font-size:11px;color:var(--th)">${esc(u.store||'')}</span></span><span style="font-size:10px;color:${isAuto?'var(--gn)':'var(--th)'}">${isAuto?'운영 자동':'예외 지정'}</span></label>`; }).join('');
+  const rows=(window.__opsPeople||[]).slice().sort((a,b)=>(opsPermAuto(b)?1:0)-(opsPermAuto(a)?1:0)).map(u=>{ const isAuto=opsPermAuto(u); const checked=isAuto||allowed.includes(String(u.id)); return `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)"><input type="checkbox" class="ops-permck" data-id="${u.id}" ${checked?'checked':''} ${isAuto?'disabled':''}> <span style="flex:1">${esc(u.name)} <span style="font-size:11px;color:var(--th)">${esc(u.store||'')}</span></span><span style="font-size:10px;color:${isAuto?'var(--gn)':'var(--th)'}">${isAuto?'총괄·항상 포함':'참여 지정'}</span></label>`; }).join('');
   const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='opsPermModal';
-  modal.innerHTML=`<div class="modal-box" style="max-width:460px"><div class="modal-head"><b>담당자 · 열람 권한 관리</b><button onclick="document.getElementById('opsPermModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:66vh;overflow-y:auto"><p style="font-size:12px;color:var(--th);margin-bottom:10px">운영팀·총괄·부총괄, 파트에 '운영'이 포함된 인원은 <b>자동 포함</b>됩니다. 그 외 인원을 체크하면 <b>담당자 후보 + 이 메뉴(보드·아이디어맵) 열람 권한</b>이 부여됩니다.</p>${rows}</div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('opsPermModal').remove()">취소</button><button class="btn-submit" onclick="opsSavePerm()">저장</button></div></div>`;
+  modal.innerHTML=`<div class="modal-box" style="max-width:460px"><div class="modal-head"><b>참여 인원 관리 (총괄 전용)</b><button onclick="document.getElementById('opsPermModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:66vh;overflow-y:auto"><p style="font-size:12px;color:var(--th);margin-bottom:10px">여기서 <b>체크한 인원만</b> 이 메뉴가 보이고 참여(열람·작성·수정)할 수 있습니다. 운영팀·부총괄·대표·이사라도 체크하지 않으면 메뉴가 보이지 않습니다. (비활성 계정은 목록에서 제외됩니다. 늦게 합류해도 이전 내용을 모두 보고 수정할 수 있습니다.)</p>${rows}</div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('opsPermModal').remove()">취소</button><button class="btn-submit" onclick="opsSavePerm()">저장</button></div></div>`;
   document.body.appendChild(modal);
 }
 async function opsSavePerm(){
