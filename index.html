@@ -307,6 +307,11 @@ textarea.form-input{min-height:120px;resize:vertical}
 .ops-cfrow{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--crd)}
 .ops-cc{padding:7px 0;border-bottom:0.5px solid var(--crd)}
 .ops-cc.rep{margin-left:16px;background:var(--crm);border-radius:8px;padding:7px 9px;border-bottom:none;margin-top:5px}
+.ops-docbar{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0}
+.ops-docbar .btn-cancel-sm{font-size:11px;padding:4px 8px}
+#opsDocBox table,.ops-doc table{border-collapse:collapse;width:100%;margin:8px 0}
+#opsDocBox td,.ops-doc td{border:1px solid var(--crd);padding:6px 8px;min-width:38px;vertical-align:top;font-size:13px}
+.ops-doc td img{max-width:100%}
 .ops-card-snip{font-size:11px;color:var(--th);margin-top:4px;line-height:1.4;max-height:30px;overflow:hidden}
 #opsDocBox{background:#fff;border-radius:0 0 8px 8px}
 #opsDocBox .ql-editor{min-height:150px;font-size:13px}
@@ -6678,7 +6683,7 @@ function opsEditCard(cardId, groupId){
       <div class="form-row"><label class="form-label">제목 <span style="color:var(--rd)">*</span></label><input id="opsCardTitle" class="form-input" value="${esc(c.title||'')}"></div>
       <div style="display:flex;justify-content:flex-end;margin-bottom:4px"><button class="btn-cancel-sm" style="font-size:11px;padding:4px 8px" onclick="opsCardFieldsConfig()"><i class="ti ti-adjustments-horizontal"></i> 표시 속성·순서</button></div>
       <div id="opsCardFields">${fieldsHtml}</div>
-      <div class="form-row"><label class="form-label">문서 (자유 편집) <span style="font-size:10px;color:var(--th);font-weight:400">· 본문에 @이름 입력 시 해당 참여자에게 알림</span></label><div id="opsDocBox"></div></div>
+      <div class="form-row"><label class="form-label">문서 (자유 편집) <span style="font-size:10px;color:var(--th);font-weight:400">· @이름 멘션 · 형광펜(툴바 배경색)</span></label><div class="ops-docbar"><button type="button" class="btn-cancel-sm" onclick="opsDocTableInsert()"><i class="ti ti-table"></i> 표</button><button type="button" class="btn-cancel-sm" onclick="opsDocColumns()"><i class="ti ti-columns"></i> 다단</button><button type="button" class="btn-cancel-sm" onclick="opsDocTable('insertRowBelow')">행+</button><button type="button" class="btn-cancel-sm" onclick="opsDocTable('deleteRow')">행-</button><button type="button" class="btn-cancel-sm" onclick="opsDocTable('insertColumnRight')">열+</button><button type="button" class="btn-cancel-sm" onclick="opsDocTable('deleteColumn')">열-</button><button type="button" class="btn-cancel-sm" onclick="opsDocTable('deleteTable')">표삭제</button></div><div id="opsDocBox"></div></div>
       <div class="form-row"><label class="form-label">첨부파일</label>
         <div id="opsAttList">${attHtml}</div>
         <input type="file" id="opsAttFile" style="display:none" onchange="opsUploadAtt(this)">
@@ -6692,11 +6697,15 @@ function opsEditCard(cardId, groupId){
   </div>`;
   document.body.appendChild(modal);
   try{
-    window.__opsQuill=new Quill('#opsDocBox',{theme:'snow',placeholder:'자유롭게 작성하세요 — 제목/목록/체크리스트/이미지/링크',modules:{toolbar:{container:[[{header:[1,2,3,false]}],['bold','italic','underline','strike'],[{background:['#fff59d','#b2f2bb','#ffc9c9','#a5d8ff','#ffd8a8',false]},{color:[]}],[{list:'ordered'},{list:'bullet'},{list:'check'}],['blockquote','code-block'],['link','image'],['clean']],handlers:{image:opsDocImage}}}});
+    window.__opsQuill=new Quill('#opsDocBox',{theme:'snow',placeholder:'자유롭게 작성하세요 — 제목/목록/체크리스트/표/다단/이미지',modules:{table:true,toolbar:{container:[[{header:[1,2,3,false]}],['bold','italic','underline','strike'],[{background:['#fff59d','#b2f2bb','#ffc9c9','#a5d8ff','#ffd8a8',false]},{color:[]}],[{list:'ordered'},{list:'bullet'},{list:'check'}],['blockquote','code-block'],['link','image'],['clean']],handlers:{image:opsDocImage}}}});
     if(c.data&&c.data._doc) window.__opsQuill.root.innerHTML=c.data._doc;
   }catch(e){ window.__opsQuill=null; }
   modal.addEventListener('input', opsAutosaveDeb);
 }
+function opsDocEnsureSel(){ const q=window.__opsQuill; if(!q) return; q.focus(); if(!q.getSelection()) q.setSelection(q.getLength(),0); }
+function opsDocTable(method){ try{ const t=window.__opsQuill&&window.__opsQuill.getModule('table'); if(!t) return; opsDocEnsureSel(); t[method](); }catch(e){} }
+function opsDocTableInsert(){ const r=parseInt(prompt('행 수 (1~12):','3')||'0',10); if(!r) return; const c=parseInt(prompt('열 수 (1~8):','3')||'0',10); if(!c) return; try{ opsDocEnsureSel(); window.__opsQuill.getModule('table').insertTable(Math.min(12,Math.max(1,r)),Math.min(8,Math.max(1,c))); }catch(e){ alert('표 삽입 실패: '+e.message); } }
+function opsDocColumns(){ const n=parseInt(prompt('분할 수 (2~5): 이미지·텍스트를 가로로 나눠 배치합니다','2')||'0',10); if(!n) return; try{ opsDocEnsureSel(); window.__opsQuill.getModule('table').insertTable(1,Math.min(5,Math.max(2,n))); }catch(e){ alert('다단 삽입 실패: '+e.message); } }
 function opsDocImage(){ const q=window.__opsQuill; if(!q) return; if(isTestMode()){ alert('테스트 모드에서는 첨부할 수 없습니다.'); return; } const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.onchange=async()=>{ const fl=inp.files&&inp.files[0]; if(!fl) return; const url=await nUploadFile(fl,'opsboard'); if(url){ const r=q.getSelection()||{index:q.getLength()}; q.insertEmbed(r.index,'image',url); q.setSelection(r.index+1); } }; inp.click(); }
 function opsChangeType(typeName){
   const O=window.__ops; opsCollectInto(window.__opsEditingCard);
