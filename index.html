@@ -302,6 +302,13 @@ textarea.form-input{min-height:120px;resize:vertical}
 .ops-reorder{display:inline-flex;flex-direction:column;flex-shrink:0}
 .ops-reorder button{background:none;border:none;cursor:pointer;color:var(--th);font-size:12px;line-height:1;padding:0}
 .ops-cfrow{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--crd)}
+.ops-card-snip{font-size:11px;color:var(--th);margin-top:4px;line-height:1.4;max-height:30px;overflow:hidden}
+#opsDocBox{background:#fff;border-radius:0 0 8px 8px}
+#opsDocBox .ql-editor{min-height:150px;font-size:13px}
+.ops-doc{font-size:13px;color:var(--tm);line-height:1.65}
+.ops-doc img{max-width:100%;border-radius:8px}
+.ops-doc h1{font-size:20px;margin:10px 0 6px}.ops-doc h2{font-size:17px;margin:9px 0 5px}.ops-doc h3{font-size:15px;margin:8px 0 4px}
+.ops-doc ul,.ops-doc ol{padding-left:22px}
 .btn-sm{padding:7px 14px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600}
 .btn-sm.primary{background:var(--br);color:#fff;border:none}
 .btn-sm.ghost{background:none;border:0.5px solid var(--crd);color:var(--ts)}
@@ -6457,7 +6464,7 @@ function opsRender(area){
   const O=window.__ops;
   const board=O.boards.find(b=>b.id===O.boardId);
   const tabs = O.boards.map(b=>`<button class="ops-tab${b.id===O.boardId?' active':''}" onclick="opsSwitchBoard(${b.id})"><i class="ti ${b.type==='mind'?'ti-bulb':'ti-layout-kanban'}" style="font-size:12px"></i> ${esc(b.name)}</button>`).join('');
-  const addBoardBtn = opsCanManage()?`<button class="ops-tab" onclick="opsAddBoard()" title="프로젝트 추가"><i class="ti ti-plus"></i></button>`:'';
+  const addBoardBtn = opsCanManage()?`<button class="ops-tab" onclick="opsAddBoard('board')" title="카드 보드 추가"><i class="ti ti-plus"></i> 보드</button><button class="ops-tab" onclick="opsAddBoard('mind')" title="아이디어맵 추가"><i class="ti ti-plus"></i> 아이디어맵</button>`:'';
   const manageBtns = opsCanManage()?`
     <button class="btn-cancel-sm" onclick="opsOpenFields()"><i class="ti ti-adjustments"></i> 속성/유형</button>
     <button class="btn-cancel-sm" onclick="opsAddGroup()"><i class="ti ti-plus"></i> 묶음</button>`:'';
@@ -6472,11 +6479,12 @@ function opsRender(area){
   const isMind = board && board.type==='mind';
   const boardBtns = opsCanManage()?`<button class="btn-cancel-sm" onclick="opsRenameBoard()"><i class="ti ti-edit"></i> 이름</button>`:'';
   const delBoardBtn = opsIsMaster()?`<button class="btn-cancel-sm" style="color:var(--rd)" onclick="opsDeleteBoard()" title="이 항목 삭제(총괄)"><i class="ti ti-trash"></i></button>`:'';
+  const permBtn = opsIsMaster()?`<button class="btn-cancel-sm" onclick="opsPermMgr()"><i class="ti ti-users"></i> 담당자·권한</button>`:'';
   area.innerHTML = `
   <div class="ops-wrap">
     <div class="ops-header">
       <div class="ops-tabs">${tabs}${addBoardBtn}</div>
-      <div class="ops-actions">${isMind?'':(manageBtns+masterBtns)}${boardBtns}${delBoardBtn}</div>
+      <div class="ops-actions">${isMind?'':(manageBtns+masterBtns)}${permBtn}${boardBtns}${delBoardBtn}</div>
     </div>
     ${isMind ? opsMindShell() : `
     <div class="ops-toolbar">
@@ -6536,6 +6544,7 @@ function opsCardMini(c){
   return `<div class="ops-card" draggable="true" ondragstart="opsDragStart(event,${c.id})" ondragover="opsDragOver(event)" ondrop="opsCardDrop(event,${c.id})" onclick="opsOpenCard(${c.id})" style="border-left:4px solid ${tcolor}">
     ${c.card_type?`<span class="ops-type" style="background:${tcolor};color:#fff;border-color:${tcolor}">${esc(c.card_type)}</span>`:''}
     <div class="ops-card-title">${esc(c.title||'(제목 없음)')}</div>
+    ${(c.data&&c.data._doc)?`<div class="ops-card-snip">${esc(c.data._doc.replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim().slice(0,70))}</div>`:''}
     <div class="ops-card-meta">
       ${st?`<span class="ops-chip">${esc(st)}</span>`:''}
       ${pr?`<span class="ops-chip" style="color:${prColor};border-color:${prColor}">${esc(pr)}</span>`:''}
@@ -6555,13 +6564,13 @@ function opsClearFilter(){ window.__ops.filter={}; renderOpsBoard(document.getEl
 
 // ── 보드 전환/추가 ──
 async function opsSwitchBoard(id){ window.__ops.boardId=id; window.__ops.filter={}; await opsLoadBoardData(); opsSubscribe(); opsRender(document.getElementById('contentArea')); }
-async function opsAddBoard(){
-  const name=prompt('새 항목 이름:'); if(!name) return;
-  const isMind=confirm('아이디어맵(자유 캔버스)으로 만들까요?\n\n[확인] = 아이디어맵\n[취소] = 카드 보드');
+async function opsAddBoard(type){
+  const isMind=(type==='mind');
+  const name=prompt(isMind?'새 아이디어맵 이름:':'새 보드 이름:'); if(!name) return;
   const so=window.__ops.boards.length;
   const {data,error}=await sb.from('ops_boards').insert({name:name.trim(),type:isMind?'mind':'board',fields:OPS_DEFAULT_FIELDS,card_types:OPS_DEFAULT_TYPES,sort_order:so}).select().single();
-  if(error){alert('오류: '+error.message);return;}
-  window.__ops.boards.push(data); window.__ops.boardId=data.id; window.__ops.filter={};
+  if(error){ if(/type|column|schema|42703/i.test((error.message||'')+(error.code||''))){ alert('아이디어맵/보드 유형 설정(DB)이 아직 적용되지 않았습니다.\n총괄에게 문의: ops_board_type.sql 실행이 필요합니다.'); } else alert('오류: '+error.message); return; }
+  window.__ops.boards.push(data); window.__ops.boardId=data.id; window.__ops.filter={}; window.__ops.view='board';
   await opsLoadBoardData(); opsSubscribe(); opsRender(document.getElementById('contentArea'));
 }
 async function opsRenameBoard(){ const O=window.__ops; const b=O.boards.find(x=>x.id===O.boardId); if(!b) return; const nm=prompt('이름 수정:',b.name); if(nm===null||!nm.trim()) return; await sb.from('ops_boards').update({name:nm.trim()}).eq('id',b.id); b.name=nm.trim(); opsRender(document.getElementById('contentArea')); }
@@ -6675,6 +6684,7 @@ function opsEditCard(cardId, groupId){
       <div class="form-row"><label class="form-label">제목 <span style="color:var(--rd)">*</span></label><input id="opsCardTitle" class="form-input" value="${esc(c.title||'')}"></div>
       <div style="display:flex;justify-content:flex-end;margin-bottom:4px"><button class="btn-cancel-sm" style="font-size:11px;padding:4px 8px" onclick="opsCardFieldsConfig()"><i class="ti ti-adjustments-horizontal"></i> 표시 속성·순서</button></div>
       <div id="opsCardFields">${fieldsHtml}</div>
+      <div class="form-row"><label class="form-label">문서 (자유 편집)</label><div id="opsDocBox"></div></div>
       <div class="form-row"><label class="form-label">첨부파일</label>
         <div id="opsAttList">${attHtml}</div>
         <input type="file" id="opsAttFile" style="display:none" onchange="opsUploadAtt(this)">
@@ -6687,8 +6697,13 @@ function opsEditCard(cardId, groupId){
     </div>
   </div>`;
   document.body.appendChild(modal);
+  try{
+    window.__opsQuill=new Quill('#opsDocBox',{theme:'snow',placeholder:'자유롭게 작성하세요 — 제목/목록/체크리스트/이미지/링크',modules:{toolbar:{container:[[{header:[1,2,3,false]}],['bold','italic','underline','strike'],[{list:'ordered'},{list:'bullet'},{list:'check'}],['blockquote','code-block'],['link','image'],['clean']],handlers:{image:opsDocImage}}}});
+    if(c.data&&c.data._doc) window.__opsQuill.root.innerHTML=c.data._doc;
+  }catch(e){ window.__opsQuill=null; }
   modal.addEventListener('input', opsAutosaveDeb);
 }
+function opsDocImage(){ const q=window.__opsQuill; if(!q) return; if(isTestMode()){ alert('테스트 모드에서는 첨부할 수 없습니다.'); return; } const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.onchange=async()=>{ const fl=inp.files&&inp.files[0]; if(!fl) return; const url=await nUploadFile(fl,'opsboard'); if(url){ const r=q.getSelection()||{index:q.getLength()}; q.insertEmbed(r.index,'image',url); q.setSelection(r.index+1); } }; inp.click(); }
 function opsChangeType(typeName){
   const O=window.__ops; opsCollectInto(window.__opsEditingCard);
   window.__opsEditingCard.card_type=typeName;
@@ -6710,6 +6725,7 @@ function opsCollectInto(c){
     else if(f.type==='person') c.data[f.key]=JSON.parse(el.getAttribute('data-sel')||'[]');
     else c.data[f.key]=el.value;
   });
+  if(window.__opsQuill){ try{ const h=window.__opsQuill.root.innerHTML; c.data._doc=(h==='<p><br></p>')?'':h; }catch(e){} }
 }
 async function opsUploadAtt(input){
   const file=input.files&&input.files[0]; if(!file) return;
@@ -6761,7 +6777,7 @@ function opsCloseCard(){
   const c=window.__opsEditingCard;
   if(c&&c.id) opsBroadcastEditing(c.id,false);
   opsClearDraft(c);
-  window.__opsModalOpen=false; window.__opsEditingCard=null;
+  window.__opsModalOpen=false; window.__opsEditingCard=null; window.__opsQuill=null;
   document.getElementById('opsCardModal')?.remove();
   if(window.__opsPendingReload){ window.__opsPendingReload=false; opsReloadSoft(); }
 }
@@ -6812,7 +6828,7 @@ function opsOpenCard(cardId, groupId){
   const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='opsCardModal';
   modal.innerHTML=`<div class="modal-box" style="max-width:560px">
     <div class="modal-head"><span style="display:flex;align-items:center;gap:8px">${c.card_type?`<span class="ops-type" style="background:${tcolor};color:#fff;border-color:${tcolor}">${esc(c.card_type)}</span>`:''}<b>${esc(c.title||'(제목 없음)')}</b></span><button onclick="document.getElementById('opsCardModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
-    <div class="modal-body" style="max-height:66vh;overflow-y:auto">${fieldsHtml||'<div style="color:var(--th);font-size:13px">표시할 속성이 없습니다.</div>'}${attHtml}<div style="margin-top:14px;font-size:11px;color:var(--th);border-top:0.5px solid var(--crd);padding-top:10px">${meta}</div></div>
+    <div class="modal-body" style="max-height:66vh;overflow-y:auto">${fieldsHtml}${(c.data&&c.data._doc&&c.data._doc.replace(/<[^>]+>/g,'').trim())?`<div class="ops-doc">${c.data._doc}</div>`:''}${(!fieldsHtml&&!(c.data&&c.data._doc))?'<div style="color:var(--th);font-size:13px">내용이 없습니다.</div>':''}${attHtml}<div style="margin-top:14px;font-size:11px;color:var(--th);border-top:0.5px solid var(--crd);padding-top:10px">${meta}</div></div>
     <div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('opsCardModal').remove()">닫기</button>${editBtn}</div>
   </div>`;
   document.body.appendChild(modal);
@@ -6851,7 +6867,25 @@ function opsAutosave(){
 }
 function opsClearDraft(c){ if(!c||!window.__ops) return; try{ localStorage.removeItem('opsDraft_'+window.__ops.boardId+'_'+(c.id?c.id:('new_'+c.group_id))); }catch(e){} }
 function opsPruneDrafts(){ try{ const now=Date.now(), MAX=3*24*60*60*1000; for(let i=localStorage.length-1;i>=0;i--){ const k=localStorage.key(i); if(k&&k.indexOf('opsDraft_')===0){ try{ const d=JSON.parse(localStorage.getItem(k)); if(!d||!d.ts||(now-d.ts)>MAX) localStorage.removeItem(k); }catch(e){ localStorage.removeItem(k); } } } }catch(e){} }
-function opsEligiblePeople(){ const allowed=(window.__ops.allowed||[]).map(String); return (window.__opsPeople||[]).filter(u=>u.active!==false && (u.part==='운영팀'||u.is_master||u.is_vice_master||u.role==='admin'||allowed.includes(String(u.id)))); }
+function opsEligiblePeople(){ const allowed=(window.__ops.allowed||[]).map(String); return (window.__opsPeople||[]).filter(u=>u.active!==false && (u.role==='admin'||u.is_master||u.is_vice_master||(u.part&&u.part.indexOf('운영')>=0)||allowed.includes(String(u.id)))); }
+function opsPermAuto(u){ return u.role==='admin'||u.is_master||u.is_vice_master||(u.part&&u.part.indexOf('운영')>=0); }
+function opsPermMgr(){
+  if(!opsIsMaster()){ alert('총괄만 설정할 수 있습니다.'); return; }
+  const allowed=(window.__ops.allowed||[]).map(String);
+  const rows=(window.__opsPeople||[]).slice().sort((a,b)=>(opsPermAuto(b)?1:0)-(opsPermAuto(a)?1:0)).map(u=>{ const isAuto=opsPermAuto(u); const checked=isAuto||allowed.includes(String(u.id)); return `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)"><input type="checkbox" class="ops-permck" data-id="${u.id}" ${checked?'checked':''} ${isAuto?'disabled':''}> <span style="flex:1">${esc(u.name)} <span style="font-size:11px;color:var(--th)">${esc(u.store||'')}</span></span><span style="font-size:10px;color:${isAuto?'var(--gn)':'var(--th)'}">${isAuto?'운영 자동':'예외 지정'}</span></label>`; }).join('');
+  const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='opsPermModal';
+  modal.innerHTML=`<div class="modal-box" style="max-width:460px"><div class="modal-head"><b>담당자 · 열람 권한 관리</b><button onclick="document.getElementById('opsPermModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:66vh;overflow-y:auto"><p style="font-size:12px;color:var(--th);margin-bottom:10px">운영팀·총괄·부총괄, 파트에 '운영'이 포함된 인원은 <b>자동 포함</b>됩니다. 그 외 인원을 체크하면 <b>담당자 후보 + 이 메뉴(보드·아이디어맵) 열람 권한</b>이 부여됩니다.</p>${rows}</div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('opsPermModal').remove()">취소</button><button class="btn-submit" onclick="opsSavePerm()">저장</button></div></div>`;
+  document.body.appendChild(modal);
+}
+async function opsSavePerm(){
+  const ids=[...document.querySelectorAll('#opsPermModal .ops-permck')].filter(x=>x.checked&&!x.disabled).map(x=>x.getAttribute('data-id'));
+  const {error}=await sb.from('app_settings').upsert({key:'ops_board_allowed_users',value:JSON.stringify(ids)},{onConflict:'key'});
+  if(error){ alert('오류: '+error.message); return; }
+  window.__ops.allowed=ids; window.__ops.__allowedLoaded=true;
+  document.getElementById('opsPermModal').remove();
+  const el=document.getElementById('opsNav'); if(el) el.style.display=opsCanSee()?'':'none';
+  alert('저장되었습니다. 지정한 인원은 담당자 목록과 메뉴 열람에 반영됩니다.');
+}
 function opsGroupDragStart(e,gid){ e.dataTransfer.setData('ops-group',String(gid)); e.dataTransfer.effectAllowed='move'; }
 async function opsReorderGroup(dragId,targetId){
   const O=window.__ops; if(dragId===targetId) return;
