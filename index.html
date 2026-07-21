@@ -244,6 +244,8 @@ textarea.form-input{min-height:120px;resize:vertical}
 .ops-col-name{font-size:13px;font-weight:700;color:var(--tm);cursor:pointer;flex:1}
 .ops-col-cnt{font-size:11px;color:var(--th);background:#fff;border-radius:10px;padding:1px 8px}
 .ops-col-del{background:none;border:none;color:var(--th);cursor:pointer;font-size:13px}
+.ops-grip{color:var(--th);cursor:grab;font-size:14px;margin-right:2px}
+.ops-col-head[draggable="true"]{cursor:grab}
 .ops-col-body{display:flex;flex-direction:column;gap:8px;min-height:12px}
 .ops-addcard{width:100%;margin-top:8px;background:none;border:1px dashed var(--crd);border-radius:8px;padding:8px;font-size:12px;color:var(--th);cursor:pointer}
 .ops-card{background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:10px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.04)}
@@ -6378,6 +6380,7 @@ async function renderOpsBoard(area){
   if(!opsCanSee()){ area.innerHTML='<div style="padding:40px;text-align:center;color:var(--th)">접근 권한이 없습니다.</div>'; return; }
   area.innerHTML='<div style="padding:40px;text-align:center;color:var(--th)"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
   if(!window.__allActiveUsers || !window.__allActiveUsers.length){ const {data}=await sb.from('users').select('id,name,store,role,active').eq('active',true).order('name'); window.__allActiveUsers=data||[]; }
+  { const {data:__op}=await sb.from('users').select('id,name,store,role,part,is_master,is_vice_master,active').eq('active',true).order('name'); window.__opsPeople=__op||[]; }
   await opsLoadAllowed();
   // 보드 목록
   let { data:boards, error:bErr } = await sb.from('ops_boards').select('*').order('sort_order').order('id');
@@ -6413,7 +6416,7 @@ async function opsLoadBoardData(){
   }
 }
 
-function opsPersonName(id){ const u=(window.__allActiveUsers||[]).find(x=>String(x.id)===String(id)); return u?u.name:'?'; }
+function opsPersonName(v){ if(v&&typeof v==='string'&&v.indexOf('m:')===0) return v.slice(2); const pool=(window.__opsPeople&&window.__opsPeople.length?window.__opsPeople:(window.__allActiveUsers||[])); const u=pool.find(x=>String(x.id)===String(v)); if(u) return u.name; const u2=(window.__allActiveUsers||[]).find(x=>String(x.id)===String(v)); return u2?u2.name:'?'; }
 
 function opsRender(area){
   const O=window.__ops;
@@ -6464,7 +6467,8 @@ function opsGroupsHtml(){
     const cardHtml=cards.map(c=>opsCardMini(c)).join('') || '<div class="ops-empty">카드 없음</div>';
     const gAdmin=opsCanManage();
     return `<div class="ops-col" data-gid="${g.id}" ondragover="opsDragOver(event)" ondrop="opsDrop(event,${g.id})">
-      <div class="ops-col-head" style="border-top:3px solid ${g.color||'#c9b8a4'}">
+      <div class="ops-col-head" style="border-top:3px solid ${g.color||'#c9b8a4'}" ${gAdmin?`draggable="true" ondragstart="opsGroupDragStart(event,${g.id})"`:''}>
+        ${gAdmin?`<i class="ti ti-grip-vertical ops-grip" title="드래그로 순서 이동"></i>`:''}
         <span class="ops-col-name" ${gAdmin?`onclick="opsRenameGroup(${g.id})"`:''}>${esc(g.name)}</span>
         <span class="ops-col-cnt">${cards.length}</span>
         ${gAdmin?`<button class="ops-col-del" onclick="opsDeleteGroup(${g.id})" title="묶음 삭제"><i class="ti ti-dots"></i></button>`:''}
@@ -6487,7 +6491,7 @@ function opsCardMini(c){
   const editBadge = editing && String(editing.userId)!==String(currentUser.id) ? `<div class="ops-editing"><i class="ti ti-pencil"></i> ${esc(editing.name)} 편집 중</div>`:'';
   const prColor = pr==='높음'?'#d9534f':(pr==='낮음'?'#8a8a8a':'#c98a3a');
   const attN=(c.attachments||[]).length;
-  return `<div class="ops-card" draggable="true" ondragstart="opsDragStart(event,${c.id})" onclick="opsOpenCard(${c.id})">
+  return `<div class="ops-card" draggable="true" ondragstart="opsDragStart(event,${c.id})" ondragover="opsDragOver(event)" ondrop="opsCardDrop(event,${c.id})" onclick="opsOpenCard(${c.id})">
     ${c.card_type?`<span class="ops-type">${esc(c.card_type)}</span>`:''}
     <div class="ops-card-title">${esc(c.title||'(제목 없음)')}</div>
     <div class="ops-card-meta">
@@ -6542,11 +6546,13 @@ async function opsDeleteGroup(id){
 }
 
 // ── 드래그 이동 ──
-function opsDragStart(e,cardId){ e.stopPropagation(); e.dataTransfer.setData('text/plain',cardId); e.dataTransfer.effectAllowed='move'; }
+function opsDragStart(e,cardId){ e.stopPropagation(); e.dataTransfer.setData('text/plain',String(cardId)); e.dataTransfer.setData('ops-card',String(cardId)); e.dataTransfer.effectAllowed='move'; }
 function opsDragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect='move'; }
 async function opsDrop(e,groupId){
   e.preventDefault();
-  const cardId=parseInt(e.dataTransfer.getData('text/plain'),10); if(!cardId) return;
+  const gDrag=e.dataTransfer.getData('ops-group');
+  if(gDrag){ await opsReorderGroup(parseInt(gDrag,10),groupId); return; }
+  const cardId=parseInt(e.dataTransfer.getData('ops-card')||e.dataTransfer.getData('text/plain'),10); if(!cardId) return;
   const c=window.__ops.cards.find(x=>x.id===cardId); if(!c) return;
   const maxSort=window.__ops.cards.filter(x=>x.group_id===groupId).reduce((m,x)=>Math.max(m,x.sort_order||0),0);
   c.group_id=groupId; c.sort_order=maxSort+1;
@@ -6571,22 +6577,28 @@ function opsFieldInput(f,val){
   if(f.type==='person'){
     const sel=(val||[]).map(String);
     const chips=sel.map(id2=>`<span class="ops-pchip">${esc(opsPersonName(id2))} <i class="ti ti-x" onclick="opsTogglePerson('${f.key}','${id2}')"></i></span>`).join('');
-    const users=(window.__allActiveUsers||[]).filter(u=>u.active!==false).map(u=>`<option value="${u.id}">${esc(u.name)} (${esc(u.store||'')})</option>`).join('');
+    const users=opsEligiblePeople().map(u=>`<option value="${u.id}">${esc(u.name)} (${esc(u.store||'')})</option>`).join('');
     return `<div id="${id}" data-sel='${JSON.stringify(sel)}'><div class="ops-pchips">${chips}</div>
-      <select class="form-input" onchange="opsAddPerson('${f.key}',this.value);this.value='';"><option value="">+ 담당자 추가</option>${users}</select></div>`;
+      <select class="form-input" onchange="opsAddPerson('${f.key}',this.value);this.value='';"><option value="">+ 담당자 추가</option>${users}<option value="__manual__">+ 기타(직접 입력)</option></select></div>`;
   }
   return `<input id="${id}" class="form-input" value="${esc(val||'')}">`;
 }
 function opsTogglePerson(key,uid){ opsRemovePerson(key,uid); }
-function opsAddPerson(key,uid){ if(!uid) return; const box=document.getElementById('opsf-'+key); let sel=JSON.parse(box.getAttribute('data-sel')||'[]'); if(!sel.map(String).includes(String(uid))) sel.push(uid); box.setAttribute('data-sel',JSON.stringify(sel)); opsRenderPersonChips(key,sel); }
+function opsAddPerson(key,uid){ if(!uid) return; if(uid==='__manual__'){ const nm=prompt('담당자 이름(직접 입력):'); if(!nm||!nm.trim()) return; uid='m:'+nm.trim(); } const box=document.getElementById('opsf-'+key); let sel=JSON.parse(box.getAttribute('data-sel')||'[]'); if(!sel.map(String).includes(String(uid))) sel.push(uid); box.setAttribute('data-sel',JSON.stringify(sel)); opsRenderPersonChips(key,sel); }
 function opsRemovePerson(key,uid){ const box=document.getElementById('opsf-'+key); let sel=JSON.parse(box.getAttribute('data-sel')||'[]').filter(x=>String(x)!==String(uid)); box.setAttribute('data-sel',JSON.stringify(sel)); opsRenderPersonChips(key,sel); }
 function opsRenderPersonChips(key,sel){ const box=document.getElementById('opsf-'+key); const chips=sel.map(id2=>`<span class="ops-pchip">${esc(opsPersonName(id2))} <i class="ti ti-x" onclick="opsRemovePerson('${key}','${id2}')"></i></span>`).join(''); box.querySelector('.ops-pchips').innerHTML=chips; }
 
 function opsOpenCard(cardId, groupId){
   const O=window.__ops;
-  const c = cardId ? O.cards.find(x=>x.id===cardId) : { id:null, group_id:groupId, card_type:(O.cardTypes[0]&&O.cardTypes[0].name)||'', title:'', data:{}, attachments:[] };
+  let c = cardId ? O.cards.find(x=>x.id===cardId) : { id:null, group_id:groupId, card_type:(O.cardTypes[0]&&O.cardTypes[0].name)||'', title:'', data:{}, attachments:[] };
   window.__opsEditingCard=JSON.parse(JSON.stringify(c));
   window.__opsModalOpen=true;
+  try{
+    const dkey='opsDraft_'+O.boardId+'_'+(cardId?cardId:('new_'+groupId));
+    const draftRaw=localStorage.getItem(dkey);
+    if(draftRaw){ const d=JSON.parse(draftRaw); const cardTs=(cardId&&c.updated_at)?new Date(c.updated_at).getTime():0; if(d&&d.ts&&d.ts>cardTs){ if(confirm('이전에 작성 중이던 임시저장 내용이 있습니다. 불러올까요?\n(취소하면 임시저장은 삭제됩니다)')){ window.__opsEditingCard.title=d.title||''; window.__opsEditingCard.card_type=d.card_type||window.__opsEditingCard.card_type; window.__opsEditingCard.data=d.data||{}; window.__opsEditingCard.attachments=d.attachments||[]; } else { localStorage.removeItem(dkey); } } }
+  }catch(e){}
+  c = window.__opsEditingCard;
   if(cardId) opsBroadcastEditing(cardId,true);
   const typeSel=O.cardTypes.map(t=>`<option value="${esc(t.name)}"${c.card_type===t.name?' selected':''}>${esc(t.name)}</option>`).join('');
   const visKeys=opsFieldsForType(c.card_type);
@@ -6609,12 +6621,13 @@ function opsOpenCard(cardId, groupId){
         <button class="btn-cancel-sm" style="margin-top:6px" onclick="document.getElementById('opsAttFile').click()"><i class="ti ti-upload"></i> 파일 추가</button>
       </div>
     </div>
-    <div class="modal-foot" style="display:flex;gap:8px;justify-content:space-between">
-      <div>${delBtn}</div>
+    <div class="modal-foot" style="display:flex;gap:8px;justify-content:space-between;align-items:center">
+      <div style="display:flex;align-items:center;gap:8px">${delBtn}<span id="opsDraftInfo" style="font-size:11px;color:var(--th)"></span></div>
       <div style="display:flex;gap:8px"><button class="btn-cancel-sm" onclick="opsCloseCard()">취소</button><button class="btn-submit" onclick="opsSaveCard()">저장</button></div>
     </div>
   </div>`;
   document.body.appendChild(modal);
+  modal.addEventListener('input', opsAutosaveDeb);
 }
 function opsChangeType(typeName){
   const O=window.__ops; window.__opsEditingCard.card_type=typeName;
@@ -6687,9 +6700,46 @@ async function opsDeleteCard(id){
 function opsCloseCard(){
   const c=window.__opsEditingCard;
   if(c&&c.id) opsBroadcastEditing(c.id,false);
+  opsClearDraft(c);
   window.__opsModalOpen=false; window.__opsEditingCard=null;
   document.getElementById('opsCardModal')?.remove();
   if(window.__opsPendingReload){ window.__opsPendingReload=false; opsReloadSoft(); }
+}
+
+// ── 자동 임시저장 / 담당자 필터 / 그룹·카드 이동 ──
+let __opsAutoT=null;
+function opsAutosaveDeb(){ clearTimeout(__opsAutoT); __opsAutoT=setTimeout(opsAutosave,700); }
+function opsAutosave(){
+  if(!window.__opsModalOpen||!window.__opsEditingCard) return;
+  try{ opsCollectInto(window.__opsEditingCard); }catch(e){}
+  const c=window.__opsEditingCard;
+  const dkey='opsDraft_'+window.__ops.boardId+'_'+(c.id?c.id:('new_'+c.group_id));
+  try{ localStorage.setItem(dkey, JSON.stringify({title:c.title,card_type:c.card_type,data:c.data,attachments:c.attachments,ts:Date.now()})); }catch(e){}
+  try{ __lastActivity=Date.now(); }catch(e){}
+  const info=document.getElementById('opsDraftInfo'); if(info){ const d=new Date(); info.textContent='임시 저장됨 '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
+}
+function opsClearDraft(c){ if(!c||!window.__ops) return; try{ localStorage.removeItem('opsDraft_'+window.__ops.boardId+'_'+(c.id?c.id:('new_'+c.group_id))); }catch(e){} }
+function opsEligiblePeople(){ const allowed=(window.__ops.allowed||[]).map(String); return (window.__opsPeople||[]).filter(u=>u.active!==false && (u.part==='운영팀'||u.is_master||u.is_vice_master||u.role==='admin'||allowed.includes(String(u.id)))); }
+function opsGroupDragStart(e,gid){ e.dataTransfer.setData('ops-group',String(gid)); e.dataTransfer.effectAllowed='move'; }
+async function opsReorderGroup(dragId,targetId){
+  const O=window.__ops; if(dragId===targetId) return;
+  let arr=O.groups.slice();
+  const di=arr.findIndex(g=>g.id===dragId); if(di<0) return;
+  const moved=arr.splice(di,1)[0];
+  let ti=arr.findIndex(g=>g.id===targetId);
+  arr.splice(ti<0?arr.length:ti,0,moved);
+  O.groups=arr;
+  document.getElementById('opsBoard').innerHTML=opsGroupsHtml();
+  for(let i=0;i<arr.length;i++){ if(arr[i].sort_order!==i){ arr[i].sort_order=i; await sb.from('ops_groups').update({sort_order:i}).eq('id',arr[i].id); } }
+}
+async function opsCardDrop(e,targetCardId){
+  e.preventDefault(); e.stopPropagation();
+  if(e.dataTransfer.getData('ops-group')) return;
+  const cardId=parseInt(e.dataTransfer.getData('ops-card')||e.dataTransfer.getData('text/plain'),10); if(!cardId||cardId===targetCardId) return;
+  const c=window.__ops.cards.find(x=>x.id===cardId); const t=window.__ops.cards.find(x=>x.id===targetCardId); if(!c||!t) return;
+  c.group_id=t.group_id; c.sort_order=(t.sort_order||0)-0.5;
+  document.getElementById('opsBoard').innerHTML=opsGroupsHtml();
+  await sb.from('ops_cards').update({group_id:c.group_id,sort_order:c.sort_order,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',cardId);
 }
 
 // ── 속성/유형 관리 ──
