@@ -1183,6 +1183,7 @@ async function loginAs(user) {
   if (opsB) { setTimeout(function(){ try{ if(typeof opsCanSee==='function' && opsCanSee()){ window.__ops.boardId=parseInt(opsB); goPage('opsboard'); const oc=params.get('opscard'); if(oc){ setTimeout(function(){ try{ opsOpenCard(parseInt(oc)); }catch(e){} }, 1300); } } }catch(e){} }, 700); }
 
   // 슬랙 계정 미등록 시 안내 팝업
+  loadNotifConfig();
   checkSlackSetup();
 }
 
@@ -4145,6 +4146,7 @@ async function renderStats(area) {
 
 // ── NOTIF SETTINGS ────────────────────────────────
 async function renderNotifSettings(area) {
+  await loadNotifConfig();
   const { data: ns } = await sb.from('notification_settings').select('*').single();
   window.__remindTarget = ns?.remind_target || 'unread';
   area.innerHTML = `
@@ -4199,6 +4201,7 @@ async function renderNotifSettings(area) {
         <p style="font-size:11px;color:var(--th);margin-top:6px">게시글 수정 화면에서 리마인드 발송 시 적용되는 기본 대상입니다.</p>
       </div>
     </div>
+    ${opsNotifConfigCardHtml()}
     <div style="text-align:right">
       <button class="btn-submit" onclick="saveNotifSettings()">설정 저장</button>
     </div>`;
@@ -5124,9 +5127,9 @@ async function sendRoleBasedPostNotify(postId, title) {
       user_id: u.id, type: 'new_post', ref_id: postId, ref_type: 'post',
       message: msg, is_read: false, created_at: new Date().toISOString()
     });
-    if (u.slack_member_id) {
+    if (u.slack_member_id && notifEnabled('new_post')) {
       const link = 'https://bnzcoffee.github.io/bonanza-ops/?post=' + postId;
-      await sendSlackDM(u.slack_member_id, '📢 ' + msg + '\n' + link);
+      await sendSlackDM(u.slack_member_id, notifEmoji('new_post') + ' ' + msg + '\n' + link);
     }
     sent++;
   }
@@ -6804,7 +6807,7 @@ async function opsNotifyAssignees(card, prevAssignees){
     for(const uid of newly){
       if(String(uid)===String(currentUser.id)) continue;
       try{ await createNotification(uid,'ops_assign',card.id,'ops',msg); }catch(e){}
-      try{ const {data:u}=await sb.from('users').select('slack_member_id').eq('id',uid).maybeSingle(); if(u&&u.slack_member_id) await sendSlackDM(u.slack_member_id,'🧩 '+msg+'\n'+link); }catch(e){}
+      try{ const {data:u}=await sb.from('users').select('slack_member_id').eq('id',uid).maybeSingle(); if(u&&u.slack_member_id && notifEnabled('ops_assign')) await sendSlackDM(u.slack_member_id,notifEmoji('ops_assign')+' '+msg+'\n'+link); }catch(e){}
     }
     try{ updateNotifDot(); }catch(e){}
   }catch(e){}
@@ -6823,7 +6826,7 @@ async function opsNotifyMentions(card, prevDoc){
       if(text.indexOf(at)>=0 && prevText.indexOf(at)<0){
         const msg='[운영 프로젝트] "'+(card.title||'')+'" 문서에서 회원님이 멘션되었습니다.'+(board?' ('+board.name+')':'');
         try{ await createNotification(u.id,'ops_mention',card.id,'ops',msg); }catch(e){}
-        try{ const {data:uu}=await sb.from('users').select('slack_member_id').eq('id',u.id).maybeSingle(); if(uu&&uu.slack_member_id) await sendSlackDM(uu.slack_member_id,'💬 '+msg+'\n'+link); }catch(e){}
+        try{ const {data:uu}=await sb.from('users').select('slack_member_id').eq('id',u.id).maybeSingle(); if(uu&&uu.slack_member_id && notifEnabled('ops_mention')) await sendSlackDM(uu.slack_member_id,notifEmoji('ops_mention')+' '+msg+'\n'+link); }catch(e){}
       }
     }
     try{ updateNotifDot(); }catch(e){}
@@ -16731,11 +16734,17 @@ async function sendSlackDM(slackMemberId, msg) {
 }
 
 // 1. 단일 사용자용 기존 슬랙 DM 발송 함수
-function notifEmoji(t){ t=String(t||''); if(t.indexOf('comment_reply')>=0||t.indexOf('reply')>=0) return '↩️'; if(t.indexOf('mention')>=0) return '💬'; if(t.indexOf('comment')>=0||t.indexOf('tag')>=0) return '💬'; if(t.indexOf('assign')>=0) return '🧩'; if(t.indexOf('보고')>=0||t.indexOf('report')>=0) return '📝'; if(t==='new_post'||t.indexOf('post')>=0) return '📢'; if(t.indexOf('request')>=0||t.indexOf('신청')>=0) return '📋'; if(t.indexOf('schedule')>=0||t.indexOf('근태')>=0) return '📅'; return '🔔'; }
+const NOTIF_DEFS=[{key:'new_post',name:'새 공지',emoji:'📢'},{key:'request',name:'업무 신청',emoji:'📋'},{key:'report',name:'업무 보고',emoji:'📝'},{key:'comment_tag',name:'댓글 태그',emoji:'💬'},{key:'comment_reply',name:'답글',emoji:'↩️'},{key:'ops_assign',name:'담당 배정(운영)',emoji:'🧩'},{key:'ops_mention',name:'문서 멘션(운영)',emoji:'💬'},{key:'schedule',name:'스케줄/근태',emoji:'📅'}];
+function notifKey(t){ t=String(t||''); if(t.indexOf('reply')>=0) return 'comment_reply'; if(t.indexOf('mention')>=0) return 'ops_mention'; if(t.indexOf('assign')>=0) return 'ops_assign'; if(t.indexOf('comment')>=0||t.indexOf('tag')>=0) return 'comment_tag'; if(t.indexOf('보고')>=0||t.indexOf('report')>=0) return 'report'; if(t==='new_post'||t.indexOf('post')>=0) return 'new_post'; if(t.indexOf('request')>=0||t.indexOf('신청')>=0) return 'request'; if(t.indexOf('schedule')>=0||t.indexOf('근태')>=0) return 'schedule'; return 'etc'; }
+function notifEmoji(t){ const k=notifKey(t); const c=(window.__notifCfg||{})[k]; if(c&&c.emoji) return c.emoji; const d=NOTIF_DEFS.find(x=>x.key===k); return d?d.emoji:'🔔'; }
+function notifEnabled(t){ const k=notifKey(t); const c=(window.__notifCfg||{})[k]; return !c||c.enabled!==false; }
+async function loadNotifConfig(){ const base={}; NOTIF_DEFS.forEach(d=>base[d.key]={emoji:d.emoji,enabled:true}); try{ const {data}=await sb.from('app_settings').select('value').eq('key','notif_config').maybeSingle(); if(data&&data.value){ const saved=JSON.parse(data.value); Object.keys(saved).forEach(k=>{ base[k]=Object.assign(base[k]||{},saved[k]); }); } }catch(e){} window.__notifCfg=base; }
+function opsNotifConfigCardHtml(){ if(!currentUser.is_master) return ''; const cfg=window.__notifCfg||{}; const rows=NOTIF_DEFS.map(d=>{ const c=cfg[d.key]||{emoji:d.emoji,enabled:true}; return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:0.5px solid var(--crd)"><input class="form-input nc-emoji" data-key="${d.key}" value="${esc(c.emoji||d.emoji)}" style="width:54px;text-align:center;padding:6px"><span style="flex:1;font-size:13px">${d.name}</span><label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="nc-en" data-key="${d.key}" ${c.enabled!==false?'checked':''}> 발송</label></div>`; }).join(''); return `<div class="notif-card"><div class="section-label" style="margin-bottom:8px"><i class="ti ti-message-cog"></i> 알림 문구·이모지 관리 <span style="font-size:10px;background:var(--br);color:#fff;border-radius:4px;padding:1px 7px">총괄 전용</span></div><p style="font-size:11px;color:var(--th);margin-bottom:8px">종류별 이모지와 발송 여부를 설정합니다. 발송을 끄면 해당 종류의 DM이 나가지 않습니다.</p>${rows}<div style="text-align:right;margin-top:8px"><button class="btn-submit" onclick="saveNotifConfig()">알림 설정 저장</button></div></div>`; }
+async function saveNotifConfig(){ const cfg={}; document.querySelectorAll('.nc-emoji').forEach(el=>{ const k=el.getAttribute('data-key'); cfg[k]={emoji:(el.value.trim()||'🔔')}; }); document.querySelectorAll('.nc-en').forEach(el=>{ const k=el.getAttribute('data-key'); if(!cfg[k]) cfg[k]={}; cfg[k].enabled=el.checked; }); const {error}=await sb.from('app_settings').upsert({key:'notif_config',value:JSON.stringify(cfg)},{onConflict:'key'}); if(error){ alert('오류: '+error.message); return; } window.__notifCfg=Object.assign(window.__notifCfg||{},cfg); alert('알림 설정이 저장되었습니다.'); }
 async function createNotificationWithSlack(userId, type, refId, refType, msg) {
   await createNotification(userId, type, refId, refType, msg);
   const { data: u } = await sb.from('users').select('slack_member_id').eq('id', userId).maybeSingle();
-  if (u && u.slack_member_id) {
+  if (u && u.slack_member_id && notifEnabled(type)) {
     const BASE = 'https://bnzcoffee.github.io/bonanza-ops/';
     let link = BASE + '?' + (refType === 'post' ? 'post=' : refType === 'request' ? 'request=' : refType === 'schedule' ? 'schedule=' : '') + refId;
     const dmMsg = notifEmoji(type) + ' ' + msg + '\n' + link;
@@ -16766,12 +16775,12 @@ async function broadcastNotificationWithSlack(actionType, refId, refType, msg, s
 
   const BASE = 'https://bnzcoffee.github.io/bonanza-ops/';
   let link = BASE + '?' + (refType === 'post' ? 'post=' : refType === 'request' ? 'request=' : refType === 'schedule' ? 'schedule=' : '') + refId;
-  const dmMsg = notifEmoji(refType) + ' ' + msg + '\n' + link;
+  const dmMsg = notifEmoji(actionType) + ' ' + msg + '\n' + link;
 
   // 필터링된 모든 대상자에게 앱 내 알림 생성 + 슬랙 DM 동시 발송
   for (const u of targetUsers) {
     await createNotification(u.id, refType, refId, refType, msg);
-    if (u.slack_member_id) {
+    if (u.slack_member_id && notifEnabled(actionType)) {
       await sendSlackDM(u.slack_member_id, dmMsg);
     }
   }
