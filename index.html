@@ -2319,7 +2319,7 @@ async function submitComment(postId) {
   // 태그된 인원에게 알림 + 슬랙 DM
   if (tags.length) {
     const {data:post} = await sb.from('posts').select('title').eq('id',postId).single();
-    const msg = '[댓글 태그] "' + (post?.title||'공지') + '" 댓글에 회원님이 태그되었습니다.';
+    const msg = notifRender('comment_tag',{title:(post?.title||'공지')});
     for (const t of tags) {
       await createNotificationWithSlack(t.id, 'post_comment_tag', postId, 'post', msg);
     }
@@ -2331,7 +2331,7 @@ async function submitComment(postId) {
       const taggedIds = new Set(tags.map(t=>t.id));
       if (parent && parent.author_id && parent.author_id !== currentUser.id && !taggedIds.has(parent.author_id)) {
         const {data:post} = await sb.from('posts').select('title').eq('id',postId).single();
-        const rmsg = '[답글] "' + (post?.title||'게시글') + '" 내 댓글에 답글이 달렸습니다.';
+        const rmsg = notifRender('comment_reply',{title:(post?.title||'게시글')});
         await createNotificationWithSlack(parent.author_id, 'post_comment_reply', postId, 'post', rmsg);
       }
     } catch(e){}
@@ -5108,7 +5108,7 @@ async function sendRoleBasedPostNotify(postId, title) {
 
   if (!allUsers?.length) return;
 
-  const msg = '[새 공지] ' + (title||'새 공지가 등록되었습니다') + ' — 확인해주세요.';
+  const msg = notifRender('new_post',{title:(title||'새 공지가 등록되었습니다')});
   let sent = 0;
   for (const u of allUsers) {
     // 역할 판정
@@ -6803,7 +6803,7 @@ async function opsNotifyAssignees(card, prevAssignees){
     if(!newly.length) return;
     const O=window.__ops; const board=O.boards.find(b=>b.id===O.boardId);
     const link='https://bnzcoffee.github.io/bonanza-ops/?opsboard='+O.boardId+'&opscard='+card.id;
-    const msg='[운영 프로젝트] "'+(card.title||'')+'" 업무에 담당자로 지정되었습니다.'+(board?' ('+board.name+')':'');
+    const msg=notifRender('ops_assign',{title:(card.title||''),board:board?board.name:''});
     for(const uid of newly){
       if(String(uid)===String(currentUser.id)) continue;
       try{ await createNotification(uid,'ops_assign',card.id,'ops',msg); }catch(e){}
@@ -6824,7 +6824,7 @@ async function opsNotifyMentions(card, prevDoc){
       if(String(u.id)===String(currentUser.id)) continue;
       const at='@'+u.name;
       if(text.indexOf(at)>=0 && prevText.indexOf(at)<0){
-        const msg='[운영 프로젝트] "'+(card.title||'')+'" 문서에서 회원님이 멘션되었습니다.'+(board?' ('+board.name+')':'');
+        const msg=notifRender('ops_mention',{title:(card.title||''),where:'문서에서',board:board?board.name:''});
         try{ await createNotification(u.id,'ops_mention',card.id,'ops',msg); }catch(e){}
         try{ const {data:uu}=await sb.from('users').select('slack_member_id').eq('id',u.id).maybeSingle(); if(uu&&uu.slack_member_id && notifEnabled('ops_mention')) await sendSlackDM(uu.slack_member_id,notifEmoji('ops_mention')+' '+msg+'\n'+link); }catch(e){}
       }
@@ -6885,7 +6885,7 @@ function opsOpenCard(cardId, groupId){
   modal.innerHTML=`<div class="modal-box" style="max-width:560px">
     <div class="modal-head"><span style="display:flex;align-items:center;gap:8px">${c.card_type?`<span class="ops-type" style="background:${tcolor};color:#fff;border-color:${tcolor}">${esc(c.card_type)}</span>`:''}<b>${esc(c.title||'(제목 없음)')}</b></span><button onclick="document.getElementById('opsCardModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
     <div class="modal-body" style="max-height:66vh;overflow-y:auto">${fieldsHtml}${(c.data&&c.data._doc&&c.data._doc.replace(/<[^>]+>/g,'').trim())?`<div class="ops-doc">${c.data._doc}</div>`:''}${(!fieldsHtml&&!(c.data&&c.data._doc))?'<div style="color:var(--th);font-size:13px">내용이 없습니다.</div>':''}${attHtml}<div style="margin-top:14px;font-size:11px;color:var(--th);border-top:0.5px solid var(--crd);padding-top:10px">${meta}${lockBadge?' · '+lockBadge:''}</div></div>
-    <div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('opsCardModal').remove()">닫기</button>${actionBtns}</div>
+    <div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="opsCopyCardLink(${cardId})"><i class="ti ti-link"></i> 링크 복사</button><button class="btn-cancel-sm" onclick="document.getElementById('opsCardModal').remove()">닫기</button>${actionBtns}</div>
   </div>`;
   document.body.appendChild(modal);
 }
@@ -7123,12 +7123,44 @@ async function opsSyncSheet(card){
 // ══════════════════════════════════════════════════════════════
 window.__mind = window.__mind || { nodes:[], edges:[], panX:40, panY:40, zoom:1, drag:null };
 const MIND_COLORS = ['#c98a3a','#4a90d9','#d9534f','#5cb85c','#8e6fd8','#41403e'];
+const MIND_TEMPLATES={
+ struct:{name:'업무 구조도', nodes:[{text:'중심 주제',dx:-84,dy:-28,color:'#41403e'},{text:'영역 A',dx:-330,dy:-170,color:'#4a90d9'},{text:'영역 B',dx:190,dy:-170,color:'#5cb85c'},{text:'세부 A-1',dx:-430,dy:60,color:'#c98a3a'},{text:'세부 B-1',dx:300,dy:60,color:'#c98a3a'}], edges:[[0,1],[0,2],[1,3],[2,4]]},
+ process:{name:'프로세스 흐름', nodes:[{text:'1단계',dx:-370,dy:-28,color:'#4a90d9'},{text:'2단계',dx:-120,dy:-28,color:'#4a90d9'},{text:'3단계',dx:130,dy:-28,color:'#4a90d9'},{text:'완료',dx:380,dy:-28,color:'#5cb85c'}], edges:[[0,1],[1,2],[2,3]]},
+ brainstorm:{name:'브레인스토밍', nodes:[{text:'주제',dx:-84,dy:-28,color:'#8e6fd8'},{text:'아이디어 1',dx:-330,dy:-190},{text:'아이디어 2',dx:190,dy:-190},{text:'아이디어 3',dx:-330,dy:130},{text:'아이디어 4',dx:190,dy:130}], edges:[[0,1],[0,2],[0,3],[0,4]]},
+ manual:{name:'매뉴얼 목차', nodes:[{text:'매뉴얼 제목',dx:-84,dy:-210,color:'#41403e'},{text:'대분류 1',dx:-310,dy:-40,color:'#c98a3a'},{text:'대분류 2',dx:190,dy:-40,color:'#c98a3a'},{text:'소항목 1-1',dx:-400,dy:150},{text:'소항목 1-2',dx:-200,dy:150},{text:'소항목 2-1',dx:130,dy:150}], edges:[[0,1],[0,2],[1,3],[1,4],[2,5]]}
+};
+function opsMindTemplateMenu(e){ e.stopPropagation(); document.getElementById('opsMindTmplMenu')?.remove(); const mn=document.createElement('div'); mn.id='opsMindTmplMenu'; mn.className='ops-menu'; mn.innerHTML=Object.keys(MIND_TEMPLATES).map(k=>`<button onclick="document.getElementById('opsMindTmplMenu').remove();opsMindApplyTemplate('${k}')">${MIND_TEMPLATES[k].name}</button>`).join(''); document.body.appendChild(mn); const r=e.target.getBoundingClientRect(); mn.style.left=r.left+'px'; mn.style.top=(r.bottom+4)+'px'; setTimeout(()=>document.addEventListener('click',()=>document.getElementById('opsMindTmplMenu')?.remove(),{once:true}),0); }
+async function opsMindApplyTemplate(key){
+  if(isTestMode()){ alert('테스트 모드에서는 추가할 수 없습니다.'); return; }
+  const T=MIND_TEMPLATES[key]; if(!T) return;
+  const vp=document.getElementById('opsMindVp'); const m=window.__mind;
+  const cx=Math.round((-m.panX+(vp?vp.clientWidth/2:300))/m.zoom)-84;
+  const cy=Math.round((-m.panY+(vp?vp.clientHeight/2:200))/m.zoom)-24;
+  const created=[];
+  for(const nd of T.nodes){ const {data,error}=await sb.from('ops_mind_nodes').insert({board_id:window.__ops.boardId,text:nd.text,x:cx+nd.dx,y:cy+nd.dy,color:nd.color||'#c98a3a',created_by:currentUser.id,updated_by:currentUser.id}).select().single(); if(error){ alert('오류: '+error.message); return; } created.push(data); m.nodes.push(data); }
+  for(const e of (T.edges||[])){ const a=created[e[0]], b=created[e[1]]; if(a&&b){ try{ const {data:ed}=await sb.from('ops_mind_edges').insert({board_id:window.__ops.boardId,from_id:a.id,to_id:b.id}).select().single(); if(ed) m.edges.push(ed); }catch(err){} } }
+  opsMindRender();
+}
+async function opsMindLinkPicker(){
+  const O=window.__ops; const boards=(O.boards||[]).filter(b=>b.type!=='mind');
+  if(!boards.length){ alert('연결할 보드가 없습니다. 먼저 카드 보드를 만들어 주세요.'); return; }
+  const ids=boards.map(b=>b.id); const bname={}; boards.forEach(b=>bname[b.id]=b.name);
+  const {data:cards}=await sb.from('ops_cards').select('id,board_id,title').in('board_id',ids);
+  const rows=(cards||[]).map(c=>{ const k=((bname[c.board_id]||'')+' '+(c.title||'')).toLowerCase(); const t=(c.title||'(제목 없음)').replace(/'/g,"\\'"); return `<div class="ops-permrow" data-k="${esc(k)}" style="padding:9px 4px;border-bottom:0.5px solid var(--crd);cursor:pointer" onclick="opsMindPickCard(${c.board_id},${c.id},'${esc(t)}')"><span style="font-size:11px;color:var(--th)">${esc(bname[c.board_id]||'')}</span> · ${esc(c.title||'(제목 없음)')}</div>`; }).join('')||'<div style="color:var(--th)">연결할 카드가 없습니다.</div>';
+  const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='mindLinkPicker'; modal.style.zIndex='330';
+  modal.innerHTML=`<div class="modal-box" style="max-width:420px"><div class="modal-head"><b>보드 항목 연결</b><button onclick="document.getElementById('mindLinkPicker').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:60vh;overflow-y:auto"><input class="form-input" placeholder="보드·카드 검색" oninput="opsMindPickFilter(this.value)" style="margin-bottom:8px">${rows}</div></div>`;
+  document.body.appendChild(modal);
+}
+function opsMindPickFilter(q){ q=(q||'').trim().toLowerCase(); document.querySelectorAll('#mindLinkPicker .ops-permrow').forEach(function(r){ r.style.display=(!q||r.getAttribute('data-k').indexOf(q)>=0)?'':'none'; }); }
+function opsMindPickCard(boardId,cardId,title){ const link='https://bnzcoffee.github.io/bonanza-ops/?opsboard='+boardId+'&opscard='+cardId; const li=document.getElementById('mindNodeLink'); if(li) li.value=link; const ll=document.getElementById('mindNodeLinkLabel'); if(ll&&!ll.value) ll.value=title; document.getElementById('mindLinkPicker')?.remove(); }
+function opsCopyCardLink(id){ const link='https://bnzcoffee.github.io/bonanza-ops/?opsboard='+window.__ops.boardId+'&opscard='+id; try{ navigator.clipboard.writeText(link); alert('링크가 복사되었습니다.\n아이디어맵 항목의 "연결 링크"에 붙여넣으세요.'); }catch(e){ prompt('아래 링크를 복사하세요:', link); } }
 
 function opsMindShell(){
   return `<div class="ops-mind" id="opsMind">
     <div class="ops-mind-tools">
       <button class="btn-cancel-sm" onclick="opsMindAddNode()"><i class="ti ti-plus"></i> 항목</button>
       <button class="btn-cancel-sm" id="opsMindLinkBtn" onclick="opsMindToggleLink()"><i class="ti ti-link"></i> 연결모드</button>
+      <button class="btn-cancel-sm" onclick="opsMindTemplateMenu(event)"><i class="ti ti-template"></i> 템플릿</button>
       <button class="btn-cancel-sm" onclick="opsMindExportImage()"><i class="ti ti-photo-down"></i> 이미지 저장</button>
       <div class="ops-mind-search"><input id="opsMindSearch" placeholder="항목 검색..." oninput="opsMindSearch(this.value)"><div id="opsMindResults" class="ops-mind-results"></div></div>
       <span id="opsMindHint" style="font-size:11px;color:var(--th);align-self:center"></span>
@@ -7259,6 +7291,7 @@ function opsMindOpenNode(id){
         <label class="form-label" style="font-size:12px"><i class="ti ti-link"></i> 연결 링크 (보드 카드·게시물·자료 URL)</label>
         <input id="mindNodeLink" class="form-input" placeholder="https://... (앱 링크·게시물·구글드라이브 등)" value="${esc(nlink)}">
         <input id="mindNodeLinkLabel" class="form-input" style="margin-top:6px" placeholder="링크 이름 (선택)" value="${esc(nlabel)}">
+        <button class="btn-cancel-sm" style="margin-top:6px" onclick="opsMindLinkPicker()"><i class="ti ti-clipboard-list"></i> 보드 항목에서 선택</button>
         ${nlink?`<button class="btn-cancel-sm" style="margin-top:6px" onclick="window.open('${nlink.replace(/'/g,"\\'")}','_blank')"><i class="ti ti-external-link"></i> 링크 열기</button>`:''}
         <p style="font-size:10px;color:var(--th);margin-top:4px">보드 카드는 카드 화면의 링크, 게시물은 ?post= 링크를 붙여넣으면 됩니다.</p>
       </div>
@@ -7300,7 +7333,7 @@ async function opsMindNotifyNodeMentions(node, prevText){
       if(String(u.id)===String(currentUser.id)) continue;
       const at='@'+u.name;
       if(text.indexOf(at)>=0 && prev.indexOf(at)<0){
-        const msg='[운영 아이디어맵] "'+((node.text||'').slice(0,20))+'" 항목에서 회원님이 멘션되었습니다.'+(board?' ('+board.name+')':'');
+        const msg=notifRender('ops_mention',{title:((node.text||'').slice(0,20)),where:'항목에서',board:board?board.name:''});
         try{ await createNotification(u.id,'ops_mention',O.boardId,'ops',msg); }catch(e){}
         try{ const {data:uu}=await sb.from('users').select('slack_member_id').eq('id',u.id).maybeSingle(); if(uu&&uu.slack_member_id && notifEnabled('ops_mention')) await sendSlackDM(uu.slack_member_id,notifEmoji('ops_mention')+' '+msg+'\n'+link); }catch(e){}
       }
@@ -9437,9 +9470,9 @@ async function submitRequest() {
     if (part && part.name) {
       // 카테고리 이름에 '보고'가 포함되어 있으면 운영팀 전체에 발송, 아니면 해당 파트 전체에 발송
       if (reqSelectedType.name.includes('보고')) {
-        await broadcastNotificationWithSlack('업무보고', req.id, 'request', `[업무보고] ${title} - ${currentUser.name}`);
+        await broadcastNotificationWithSlack('업무보고', req.id, 'request', notifRender('report',{title:title,author:currentUser.name}));
       } else {
-        await broadcastNotificationWithSlack('업무신청', req.id, 'request', `[${part.name}] 새로운 업무 요청: ${title}`, '', part.name);
+        await broadcastNotificationWithSlack('업무신청', req.id, 'request', notifRender('request',{title:title,part:part.name}), '', part.name);
       }
     }
   }
@@ -16779,13 +16812,25 @@ async function sendSlackDM(slackMemberId, msg) {
 }
 
 // 1. 단일 사용자용 기존 슬랙 DM 발송 함수
-const NOTIF_DEFS=[{key:'new_post',name:'새 공지',emoji:'📢'},{key:'request',name:'업무 신청',emoji:'📋'},{key:'report',name:'업무 보고',emoji:'📝'},{key:'comment_tag',name:'댓글 태그',emoji:'💬'},{key:'comment_reply',name:'답글',emoji:'↩️'},{key:'ops_assign',name:'담당 배정(운영)',emoji:'🧩'},{key:'ops_mention',name:'문서 멘션(운영)',emoji:'💬'},{key:'schedule',name:'스케줄/근태',emoji:'📅'}];
+const NOTIF_DEFS=[{key:'new_post',name:'새 공지',emoji:'📢',template:'[새 공지] {title} — 확인해주세요.'},{key:'request',name:'업무 신청',emoji:'📋',template:'[{part}] 새로운 업무 요청: {title}'},{key:'report',name:'업무 보고',emoji:'📝',template:'[업무보고] {title} - {author}'},{key:'comment_tag',name:'댓글 태그',emoji:'💬',template:'[댓글 태그] "{title}" 댓글에 회원님이 태그되었습니다.'},{key:'comment_reply',name:'답글',emoji:'↩️',template:'[답글] "{title}" 내 댓글에 답글이 달렸습니다.'},{key:'ops_assign',name:'담당 배정(운영)',emoji:'🧩',template:'[운영 프로젝트] "{title}" 업무에 담당자로 지정되었습니다.{board}'},{key:'ops_mention',name:'문서/항목 멘션(운영)',emoji:'💬',template:'[운영 프로젝트] "{title}" {where} 회원님이 멘션되었습니다.{board}'},{key:'schedule',name:'스케줄/근태',emoji:'📅',template:'스케줄/근태 관련 안내: {title}'}];
+function notifTemplate(key){ const c=(window.__notifCfg||{})[key]; if(c&&typeof c.template==='string') return c.template; const d=NOTIF_DEFS.find(x=>x.key===key); return d?(d.template||''):''; }
+function notifRender(key, vars){ vars=vars||{}; return notifTemplate(key).replace(/\{title\}/g,vars.title||'').replace(/\{part\}/g,vars.part||'').replace(/\{author\}/g,vars.author||'').replace(/\{where\}/g,vars.where||'').replace(/\{board\}/g,vars.board?(' ('+vars.board+')'):''); }
 function notifKey(t){ t=String(t||''); if(t.indexOf('reply')>=0) return 'comment_reply'; if(t.indexOf('mention')>=0) return 'ops_mention'; if(t.indexOf('assign')>=0) return 'ops_assign'; if(t.indexOf('comment')>=0||t.indexOf('tag')>=0) return 'comment_tag'; if(t.indexOf('보고')>=0||t.indexOf('report')>=0) return 'report'; if(t==='new_post'||t.indexOf('post')>=0) return 'new_post'; if(t.indexOf('request')>=0||t.indexOf('신청')>=0) return 'request'; if(t.indexOf('schedule')>=0||t.indexOf('근태')>=0) return 'schedule'; return 'etc'; }
 function notifEmoji(t){ const k=notifKey(t); const c=(window.__notifCfg||{})[k]; if(c&&c.emoji) return c.emoji; const d=NOTIF_DEFS.find(x=>x.key===k); return d?d.emoji:'🔔'; }
 function notifEnabled(t){ const k=notifKey(t); const c=(window.__notifCfg||{})[k]; return !c||c.enabled!==false; }
-async function loadNotifConfig(){ const base={}; NOTIF_DEFS.forEach(d=>base[d.key]={emoji:d.emoji,enabled:true}); try{ const {data}=await sb.from('app_settings').select('value').eq('key','notif_config').maybeSingle(); if(data&&data.value){ const saved=JSON.parse(data.value); Object.keys(saved).forEach(k=>{ base[k]=Object.assign(base[k]||{},saved[k]); }); } }catch(e){} window.__notifCfg=base; }
-function opsNotifConfigCardHtml(){ if(!currentUser.is_master) return ''; const cfg=window.__notifCfg||{}; const rows=NOTIF_DEFS.map(d=>{ const c=cfg[d.key]||{emoji:d.emoji,enabled:true}; return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:0.5px solid var(--crd)"><input class="form-input nc-emoji" data-key="${d.key}" value="${esc(c.emoji||d.emoji)}" style="width:54px;text-align:center;padding:6px"><span style="flex:1;font-size:13px">${d.name}</span><label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="nc-en" data-key="${d.key}" ${c.enabled!==false?'checked':''}> 발송</label></div>`; }).join(''); return `<div class="notif-card"><div class="section-label" style="margin-bottom:8px"><i class="ti ti-message-cog"></i> 알림 문구·이모지 관리 <span style="font-size:10px;background:var(--br);color:#fff;border-radius:4px;padding:1px 7px">총괄 전용</span></div><p style="font-size:11px;color:var(--th);margin-bottom:8px">종류별 이모지와 발송 여부를 설정합니다. 발송을 끄면 해당 종류의 DM이 나가지 않습니다.</p>${rows}<div style="text-align:right;margin-top:8px"><button class="btn-submit" onclick="saveNotifConfig()">알림 설정 저장</button></div></div>`; }
-async function saveNotifConfig(){ const cfg={}; document.querySelectorAll('.nc-emoji').forEach(el=>{ const k=el.getAttribute('data-key'); cfg[k]={emoji:(el.value.trim()||'🔔')}; }); document.querySelectorAll('.nc-en').forEach(el=>{ const k=el.getAttribute('data-key'); if(!cfg[k]) cfg[k]={}; cfg[k].enabled=el.checked; }); const {error}=await sb.from('app_settings').upsert({key:'notif_config',value:JSON.stringify(cfg)},{onConflict:'key'}); if(error){ alert('오류: '+error.message); return; } window.__notifCfg=Object.assign(window.__notifCfg||{},cfg); alert('알림 설정이 저장되었습니다.'); }
+async function loadNotifConfig(){ const base={}; NOTIF_DEFS.forEach(d=>base[d.key]={emoji:d.emoji,enabled:true,template:d.template}); try{ const {data}=await sb.from('app_settings').select('value').eq('key','notif_config').maybeSingle(); if(data&&data.value){ const saved=JSON.parse(data.value); Object.keys(saved).forEach(k=>{ base[k]=Object.assign(base[k]||{},saved[k]); }); } }catch(e){} window.__notifCfg=base; }
+function opsNotifConfigCardHtml(){ if(!currentUser.is_master) return ''; const cfg=window.__notifCfg||{}; const rows=NOTIF_DEFS.map(d=>{ const c=cfg[d.key]||{}; const emoji=c.emoji||d.emoji; const tmpl=(typeof c.template==='string')?c.template:d.template; const en=c.enabled!==false; return `<div style="padding:9px 0;border-bottom:0.5px solid var(--crd)"><div style="display:flex;align-items:center;gap:8px"><input class="form-input nc-emoji" data-key="${d.key}" value="${esc(emoji)}" style="width:46px;text-align:center;padding:6px"><span style="flex:1;font-size:13px;font-weight:600">${d.name}</span><label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="nc-en" data-key="${d.key}" ${en?'checked':''}> 발송</label><button class="btn-cancel-sm" style="font-size:11px;padding:5px 8px" onclick="opsNotifTest('${d.key}')"><i class="ti ti-send"></i> 테스트</button></div><textarea class="form-input nc-tmpl" data-key="${d.key}" style="margin-top:6px;min-height:44px;font-size:12px">${esc(tmpl)}</textarea></div>`; }).join(''); return `<div class="notif-card"><div class="section-label" style="margin-bottom:8px"><i class="ti ti-message-cog"></i> 알림 문구·이모지 관리 <span style="font-size:10px;background:var(--br);color:#fff;border-radius:4px;padding:1px 7px">총괄 전용</span></div><p style="font-size:11px;color:var(--th);margin-bottom:8px">종류별 <b>이모지·문구</b>를 편집하고 발송 여부를 설정합니다. 자리표시자: <b>{title}</b> 제목 · <b>{part}</b> 담당파트 · <b>{author}</b> 작성자 · <b>{board}</b> 보드명 · <b>{where}</b> 문서/항목. [테스트]로 내 슬랙에 예시가 발송됩니다.</p>${rows}<div style="text-align:right;margin-top:8px"><button class="btn-submit" onclick="saveNotifConfig()">알림 설정 저장</button></div></div>`; }
+async function saveNotifConfig(){ const cfg={}; document.querySelectorAll('.nc-emoji').forEach(el=>{ const k=el.getAttribute('data-key'); cfg[k]={emoji:(el.value.trim()||'🔔')}; }); document.querySelectorAll('.nc-en').forEach(el=>{ const k=el.getAttribute('data-key'); if(!cfg[k]) cfg[k]={}; cfg[k].enabled=el.checked; }); document.querySelectorAll('.nc-tmpl').forEach(el=>{ const k=el.getAttribute('data-key'); if(!cfg[k]) cfg[k]={}; cfg[k].template=el.value; }); const {error}=await sb.from('app_settings').upsert({key:'notif_config',value:JSON.stringify(cfg)},{onConflict:'key'}); if(error){ alert('오류: '+error.message); return; } window.__notifCfg=Object.assign(window.__notifCfg||{},cfg); alert('알림 설정이 저장되었습니다.'); }
+async function opsNotifTest(key){
+  if(!currentUser.slack_member_id){ alert('내 정보에 슬랙 멤버 ID가 등록돼 있어야 테스트 DM을 받을 수 있습니다.'); return; }
+  const emojiEl=document.querySelector('.nc-emoji[data-key="'+key+'"]'); const tmplEl=document.querySelector('.nc-tmpl[data-key="'+key+'"]');
+  const emoji=(emojiEl?emojiEl.value.trim():'')||notifEmoji(key);
+  let body=(tmplEl?tmplEl.value:notifTemplate(key));
+  body=body.replace(/\{title\}/g,'예시 제목').replace(/\{part\}/g,'구매팀').replace(/\{author\}/g,currentUser.name||'홍길동').replace(/\{where\}/g,'문서에서').replace(/\{board\}/g,' (운영 프로젝트)');
+  const link='https://bnzcoffee.github.io/bonanza-ops/';
+  const res=await sendSlackDM(currentUser.slack_member_id, emoji+' '+body+'\n'+link);
+  alert('테스트 DM을 본인 슬랙으로 보냈습니다. (미저장 편집값 기준) 확인해보세요.');
+}
 async function createNotificationWithSlack(userId, type, refId, refType, msg) {
   await createNotification(userId, type, refId, refType, msg);
   const { data: u } = await sb.from('users').select('slack_member_id').eq('id', userId).maybeSingle();
