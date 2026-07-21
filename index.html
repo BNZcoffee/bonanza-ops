@@ -2949,7 +2949,8 @@ async function submitPost(isDraft=false) {
   if(status === 'published' && postId) {
     // ── 권한별 자동 알림 발송 ──
     await sendRoleBasedPostNotify(postId, title);
-    sendPostSlackNotify(postId, title, catId);
+    // 채널 웹훅 발송 중단 — 개인 DM으로 일원화 (sendRoleBasedPostNotify가 각자 DM 발송)
+    // sendPostSlackNotify(postId, title, catId);
   }
 
   if(isDraft){
@@ -5168,7 +5169,7 @@ async function sendRoleBasedPostNotify(postId, title) {
     });
     if (u.slack_member_id) {
       const link = 'https://bnzcoffee.github.io/bonanza-ops/?post=' + postId;
-      await sendSlackDM(u.slack_member_id, '🔔 ' + msg + '\n' + link);
+      await sendSlackDM(u.slack_member_id, '📢 ' + msg + '\n' + link);
     }
     sent++;
   }
@@ -6690,7 +6691,7 @@ function opsEditCard(cardId, groupId){
       <div class="form-row"><label class="form-label">제목 <span style="color:var(--rd)">*</span></label><input id="opsCardTitle" class="form-input" value="${esc(c.title||'')}"></div>
       <div style="display:flex;justify-content:flex-end;margin-bottom:4px"><button class="btn-cancel-sm" style="font-size:11px;padding:4px 8px" onclick="opsCardFieldsConfig()"><i class="ti ti-adjustments-horizontal"></i> 표시 속성·순서</button></div>
       <div id="opsCardFields">${fieldsHtml}</div>
-      <div class="form-row"><label class="form-label">문서 (자유 편집)</label><div id="opsDocBox"></div></div>
+      <div class="form-row"><label class="form-label">문서 (자유 편집) <span style="font-size:10px;color:var(--th);font-weight:400">· 본문에 @이름 입력 시 해당 참여자에게 알림</span></label><div id="opsDocBox"></div></div>
       <div class="form-row"><label class="form-label">첨부파일</label>
         <div id="opsAttList">${attHtml}</div>
         <input type="file" id="opsAttFile" style="display:none" onchange="opsUploadAtt(this)">
@@ -6761,6 +6762,7 @@ async function opsSaveCard(){
   if(dueField && !(c.data&&c.data._due)){ alert('마감일을 입력해주세요.'); return; }
   const __prevCard=c.id?O.cards.find(x=>x.id===c.id):null;
   const __prevA=(__prevCard&&__prevCard.data&&__prevCard.data._assignees)||[];
+  const __prevDoc=(__prevCard&&__prevCard.data&&__prevCard.data._doc)||'';
   const payload={ board_id:O.boardId, group_id:c.group_id, card_type:c.card_type, title:c.title, data:c.data||{}, attachments:c.attachments||[], updated_by:currentUser.id, updated_at:new Date().toISOString() };
   let saved;
   if(c.id){ const {data,error}=await sb.from('ops_cards').update(payload).eq('id',c.id).select().single(); if(error){alert('오류: '+error.message);return;} saved=data; }
@@ -6773,6 +6775,7 @@ async function opsSaveCard(){
   document.getElementById('opsBoard').innerHTML=opsGroupsHtml();
   opsSyncSheet(saved).catch(()=>{});
   opsNotifyAssignees(saved,__prevA).catch(()=>{});
+  opsNotifyMentions(saved,__prevDoc).catch(()=>{});
 }
 async function opsDeleteCard(id){
   if(!confirm('이 카드를 삭제할까요?')) return;
@@ -6820,7 +6823,27 @@ async function opsNotifyAssignees(card, prevAssignees){
     for(const uid of newly){
       if(String(uid)===String(currentUser.id)) continue;
       try{ await createNotification(uid,'ops_assign',card.id,'ops',msg); }catch(e){}
-      try{ const {data:u}=await sb.from('users').select('slack_member_id').eq('id',uid).maybeSingle(); if(u&&u.slack_member_id) await sendSlackDM(u.slack_member_id,'🔔 '+msg+'\n'+link); }catch(e){}
+      try{ const {data:u}=await sb.from('users').select('slack_member_id').eq('id',uid).maybeSingle(); if(u&&u.slack_member_id) await sendSlackDM(u.slack_member_id,'🧩 '+msg+'\n'+link); }catch(e){}
+    }
+    try{ updateNotifDot(); }catch(e){}
+  }catch(e){}
+}
+
+async function opsNotifyMentions(card, prevDoc){
+  try{
+    const doc=(card.data&&card.data._doc)||''; if(!doc) return;
+    const text=' '+doc.replace(/<[^>]+>/g,' ')+' ';
+    const prevText=' '+(prevDoc||'').replace(/<[^>]+>/g,' ')+' ';
+    const O=window.__ops; const board=O.boards.find(b=>b.id===O.boardId);
+    const link='https://bnzcoffee.github.io/bonanza-ops/?opsboard='+O.boardId+'&opscard='+card.id;
+    for(const u of opsEligiblePeople()){
+      if(String(u.id)===String(currentUser.id)) continue;
+      const at='@'+u.name;
+      if(text.indexOf(at)>=0 && prevText.indexOf(at)<0){
+        const msg='[운영 프로젝트] "'+(card.title||'')+'" 문서에서 회원님이 멘션되었습니다.'+(board?' ('+board.name+')':'');
+        try{ await createNotification(u.id,'ops_mention',card.id,'ops',msg); }catch(e){}
+        try{ const {data:uu}=await sb.from('users').select('slack_member_id').eq('id',u.id).maybeSingle(); if(uu&&uu.slack_member_id) await sendSlackDM(uu.slack_member_id,'💬 '+msg+'\n'+link); }catch(e){}
+      }
     }
     try{ updateNotifDot(); }catch(e){}
   }catch(e){}
@@ -6921,11 +6944,12 @@ function opsPermAuto(u){ return !!u.is_master; }
 function opsPermMgr(){
   if(!opsIsMaster()){ alert('총괄만 설정할 수 있습니다.'); return; }
   const allowed=(window.__ops.allowed||[]).map(String);
-  const rows=(window.__opsPeople||[]).slice().sort((a,b)=>(opsPermAuto(b)?1:0)-(opsPermAuto(a)?1:0)).map(u=>{ const isAuto=opsPermAuto(u); const checked=isAuto||allowed.includes(String(u.id)); return `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)"><input type="checkbox" class="ops-permck" data-id="${u.id}" ${checked?'checked':''} ${isAuto?'disabled':''}> <span style="flex:1">${esc(u.name)} <span style="font-size:11px;color:var(--th)">${esc(u.store||'')}</span></span><span style="font-size:10px;color:${isAuto?'var(--gn)':'var(--th)'}">${isAuto?'총괄·항상 포함':'참여 지정'}</span></label>`; }).join('');
+  const rows=(window.__opsPeople||[]).filter(u=>u.active!==false).slice().sort((a,b)=>(opsPermAuto(b)?1:0)-(opsPermAuto(a)?1:0)).map(u=>{ const isAuto=opsPermAuto(u); const checked=isAuto||allowed.includes(String(u.id)); const k=(String(u.name)+' '+String(u.store||'')).toLowerCase().replace(/"/g,''); return `<label class="ops-permrow" data-k="${k}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)"><input type="checkbox" class="ops-permck" data-id="${u.id}" ${checked?'checked':''} ${isAuto?'disabled':''}> <span style="flex:1">${esc(u.name)} <span style="font-size:11px;color:var(--th)">${esc(u.store||'')}</span></span><span style="font-size:10px;color:${isAuto?'var(--gn)':'var(--th)'}">${isAuto?'총괄·항상 포함':'참여 지정'}</span></label>`; }).join('');
   const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='opsPermModal';
-  modal.innerHTML=`<div class="modal-box" style="max-width:460px"><div class="modal-head"><b>참여 인원 관리 (총괄 전용)</b><button onclick="document.getElementById('opsPermModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:66vh;overflow-y:auto"><p style="font-size:12px;color:var(--th);margin-bottom:10px">여기서 <b>체크한 인원만</b> 이 메뉴가 보이고 참여(열람·작성·수정)할 수 있습니다. 운영팀·부총괄·대표·이사라도 체크하지 않으면 메뉴가 보이지 않습니다. (비활성 계정은 목록에서 제외됩니다. 늦게 합류해도 이전 내용을 모두 보고 수정할 수 있습니다.)</p>${rows}</div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('opsPermModal').remove()">취소</button><button class="btn-submit" onclick="opsSavePerm()">저장</button></div></div>`;
+  modal.innerHTML=`<div class="modal-box" style="max-width:460px"><div class="modal-head"><b>참여 인원 관리 (총괄 전용)</b><button onclick="document.getElementById('opsPermModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:66vh;overflow-y:auto"><input id="opsPermSearch" class="form-input" placeholder="이름·매장 검색" oninput="opsPermFilter(this.value)" style="margin-bottom:10px"><p style="font-size:12px;color:var(--th);margin-bottom:10px">여기서 <b>체크한 인원만</b> 이 메뉴가 보이고 참여(열람·작성·수정)할 수 있습니다. 운영팀·부총괄·대표·이사라도 체크하지 않으면 메뉴가 보이지 않습니다. (비활성 계정은 목록에서 제외됩니다. 늦게 합류해도 이전 내용을 모두 보고 수정할 수 있습니다.)</p>${rows}</div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('opsPermModal').remove()">취소</button><button class="btn-submit" onclick="opsSavePerm()">저장</button></div></div>`;
   document.body.appendChild(modal);
 }
+function opsPermFilter(q){ q=(q||'').trim().toLowerCase(); document.querySelectorAll('#opsPermModal .ops-permrow').forEach(function(r){ r.style.display=(!q||r.getAttribute('data-k').indexOf(q)>=0)?'':'none'; }); }
 async function opsSavePerm(){
   const ids=[...document.querySelectorAll('#opsPermModal .ops-permck')].filter(x=>x.checked&&!x.disabled).map(x=>x.getAttribute('data-id'));
   const {error}=await sb.from('app_settings').upsert({key:'ops_board_allowed_users',value:JSON.stringify(ids)},{onConflict:'key'});
@@ -9377,7 +9401,8 @@ async function submitRequest() {
         '요청 매장: ' + reqStore + '\n' +
         '신청자: ' + currentUser.name + '\n' +
         '담당 파트: ' + part.name;
-      await sendSlackNotify(part.slack_webhook, msg);
+      // 파트 채널 발송 중단 — 개인 DM으로 일원화 (아래 broadcastNotificationWithSlack가 담당팀에 DM 발송)
+      // await sendSlackNotify(part.slack_webhook, msg);
     }
     // 👇 [신규 추가] 앱 내 알림 + 개인 슬랙 DM 동시 발송 (운영팀 또는 담당팀)
     if (part && part.name) {
@@ -16725,13 +16750,14 @@ async function sendSlackDM(slackMemberId, msg) {
 }
 
 // 1. 단일 사용자용 기존 슬랙 DM 발송 함수
+function notifEmoji(t){ t=String(t||''); if(t.indexOf('comment_reply')>=0||t.indexOf('reply')>=0) return '↩️'; if(t.indexOf('mention')>=0) return '💬'; if(t.indexOf('comment')>=0||t.indexOf('tag')>=0) return '💬'; if(t.indexOf('assign')>=0) return '🧩'; if(t.indexOf('보고')>=0||t.indexOf('report')>=0) return '📝'; if(t==='new_post'||t.indexOf('post')>=0) return '📢'; if(t.indexOf('request')>=0||t.indexOf('신청')>=0) return '📋'; if(t.indexOf('schedule')>=0||t.indexOf('근태')>=0) return '📅'; return '🔔'; }
 async function createNotificationWithSlack(userId, type, refId, refType, msg) {
   await createNotification(userId, type, refId, refType, msg);
   const { data: u } = await sb.from('users').select('slack_member_id').eq('id', userId).maybeSingle();
   if (u && u.slack_member_id) {
     const BASE = 'https://bnzcoffee.github.io/bonanza-ops/';
     let link = BASE + '?' + (refType === 'post' ? 'post=' : refType === 'request' ? 'request=' : refType === 'schedule' ? 'schedule=' : '') + refId;
-    const dmMsg = '🔔 ' + msg + '\n' + link;
+    const dmMsg = notifEmoji(type) + ' ' + msg + '\n' + link;
     await sendSlackDM(u.slack_member_id, dmMsg);
   }
 }
@@ -16759,7 +16785,7 @@ async function broadcastNotificationWithSlack(actionType, refId, refType, msg, s
 
   const BASE = 'https://bnzcoffee.github.io/bonanza-ops/';
   let link = BASE + '?' + (refType === 'post' ? 'post=' : refType === 'request' ? 'request=' : refType === 'schedule' ? 'schedule=' : '') + refId;
-  const dmMsg = '🔔 ' + msg + '\n' + link;
+  const dmMsg = notifEmoji(refType) + ' ' + msg + '\n' + link;
 
   // 필터링된 모든 대상자에게 앱 내 알림 생성 + 슬랙 DM 동시 발송
   for (const u of targetUsers) {
