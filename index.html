@@ -156,6 +156,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--cr);color:var(
 .comment-head{display:flex;align-items:center;gap:8px;margin-bottom:5px}
 .comment-avatar{width:28px;height:28px;border-radius:50%;background:var(--crm);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--br);flex-shrink:0}
 .comment-body{font-size:13px;color:var(--tm);line-height:1.6;padding-left:36px}
+.comment-reply-wrap{margin-left:16px;padding-left:12px;border-left:2px solid var(--crd);margin-top:2px}
+.comment-reply{background:var(--crm);border-radius:8px;padding:8px 8px 8px 4px;margin-top:4px}
 .comment-input-row{display:flex;gap:8px;margin-top:14px;align-items:flex-start}
 .comment-input-row textarea{flex:1;border:0.5px solid var(--crd);border-radius:8px;padding:9px 12px;font-size:13px;color:var(--tm);background:var(--cr);outline:none;resize:none;font-family:inherit;min-height:60px}
 .comment-input-row textarea:focus{border-color:var(--brl)}
@@ -1898,34 +1900,52 @@ let readListHtml = '';
   }, 300);
 
   if (p.comments_on) {
-    const cmtItems = comments.map(c => {
+    const __cmtById = {}; comments.forEach(c => { __cmtById[c.id] = c; });
+    const __rootOf = (c) => { let x=c, g=0; while(x.parent_id && __cmtById[x.parent_id] && g<10){ x=__cmtById[x.parent_id]; g++; } return x; };
+    const __cmtOne = (c, isReply) => {
       const isMine = c.author_id === currentUser.id;
       const isAdminUser = currentUser.role === 'admin';
       const dispName = c.users?.name || '?';
       const avatarContent = c.users?.avatar_url
         ? `<img src="${c.users.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
         : dispName.slice(0,2);
-      return `<div class="comment-item" id="cmt-${c.id}">
+      const imgHtml = c.image_url ? `<div style="padding-left:36px;margin-top:6px"><img src="${c.image_url}" onclick="window.open('${c.image_url}','_blank')" style="max-width:220px;max-height:220px;border-radius:8px;border:0.5px solid var(--crd);cursor:zoom-in;object-fit:cover"></div>` : '';
+      const safeName = (dispName||'').replace(/'/g,"\\'");
+      return `<div class="comment-item${isReply?' comment-reply':''}" id="cmt-${c.id}">
         <div class="comment-head">
           <div class="comment-avatar" style="overflow:hidden">${avatarContent}</div>
-          <span style="font-size:12px;font-weight:600;color:var(--tm)">${dispName}</span>
+          <span style="font-size:12px;font-weight:600;color:var(--tm)">${isReply?'\u21b3 ':''}${dispName}</span>
           <span style="font-size:11px;color:var(--th);margin-left:4px">${c.users?.store||''}</span>
           <span style="font-size:11px;color:var(--th);margin-left:auto">${fmtDateTime(c.created_at)}</span>
-          ${isMine ? `<button onclick="editCmt(${c.id})" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:6px"><i class="ti ti-edit"></i></button>` : ''}
+          <button onclick="startReply(${p.id},${c.id},'${safeName}')" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:6px" title="\uB2F5\uAE00"><i class="ti ti-corner-down-right"></i></button>
+          ${isMine ? `<button onclick="editCmt(${c.id})" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:2px"><i class="ti ti-edit"></i></button>` : ''}
           ${(isMine||isAdminUser) ? `<button onclick="delCmt(${c.id},${p.id})" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:2px"><i class="ti ti-trash"></i></button>` : ''}
         </div>
         <div class="comment-body" id="cbody-${c.id}">${esc(c.body)}</div>
+        ${imgHtml}
       </div>`;
+    };
+    const __topCmts = comments.filter(c => !c.parent_id);
+    const __replyMap = {};
+    comments.filter(c => c.parent_id).forEach(c => { const root = __rootOf(c); if(root && root.id !== c.id){ (__replyMap[root.id] = __replyMap[root.id]||[]).push(c); } });
+    Object.keys(__replyMap).forEach(k => __replyMap[k].sort((a,b)=> (a.created_at>b.created_at?1:-1)));
+    const cmtItems = __topCmts.map(c => {
+      const replies = (__replyMap[c.id]||[]).map(r => __cmtOne(r, true)).join('');
+      return __cmtOne(c, false) + (replies ? `<div class="comment-reply-wrap">${replies}</div>` : '');
     }).join('');
     cmtHtml = `<div class="comment-section">
       <div class="section-label">댓글 ${comments.length}개</div>
       ${cmtItems}
       <div class="comment-input-row">
+        <div id="replyCtx_${p.id}" style="display:none;align-items:center;gap:6px;margin-bottom:6px;padding:5px 10px;background:var(--crm);border-radius:8px;font-size:12px;color:var(--ts)"></div>
         <textarea id="cmtInput" placeholder="의견이나 질문을 남겨주세요... (@이름으로 태그 가능)" oninput="postCmtAtTrigger(this,${p.id})"></textarea>
         <div id="postCmtAtMenu_${p.id}" style="display:none;position:absolute;background:#fff;border:0.5px solid var(--crd);border-radius:8px;max-height:180px;overflow-y:auto;z-index:50;min-width:220px;box-shadow:0 4px 16px rgba(0,0,0,.12)"></div>
         <div id="postCmtTags_${p.id}" style="display:flex;flex-wrap:wrap;gap:5px;margin:6px 0"></div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:10px;color:var(--th)">@이름으로 인원 태그 → 알림 발송</span>
+        <div id="cmtImgPrev_${p.id}" style="margin:6px 0"></div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <input type="file" id="cmtImgFile_${p.id}" accept="image/*" style="display:none" onchange="cmtPickImage(${p.id},this)">
+          <button type="button" class="btn-cancel-sm" onclick="document.getElementById('cmtImgFile_${p.id}').click()" style="padding:6px 10px;font-size:12px"><i class="ti ti-photo"></i> 이미지</button>
+          <span style="font-size:10px;color:var(--th)">@태그 알림 · 이미지 첨부</span>
           <button class="btn-comment-submit" onclick="submitComment(${p.id})" style="margin-left:auto">등록</button>
         </div>
       </div>
@@ -2182,14 +2202,25 @@ function renderPostCmtTags(postId) {
 async function submitComment(postId) {
   if (isTestMode()) { alert('⚠ 테스트 모드에서는 댓글을 작성할 수 없습니다.'); return; }
   const inp = document.getElementById('cmtInput');
-  const body = inp?.value.trim();
-  if (!body) return;
+  const body = (inp?.value.trim()) || '';
+  const imgUrl = window.__cmtImg?.[postId] || null;
+  const parentId = window.__cmtReplyTo?.[postId] || null;
+  if (!body && !imgUrl) return;
 
   const tags = window.__postCmtTags?.[postId] || [];
-  await sb.from('comments').insert({
+  const __payload = {
     post_id: postId, author_id: currentUser.id, body,
-    tagged_users: tags.length ? JSON.stringify(tags) : null
-  });
+    tagged_users: tags.length ? JSON.stringify(tags) : null,
+    parent_id: parentId, image_url: imgUrl
+  };
+  let __ins = await sb.from('comments').insert(__payload);
+  if (__ins && __ins.error && /parent_id|image_url|column|schema/i.test(__ins.error.message||'')) {
+    // 신규 컬럼(parent_id·image_url) 미적용 DB 폴백 — 일반 댓글은 정상 등록
+    await sb.from('comments').insert({
+      post_id: postId, author_id: currentUser.id, body,
+      tagged_users: tags.length ? JSON.stringify(tags) : null
+    });
+  }
 
   // 태그된 인원에게 알림 + 슬랙 DM
   if (tags.length) {
@@ -2198,10 +2229,24 @@ async function submitComment(postId) {
     for (const t of tags) {
       await createNotificationWithSlack(t.id, 'post_comment_tag', postId, 'post', msg);
     }
-    updateNotifDot();
   }
+  // 답글: 원 댓글 작성자에게 알림 (본인·태그 중복 제외)
+  if (parentId) {
+    try {
+      const { data: parent } = await sb.from('comments').select('author_id').eq('id', parentId).single();
+      const taggedIds = new Set(tags.map(t=>t.id));
+      if (parent && parent.author_id && parent.author_id !== currentUser.id && !taggedIds.has(parent.author_id)) {
+        const {data:post} = await sb.from('posts').select('title').eq('id',postId).single();
+        const rmsg = '[답글] "' + (post?.title||'게시글') + '" 내 댓글에 답글이 달렸습니다.';
+        await createNotificationWithSlack(parent.author_id, 'post_comment_reply', postId, 'post', rmsg);
+      }
+    } catch(e){}
+  }
+  updateNotifDot();
 
-  window.__postCmtTags[postId] = [];
+  if (window.__postCmtTags) window.__postCmtTags[postId] = [];
+  if (window.__cmtImg) window.__cmtImg[postId] = null;
+  if (window.__cmtReplyTo) window.__cmtReplyTo[postId] = null;
   openPostById(postId);
 }
 
@@ -5798,6 +5843,49 @@ async function notifyStoreManagers(stores, type, refId, refType, msg, excludeIds
   for(const t of targets){ try{ await createNotificationWithSlack(t.id, type, refId, refType, msg); }catch(e){} }
 }
 
+
+// ── 댓글 답글·이미지 첨부 ───────────────────
+window.__cmtImg = window.__cmtImg || {};
+window.__cmtReplyTo = window.__cmtReplyTo || {};
+function startReply(postId, cmtId, name){
+  window.__cmtReplyTo = window.__cmtReplyTo || {};
+  window.__cmtReplyTo[postId] = cmtId;
+  const box = document.getElementById('replyCtx_'+postId);
+  if (box){
+    box.style.display = 'flex';
+    box.innerHTML = '<i class="ti ti-corner-down-right"></i><span><b>'+name+'</b>님에게 답글</span><button onclick="cancelReply('+postId+')" style="background:none;border:none;color:var(--th);cursor:pointer;margin-left:auto;font-size:12px">취소</button>';
+  }
+  const inp = document.getElementById('cmtInput');
+  if (inp){ inp.focus(); try{ inp.scrollIntoView({block:'center',behavior:'smooth'}); }catch(e){} }
+}
+function cancelReply(postId){
+  if (window.__cmtReplyTo) window.__cmtReplyTo[postId] = null;
+  const box = document.getElementById('replyCtx_'+postId);
+  if (box){ box.style.display='none'; box.innerHTML=''; }
+}
+async function cmtPickImage(postId, inputEl){
+  const file = inputEl.files && inputEl.files[0];
+  if (!file) return;
+  if (isTestMode()) { alert('⚠ 테스트 모드에서는 이미지를 첨부할 수 없습니다.'); inputEl.value=''; return; }
+  const prev = document.getElementById('cmtImgPrev_'+postId);
+  if (prev) prev.innerHTML = '<span style="font-size:12px;color:var(--th)">이미지 업로드 중...</span>';
+  try {
+    const compressed = await compressImage(file);
+    const fname = 'comments/'+postId+'_'+Date.now()+'_'+Math.random().toString(36).slice(2)+'.jpg';
+    const { error } = await sb.storage.from('attachments').upload(fname, compressed, {upsert:true, contentType: compressed.type||'image/jpeg'});
+    if (error){ if (prev) prev.innerHTML = '<span style="font-size:12px;color:var(--rd)">업로드 실패: '+error.message+'</span>'; return; }
+    const url = SUPABASE_URL+'/storage/v1/object/public/attachments/'+fname;
+    window.__cmtImg = window.__cmtImg || {};
+    window.__cmtImg[postId] = url;
+    if (prev) prev.innerHTML = '<div style="display:inline-flex;align-items:center;gap:8px;padding:4px;border:0.5px solid var(--crd);border-radius:8px"><img src="'+url+'" style="width:60px;height:60px;object-fit:cover;border-radius:6px"><button onclick="cmtRemoveImage('+postId+')" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:12px"><i class="ti ti-x"></i> 제거</button></div>';
+  } catch(e){ if (prev) prev.innerHTML = '<span style="font-size:12px;color:var(--rd)">오류: '+e.message+'</span>'; }
+  inputEl.value = '';
+}
+function cmtRemoveImage(postId){
+  if (window.__cmtImg) window.__cmtImg[postId] = null;
+  const prev = document.getElementById('cmtImgPrev_'+postId);
+  if (prev) prev.innerHTML = '';
+}
 
 // ── 댓글 수정/삭제 ───────────────────────────────────────────────
 async function delCmt(cmtId, postId){
