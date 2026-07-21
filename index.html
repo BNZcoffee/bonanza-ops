@@ -7127,9 +7127,10 @@ const MIND_COLORS = ['#c98a3a','#4a90d9','#d9534f','#5cb85c','#8e6fd8','#41403e'
 function opsMindShell(){
   return `<div class="ops-mind" id="opsMind">
     <div class="ops-mind-tools">
-      <button class="btn-cancel-sm" onclick="opsMindAddNode()"><i class="ti ti-plus"></i> 아이디어</button>
+      <button class="btn-cancel-sm" onclick="opsMindAddNode()"><i class="ti ti-plus"></i> 항목</button>
       <button class="btn-cancel-sm" id="opsMindLinkBtn" onclick="opsMindToggleLink()"><i class="ti ti-link"></i> 연결모드</button>
-      <div class="ops-mind-search"><input id="opsMindSearch" placeholder="아이디어 검색..." oninput="opsMindSearch(this.value)"><div id="opsMindResults" class="ops-mind-results"></div></div>
+      <button class="btn-cancel-sm" onclick="opsMindExportImage()"><i class="ti ti-photo-down"></i> 이미지 저장</button>
+      <div class="ops-mind-search"><input id="opsMindSearch" placeholder="항목 검색..." oninput="opsMindSearch(this.value)"><div id="opsMindResults" class="ops-mind-results"></div></div>
       <span id="opsMindHint" style="font-size:11px;color:var(--th);align-self:center"></span>
     </div>
     <div class="ops-mind-legend"><span><i class="ti ti-hand-move"></i> 빈곳=화면이동</span><span><i class="ti ti-pointer"></i> 노드클릭=보기/편집</span><span><i class="ti ti-arrows-move"></i> 드래그=위치</span><span><i class="ti ti-link"></i> 연결모드→두 노드 클릭</span><span><i class="ti ti-search"></i> 검색→위치이동</span></div>
@@ -7182,7 +7183,7 @@ function opsMindApplyTransform(){
 function opsMindRender(){
   const nodesDiv=document.getElementById('opsMindNodes'); if(!nodesDiv) return;
   const m=window.__mind;
-  nodesDiv.innerHTML=m.nodes.map(n=>`<div class="mind-node${window.__mindLinkFrom===n.id?' linking':''}${window.__mindHighlight===n.id?' highlight':''}" style="left:${n.x}px;top:${n.y}px;border-left:5px solid ${n.color||'#c98a3a'}" onpointerdown="opsMindNodeDown(event,${n.id})">${esc(n.text||'')}</div>`).join('');
+  nodesDiv.innerHTML=m.nodes.map(n=>`<div class="mind-node${window.__mindLinkFrom===n.id?' linking':''}${window.__mindHighlight===n.id?' highlight':''}" style="left:${n.x}px;top:${n.y}px;border-left:5px solid ${n.color||'#c98a3a'}" onpointerdown="opsMindNodeDown(event,${n.id})">${(n.data&&n.data._link)?'<i class="ti ti-link" style="color:#4a90d9;font-size:11px"></i> ':''}${esc(n.text||'')}</div>`).join('');
   opsMindRenderEdges();
 }
 
@@ -7228,7 +7229,7 @@ async function opsMindAddNode(){
   const cx=Math.round((-m.panX+(vp?vp.clientWidth/2:200))/m.zoom)-84;
   const cy=Math.round((-m.panY+(vp?vp.clientHeight/2:200))/m.zoom)-24;
   const color=MIND_COLORS[m.nodes.length%MIND_COLORS.length];
-  const {data,error}=await sb.from('ops_mind_nodes').insert({board_id:window.__ops.boardId,text:'새 아이디어',x:cx,y:cy,color,created_by:currentUser.id,updated_by:currentUser.id}).select().single();
+  const {data,error}=await sb.from('ops_mind_nodes').insert({board_id:window.__ops.boardId,text:'새 항목',x:cx,y:cy,color,created_by:currentUser.id,updated_by:currentUser.id}).select().single();
   if(error){ alert('오류: '+error.message); return; }
   m.nodes.push(data); opsMindRender(); opsMindOpenNode(data.id);
 }
@@ -7247,12 +7248,20 @@ function opsMindOpenNode(id){
   const n=window.__mind.nodes.find(x=>x.id===id); if(!n) return;
   const swatches=MIND_COLORS.map(c=>`<span onclick="opsMindPickColor('${c}')" data-c="${c}" style="width:24px;height:24px;border-radius:50%;background:${c};cursor:pointer;display:inline-block;border:2px solid ${n.color===c?'#2b1a0e':'#fff'}"></span>`).join('');
   const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='mindNodeModal';
-  window.__mindEditId=id; window.__mindPickedColor=n.color||'#c98a3a';
-  modal.innerHTML=`<div class="modal-box" style="max-width:420px">
-    <div class="modal-head"><b>아이디어 편집</b><button onclick="document.getElementById('mindNodeModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
-    <div class="modal-body">
-      <textarea id="mindNodeText" class="form-input" style="min-height:90px">${esc(n.text||'')}</textarea>
-      <div style="display:flex;gap:8px;margin-top:12px;align-items:center">색상 ${swatches}</div>
+  window.__mindEditId=id; window.__mindPickedColor=n.color||'#c98a3a'; window.__mindPrevText=n.text||'';
+  const nlink=(n.data&&n.data._link)||''; const nlabel=(n.data&&n.data._linkLabel)||'';
+  modal.innerHTML=`<div class="modal-box" style="max-width:440px">
+    <div class="modal-head"><b>항목 편집</b><button onclick="document.getElementById('mindNodeModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+    <div class="modal-body" style="max-height:70vh;overflow-y:auto">
+      <textarea id="mindNodeText" class="form-input" style="min-height:90px" placeholder="내용 · @이름 으로 참여자를 멘션하면 알림이 갑니다">${esc(n.text||'')}</textarea>
+      <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">색상 ${swatches}</div>
+      <div style="margin-top:14px">
+        <label class="form-label" style="font-size:12px"><i class="ti ti-link"></i> 연결 링크 (보드 카드·게시물·자료 URL)</label>
+        <input id="mindNodeLink" class="form-input" placeholder="https://... (앱 링크·게시물·구글드라이브 등)" value="${esc(nlink)}">
+        <input id="mindNodeLinkLabel" class="form-input" style="margin-top:6px" placeholder="링크 이름 (선택)" value="${esc(nlabel)}">
+        ${nlink?`<button class="btn-cancel-sm" style="margin-top:6px" onclick="window.open('${nlink.replace(/'/g,"\\'")}','_blank')"><i class="ti ti-external-link"></i> 링크 열기</button>`:''}
+        <p style="font-size:10px;color:var(--th);margin-top:4px">보드 카드는 카드 화면의 링크, 게시물은 ?post= 링크를 붙여넣으면 됩니다.</p>
+      </div>
     </div>
     <div class="modal-foot" style="display:flex;justify-content:space-between;gap:8px">
       <div style="display:flex;gap:8px">
@@ -7270,14 +7279,50 @@ async function opsMindSaveNode(){
   const id=window.__mindEditId; const n=window.__mind.nodes.find(x=>x.id===id); if(!n) return;
   const text=document.getElementById('mindNodeText').value;
   const color=window.__mindPickedColor||n.color;
-  const {error}=await sb.from('ops_mind_nodes').update({text,color,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',id);
-  if(error){ alert('오류: '+error.message); return; }
-  n.text=text; n.color=color;
+  const link=document.getElementById('mindNodeLink')?document.getElementById('mindNodeLink').value.trim():'';
+  const linkLabel=document.getElementById('mindNodeLinkLabel')?document.getElementById('mindNodeLinkLabel').value.trim():'';
+  const data=Object.assign({}, n.data||{}); if(link) data._link=link; else delete data._link; if(linkLabel) data._linkLabel=linkLabel; else delete data._linkLabel;
+  let up=await sb.from('ops_mind_nodes').update({text,color,data,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',id);
+  if(up.error && /data|column|schema|42703/i.test((up.error.message||'')+(up.error.code||''))){ up=await sb.from('ops_mind_nodes').update({text,color,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',id); }
+  if(up.error){ alert('오류: '+up.error.message); return; }
+  const prevText=window.__mindPrevText||'';
+  n.text=text; n.color=color; n.data=data;
   document.getElementById('mindNodeModal').remove();
   opsMindRender();
+  opsMindNotifyNodeMentions(n, prevText).catch(()=>{});
+}
+async function opsMindNotifyNodeMentions(node, prevText){
+  try{
+    const text=' '+(node.text||'')+' '; const prev=' '+(prevText||'')+' ';
+    const O=window.__ops; const board=O.boards.find(b=>b.id===O.boardId);
+    const link='https://bnzcoffee.github.io/bonanza-ops/?opsboard='+O.boardId;
+    for(const u of opsEligiblePeople()){
+      if(String(u.id)===String(currentUser.id)) continue;
+      const at='@'+u.name;
+      if(text.indexOf(at)>=0 && prev.indexOf(at)<0){
+        const msg='[운영 아이디어맵] "'+((node.text||'').slice(0,20))+'" 항목에서 회원님이 멘션되었습니다.'+(board?' ('+board.name+')':'');
+        try{ await createNotification(u.id,'ops_mention',O.boardId,'ops',msg); }catch(e){}
+        try{ const {data:uu}=await sb.from('users').select('slack_member_id').eq('id',u.id).maybeSingle(); if(uu&&uu.slack_member_id && notifEnabled('ops_mention')) await sendSlackDM(uu.slack_member_id,notifEmoji('ops_mention')+' '+msg+'\n'+link); }catch(e){}
+      }
+    }
+    try{ updateNotifDot(); }catch(e){}
+  }catch(e){}
+}
+async function opsMindExportImage(){
+  const wrap=document.getElementById('opsMind'); const vp=document.getElementById('opsMindVp'); const m=window.__mind;
+  if(!wrap) return;
+  try{
+    if(!window.html2canvas){ await new Promise((res,rej)=>{ const sc=document.createElement('script'); sc.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'; sc.onload=res; sc.onerror=rej; document.head.appendChild(sc); }); }
+    const save={panX:m.panX,panY:m.panY,zoom:m.zoom};
+    const ns=m.nodes||[];
+    if(ns.length){ const minX=Math.min(...ns.map(n=>n.x)), minY=Math.min(...ns.map(n=>n.y)), maxX=Math.max(...ns.map(n=>n.x+180)), maxY=Math.max(...ns.map(n=>n.y+90)); const w=Math.max(1,maxX-minX), h=Math.max(1,maxY-minY); const vw=(vp.clientWidth||600)-40, vh=(vp.clientHeight||400)-40; const z=Math.max(0.2,Math.min(1,Math.min(vw/w,vh/h))); m.zoom=z; m.panX=20-minX*z+Math.max(0,(vw-w*z)/2); m.panY=20-minY*z+Math.max(0,(vh-h*z)/2); opsMindApplyTransform(); await new Promise(r=>setTimeout(r,250)); }
+    const canvas=await html2canvas(wrap,{backgroundColor:'#faf7f2',scale:2,useCORS:true,logging:false});
+    const a=document.createElement('a'); a.href=canvas.toDataURL('image/png'); a.download='아이디어맵_'+Date.now()+'.png'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    m.panX=save.panX; m.panY=save.panY; m.zoom=save.zoom; opsMindApplyTransform();
+  }catch(e){ alert('이미지 저장 실패: '+(e.message||e)); }
 }
 async function opsMindDeleteNode(id){
-  if(!confirm('이 아이디어와 연결선을 삭제할까요?')) return;
+  if(!confirm('이 항목과 연결선을 삭제할까요?')) return;
   await sb.from('ops_mind_edges').delete().or('from_id.eq.'+id+',to_id.eq.'+id);
   await sb.from('ops_mind_nodes').delete().eq('id',id);
   window.__mind.nodes=window.__mind.nodes.filter(n=>n.id!==id);
@@ -7286,7 +7331,7 @@ async function opsMindDeleteNode(id){
   opsMindRender();
 }
 // ── 연결선 ──
-function opsMindStartLink(id){ window.__mindLinkFrom=id; document.getElementById('mindNodeModal')?.remove(); opsMindSetHint('연결할 다른 아이디어를 클릭하세요 (취소하려면 시작 노드 다시 클릭)'); opsMindRender(); }
+function opsMindStartLink(id){ window.__mindLinkFrom=id; document.getElementById('mindNodeModal')?.remove(); opsMindSetHint('연결할 다른 항목을 클릭하세요 (취소하려면 시작 항목 다시 클릭)'); opsMindRender(); }
 function opsMindSetHint(t){ const h=document.getElementById('opsMindHint'); if(h) h.textContent=t||''; }
 async function opsMindCreateEdge(a,b){
   if(window.__mind.edges.some(e=>(e.from_id===a&&e.to_id===b)||(e.from_id===b&&e.to_id===a))) return;
