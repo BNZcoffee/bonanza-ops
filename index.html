@@ -228,6 +228,47 @@ textarea.form-input{min-height:120px;resize:vertical}
 .modal-inner{background:#fff;border-radius:14px;padding:24px;width:340px;max-width:90vw}
 .modal-title{font-size:15px;font-weight:600;margin-bottom:14px;color:var(--tm)}
 .modal-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+/* 운영 프로젝트 보드 */
+.ops-wrap{padding:14px 16px 40px}
+.ops-header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.ops-tabs{display:flex;gap:4px;flex-wrap:wrap}
+.ops-tab{background:#fff;border:0.5px solid var(--crd);border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;color:var(--ts);cursor:pointer}
+.ops-tab.active{background:var(--br);color:#fff;border-color:var(--br)}
+.ops-actions{display:flex;gap:6px;flex-wrap:wrap}
+.ops-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.ops-search{border:0.5px solid var(--crd);border-radius:8px;padding:8px 12px;font-size:13px;min-width:160px;outline:none}
+.ops-fsel{border:0.5px solid var(--crd);border-radius:8px;padding:8px 10px;font-size:12px;background:#fff}
+.ops-board{display:flex;gap:12px;overflow-x:auto;align-items:flex-start;padding-bottom:12px}
+.ops-col{flex:0 0 268px;width:268px;background:var(--crm);border-radius:12px;padding:8px;box-sizing:border-box}
+.ops-col-head{display:flex;align-items:center;gap:6px;padding:6px 6px 8px;border-radius:8px 8px 0 0}
+.ops-col-name{font-size:13px;font-weight:700;color:var(--tm);cursor:pointer;flex:1}
+.ops-col-cnt{font-size:11px;color:var(--th);background:#fff;border-radius:10px;padding:1px 8px}
+.ops-col-del{background:none;border:none;color:var(--th);cursor:pointer;font-size:13px}
+.ops-col-body{display:flex;flex-direction:column;gap:8px;min-height:12px}
+.ops-addcard{width:100%;margin-top:8px;background:none;border:1px dashed var(--crd);border-radius:8px;padding:8px;font-size:12px;color:var(--th);cursor:pointer}
+.ops-card{background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:10px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.ops-card:hover{border-color:var(--brm)}
+.ops-type{display:inline-block;font-size:10px;font-weight:700;color:var(--br);background:var(--crm);border-radius:6px;padding:1px 7px;margin-bottom:5px}
+.ops-card-title{font-size:13px;font-weight:600;color:var(--tm);line-height:1.4;word-break:break-word}
+.ops-card-meta{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.ops-chip{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:var(--ts);border:0.5px solid var(--crd);border-radius:6px;padding:1px 7px;background:#fff}
+.ops-chip.ops-over{color:#d9534f;border-color:#d9534f;font-weight:700}
+.ops-avs{display:flex;gap:3px;margin-top:7px}
+.ops-av{width:22px;height:22px;border-radius:50%;background:var(--br);color:#fff;font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center}
+.ops-editing{margin-top:7px;font-size:11px;color:#c98a3a;font-weight:600}
+.ops-empty{font-size:12px;color:var(--th);text-align:center;padding:14px 0}
+.ops-pchips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px}
+.ops-pchip{display:inline-flex;align-items:center;gap:5px;font-size:12px;background:var(--crm);border-radius:14px;padding:3px 10px;color:var(--ts)}
+.ops-pchip i{cursor:pointer;color:var(--th)}
+.ops-att{display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0}
+.ops-att i.ti-x{cursor:pointer;color:var(--rd)}
+.ops-fieldrow,.ops-typerow{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+.ops-tfields{display:flex;flex-wrap:wrap;gap:2px}
+.modal-overlay{position:fixed;inset:0;background:rgba(43,26,14,.5);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px}
+.modal-box{background:#fff;border-radius:14px;width:100%;max-width:520px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:0.5px solid var(--crd);font-size:15px}
+.modal-body{padding:16px 20px;overflow-y:auto}
+.modal-foot{padding:14px 20px;border-top:0.5px solid var(--crd)}
 .btn-sm{padding:7px 14px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600}
 .btn-sm.primary{background:var(--br);color:#fff;border:none}
 .btn-sm.ghost{background:none;border:0.5px solid var(--crd);color:var(--ts)}
@@ -431,6 +472,10 @@ textarea.form-input{min-height:120px;resize:vertical}
       <button class="nav-btn" onclick="goPage('scheduleConfirm')" id="nav-scheduleConfirm" style="display:none"><i class="ti ti-clipboard-check"></i> 컨펌 대기 목록</button>
       <button class="nav-btn" onclick="goPage('scheduleClose')" id="nav-scheduleClose" style="display:none"><i class="ti ti-checklist"></i> 근태 마감 현황</button>
       <button class="nav-btn" onclick="goPage('scheduleSettings')" id="nav-scheduleSettings" style="display:none"><i class="ti ti-settings"></i> 휴무 기준 설정</button>
+    </div>
+    <div class="sidebar-section" id="opsNav" style="display:none">
+      <div class="sidebar-label">운영 프로젝트</div>
+      <button class="nav-btn" onclick="goPage('opsboard')" id="nav-opsboard"><i class="ti ti-layout-kanban"></i> 프로젝트 보드</button>
     </div>
     <div class="sidebar-section" id="adminNav" style="display:none">
       <div class="sidebar-label">관리</div>
@@ -1458,6 +1503,9 @@ function goPage(page) {
     const nb = document.getElementById('nav-perm');
     if (nb) nb.classList.add('active');
     renderPermSettings(area);
+  } else if (page === 'opsboard') {
+    const nb = document.getElementById('nav-opsboard'); if (nb) nb.classList.add('active');
+    renderOpsBoard(area);
   } else if (page === 'boardsettings') {
     renderBoardSettings(area);
   } else if (page === 'profile') {
@@ -6255,7 +6303,7 @@ async function downloadBackup() {
   const btn = event?.target?.closest('button');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader spin"></i> 백업 생성 중...'; }
   // 백업할 테이블 목록
-  const TABLES = ['users','categories','posts','attachments','comments','post_reads','post_favorites','post_reminders','manual_sections','parts','request_types','requests','request_attachments','store_options','position_options','role_permissions','user_permissions','notification_settings','app_settings'];
+  const TABLES = ['users','categories','posts','attachments','comments','post_reads','post_favorites','post_reminders','manual_sections','parts','request_types','requests','request_attachments','store_options','position_options','role_permissions','user_permissions','notification_settings','app_settings','ops_boards','ops_groups','ops_cards'];
   const backup = { _meta: { created_at: new Date().toISOString(), app: '보난자커피 운영 매뉴얼', version: APP.app_version || '', by: currentUser ? (currentUser.name + ' / ' + currentUser.code) : '' }, tables: {} };
   try {
     for (const t of TABLES) {
@@ -6286,6 +6334,505 @@ async function downloadBackup() {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-download"></i> 데이터 백업 다운로드'; }
   }
 }
+
+// ══════════════════════════════════════════════════════════════
+//  운영 프로젝트 보드 (노션형 카드 보드) — Phase 1
+// ══════════════════════════════════════════════════════════════
+window.__ops = window.__ops || { boardId:null, boards:[], groups:[], cards:[], fields:[], cardTypes:[], filter:{}, channel:null, editing:{}, allowed:[] };
+
+function opsCanSee(u){
+  u = u || currentUser; if(!u) return false;
+  if (u.is_master || u.is_vice_master || u.role==='admin') return true;
+  if (u.part === '운영팀') return true;
+  const allowed = (window.__ops.allowed||[]);
+  return allowed.map(String).includes(String(u.id));
+}
+function opsCanManage(){
+  const u = currentUser; if(!u) return false;
+  return !!(u.is_master || u.is_vice_master || u.role==='admin' || u.part==='운영팀');
+}
+function opsIsMaster(){ const u=currentUser; return !!(u && (u.is_master || u.role==='admin')); }
+
+const OPS_DEFAULT_FIELDS = [
+  {key:'_status',label:'상태',type:'select',options:['대기','진행중','완료','보류'],core:true},
+  {key:'_assignees',label:'담당자',type:'person',core:true},
+  {key:'_due',label:'마감일',type:'date',required:true,core:true},
+  {key:'_priority',label:'우선순위',type:'select',options:['높음','보통','낮음'],core:true},
+  {key:'_body',label:'내용',type:'textarea',core:true}
+];
+const OPS_DEFAULT_TYPES = [
+  {name:'과제', fields:['_status','_assignees','_due','_priority','_body']},
+  {name:'회의록', fields:['_due','_assignees','_body']},
+  {name:'메모', fields:['_body']},
+  {name:'자료', fields:['_assignees','_body']}
+];
+
+async function opsLoadAllowed(){
+  try{ const {data}=await sb.from('app_settings').select('value').eq('key','ops_board_allowed_users').maybeSingle();
+    window.__ops.allowed = data && data.value ? (JSON.parse(data.value)||[]) : []; }catch(e){ window.__ops.allowed=[]; }
+}
+
+async function renderOpsBoard(area){
+  if(!opsCanSee()){ area.innerHTML='<div style="padding:40px;text-align:center;color:var(--th)">접근 권한이 없습니다.</div>'; return; }
+  area.innerHTML='<div style="padding:40px;text-align:center;color:var(--th)"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  if(!window.__allActiveUsers || !window.__allActiveUsers.length){ const {data}=await sb.from('users').select('id,name,store,role,active').eq('active',true).order('name'); window.__allActiveUsers=data||[]; }
+  await opsLoadAllowed();
+  // 보드 목록
+  let { data:boards, error:bErr } = await sb.from('ops_boards').select('*').order('sort_order').order('id');
+  if(bErr){ area.innerHTML='<div style="padding:40px;text-align:center;color:var(--th);line-height:1.7">운영 보드 준비가 필요합니다.<br>총괄에게 문의해 초기 설정(DB)을 완료해주세요.<br><span style="font-size:11px">('+esc(bErr.message||'')+')</span></div>'; return; }
+  boards = boards||[];
+  if(!boards.length){
+    if(opsCanManage()){
+      const { data:nb } = await sb.from('ops_boards').insert({name:'운영 프로젝트', fields:OPS_DEFAULT_FIELDS, card_types:OPS_DEFAULT_TYPES, sort_order:0}).select().single();
+      boards = nb?[nb]:[];
+    } else { area.innerHTML='<div style="padding:40px;text-align:center;color:var(--th)">아직 생성된 프로젝트가 없습니다.</div>'; return; }
+  }
+  window.__ops.boards = boards;
+  if(!window.__ops.boardId || !boards.find(b=>b.id===window.__ops.boardId)) window.__ops.boardId = boards[0].id;
+  await opsLoadBoardData();
+  opsSubscribe();
+  opsRender(area);
+}
+
+async function opsLoadBoardData(){
+  const bid = window.__ops.boardId;
+  const board = window.__ops.boards.find(b=>b.id===bid);
+  window.__ops.fields = (board && board.fields && board.fields.length) ? board.fields : OPS_DEFAULT_FIELDS;
+  window.__ops.cardTypes = (board && board.card_types && board.card_types.length) ? board.card_types : OPS_DEFAULT_TYPES;
+  const [{data:groups},{data:cards}] = await Promise.all([
+    sb.from('ops_groups').select('*').eq('board_id',bid).order('sort_order').order('id'),
+    sb.from('ops_cards').select('*').eq('board_id',bid).order('sort_order').order('id')
+  ]);
+  window.__ops.groups = groups||[];
+  window.__ops.cards = cards||[];
+  if(!window.__ops.groups.length && opsCanManage()){
+    const {data:g}=await sb.from('ops_groups').insert({board_id:bid,name:'할 일',sort_order:0}).select().single();
+    if(g) window.__ops.groups=[g];
+  }
+}
+
+function opsPersonName(id){ const u=(window.__allActiveUsers||[]).find(x=>String(x.id)===String(id)); return u?u.name:'?'; }
+
+function opsRender(area){
+  const O=window.__ops;
+  const board=O.boards.find(b=>b.id===O.boardId);
+  const tabs = O.boards.map(b=>`<button class="ops-tab${b.id===O.boardId?' active':''}" onclick="opsSwitchBoard(${b.id})">${esc(b.name)}</button>`).join('');
+  const addBoardBtn = opsCanManage()?`<button class="ops-tab" onclick="opsAddBoard()" title="프로젝트 추가"><i class="ti ti-plus"></i></button>`:'';
+  const manageBtns = opsCanManage()?`
+    <button class="btn-cancel-sm" onclick="opsOpenFields()"><i class="ti ti-adjustments"></i> 속성/유형</button>
+    <button class="btn-cancel-sm" onclick="opsAddGroup()"><i class="ti ti-plus"></i> 묶음</button>`:'';
+  const masterBtns = opsIsMaster()?`
+    <button class="btn-cancel-sm" onclick="opsBackup()"><i class="ti ti-download"></i> 백업</button>
+    <button class="btn-cancel-sm" onclick="opsSheetSetup()"><i class="ti ti-table"></i> 시트연동</button>`:'';
+  // 필터 옵션
+  const statusField=O.fields.find(f=>f.key==='_status');
+  const statusOpts=(statusField&&statusField.options||[]).map(o=>`<option value="${esc(o)}"${O.filter.status===o?' selected':''}>${esc(o)}</option>`).join('');
+  const typeOpts=O.cardTypes.map(t=>`<option value="${esc(t.name)}"${O.filter.type===t.name?' selected':''}>${esc(t.name)}</option>`).join('');
+  const assignOpts=(window.__allActiveUsers||[]).filter(u=>u.active!==false).map(u=>`<option value="${u.id}"${String(O.filter.assignee)===String(u.id)?' selected':''}>${esc(u.name)}</option>`).join('');
+  area.innerHTML = `
+  <div class="ops-wrap">
+    <div class="ops-header">
+      <div class="ops-tabs">${tabs}${addBoardBtn}</div>
+      <div class="ops-actions">${manageBtns}${masterBtns}</div>
+    </div>
+    <div class="ops-toolbar">
+      <input id="opsSearch" class="ops-search" placeholder="카드 검색..." value="${esc(O.filter.q||'')}" oninput="opsSetFilter('q',this.value)">
+      <select class="ops-fsel" onchange="opsSetFilter('status',this.value)"><option value="">상태 전체</option>${statusOpts}</select>
+      <select class="ops-fsel" onchange="opsSetFilter('type',this.value)"><option value="">유형 전체</option>${typeOpts}</select>
+      <select class="ops-fsel" onchange="opsSetFilter('assignee',this.value)"><option value="">담당자 전체</option>${assignOpts}</select>
+      ${(O.filter.q||O.filter.status||O.filter.type||O.filter.assignee)?`<button class="btn-cancel-sm" onclick="opsClearFilter()">필터 해제</button>`:''}
+    </div>
+    <div class="ops-board" id="opsBoard">${opsGroupsHtml()}</div>
+  </div>`;
+}
+
+function opsMatchFilter(c){
+  const O=window.__ops, f=O.filter;
+  if(f.q){ const q=f.q.toLowerCase(); const hay=((c.title||'')+' '+((c.data&&c.data._body)||'')).toLowerCase(); if(hay.indexOf(q)<0) return false; }
+  if(f.status && ((c.data&&c.data._status)||'')!==f.status) return false;
+  if(f.type && (c.card_type||'')!==f.type) return false;
+  if(f.assignee){ const as=(c.data&&c.data._assignees)||[]; if(!as.map(String).includes(String(f.assignee))) return false; }
+  return true;
+}
+
+function opsGroupsHtml(){
+  const O=window.__ops;
+  return O.groups.map(g=>{
+    const cards=O.cards.filter(c=>c.group_id===g.id && opsMatchFilter(c));
+    const cardHtml=cards.map(c=>opsCardMini(c)).join('') || '<div class="ops-empty">카드 없음</div>';
+    const gAdmin=opsCanManage();
+    return `<div class="ops-col" data-gid="${g.id}" ondragover="opsDragOver(event)" ondrop="opsDrop(event,${g.id})">
+      <div class="ops-col-head" style="border-top:3px solid ${g.color||'#c9b8a4'}">
+        <span class="ops-col-name" ${gAdmin?`onclick="opsRenameGroup(${g.id})"`:''}>${esc(g.name)}</span>
+        <span class="ops-col-cnt">${cards.length}</span>
+        ${gAdmin?`<button class="ops-col-del" onclick="opsDeleteGroup(${g.id})" title="묶음 삭제"><i class="ti ti-dots"></i></button>`:''}
+      </div>
+      <div class="ops-col-body">${cardHtml}</div>
+      <button class="ops-addcard" onclick="opsOpenCard(null,${g.id})"><i class="ti ti-plus"></i> 카드 추가</button>
+    </div>`;
+  }).join('');
+}
+
+function opsCardMini(c){
+  const O=window.__ops;
+  const st=(c.data&&c.data._status)||'';
+  const pr=(c.data&&c.data._priority)||'';
+  const due=(c.data&&c.data._due)||'';
+  const as=(c.data&&c.data._assignees)||[];
+  const overdue = due && st!=='완료' && (new Date(due) < new Date(new Date().toDateString()));
+  const asHtml=as.slice(0,4).map(id=>`<span class="ops-av">${esc(opsPersonName(id).slice(0,2))}</span>`).join('');
+  const editing=O.editing[c.id];
+  const editBadge = editing && String(editing.userId)!==String(currentUser.id) ? `<div class="ops-editing"><i class="ti ti-pencil"></i> ${esc(editing.name)} 편집 중</div>`:'';
+  const prColor = pr==='높음'?'#d9534f':(pr==='낮음'?'#8a8a8a':'#c98a3a');
+  const attN=(c.attachments||[]).length;
+  return `<div class="ops-card" draggable="true" ondragstart="opsDragStart(event,${c.id})" onclick="opsOpenCard(${c.id})">
+    ${c.card_type?`<span class="ops-type">${esc(c.card_type)}</span>`:''}
+    <div class="ops-card-title">${esc(c.title||'(제목 없음)')}</div>
+    <div class="ops-card-meta">
+      ${st?`<span class="ops-chip">${esc(st)}</span>`:''}
+      ${pr?`<span class="ops-chip" style="color:${prColor};border-color:${prColor}">${esc(pr)}</span>`:''}
+      ${due?`<span class="ops-chip${overdue?' ops-over':''}"><i class="ti ti-calendar"></i> ${esc(due.slice(5))}</span>`:''}
+      ${attN?`<span class="ops-chip"><i class="ti ti-paperclip"></i> ${attN}</span>`:''}
+    </div>
+    ${asHtml?`<div class="ops-avs">${asHtml}</div>`:''}
+    ${editBadge}
+  </div>`;
+}
+
+// ── 필터 ──
+function opsSetFilter(k,v){ window.__ops.filter[k]=v; const b=document.getElementById('opsBoard'); if(b) b.innerHTML=opsGroupsHtml();
+  // 검색은 포커스 유지
+  if(k==='q'){ const s=document.getElementById('opsSearch'); } }
+function opsClearFilter(){ window.__ops.filter={}; renderOpsBoard(document.getElementById('contentArea')); }
+
+// ── 보드 전환/추가 ──
+async function opsSwitchBoard(id){ window.__ops.boardId=id; window.__ops.filter={}; await opsLoadBoardData(); opsSubscribe(); opsRender(document.getElementById('contentArea')); }
+async function opsAddBoard(){
+  const name=prompt('새 프로젝트 이름:'); if(!name) return;
+  const so=window.__ops.boards.length;
+  const {data,error}=await sb.from('ops_boards').insert({name:name.trim(),fields:OPS_DEFAULT_FIELDS,card_types:OPS_DEFAULT_TYPES,sort_order:so}).select().single();
+  if(error){alert('오류: '+error.message);return;}
+  window.__ops.boards.push(data); window.__ops.boardId=data.id; window.__ops.filter={};
+  await opsLoadBoardData(); opsSubscribe(); opsRender(document.getElementById('contentArea'));
+}
+
+// ── 묶음(그룹) ──
+async function opsAddGroup(){
+  const name=prompt('새 묶음 이름:','새 묶음'); if(name===null) return;
+  const so=window.__ops.groups.length;
+  const {data}=await sb.from('ops_groups').insert({board_id:window.__ops.boardId,name:(name||'새 묶음').trim(),sort_order:so}).select().single();
+  if(data){ window.__ops.groups.push(data); document.getElementById('opsBoard').innerHTML=opsGroupsHtml(); }
+}
+async function opsRenameGroup(id){
+  const g=window.__ops.groups.find(x=>x.id===id); if(!g) return;
+  const name=prompt('묶음 이름:',g.name); if(name===null) return;
+  await sb.from('ops_groups').update({name:name.trim()}).eq('id',id);
+  g.name=name.trim(); document.getElementById('opsBoard').innerHTML=opsGroupsHtml();
+}
+async function opsDeleteGroup(id){
+  const cnt=window.__ops.cards.filter(c=>c.group_id===id).length;
+  if(!confirm('이 묶음을 삭제할까요?'+(cnt?('\n포함된 카드 '+cnt+'건도 함께 삭제됩니다.'):''))) return;
+  await sb.from('ops_cards').delete().eq('group_id',id);
+  await sb.from('ops_groups').delete().eq('id',id);
+  window.__ops.groups=window.__ops.groups.filter(g=>g.id!==id);
+  window.__ops.cards=window.__ops.cards.filter(c=>c.group_id!==id);
+  document.getElementById('opsBoard').innerHTML=opsGroupsHtml();
+}
+
+// ── 드래그 이동 ──
+function opsDragStart(e,cardId){ e.stopPropagation(); e.dataTransfer.setData('text/plain',cardId); e.dataTransfer.effectAllowed='move'; }
+function opsDragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect='move'; }
+async function opsDrop(e,groupId){
+  e.preventDefault();
+  const cardId=parseInt(e.dataTransfer.getData('text/plain'),10); if(!cardId) return;
+  const c=window.__ops.cards.find(x=>x.id===cardId); if(!c) return;
+  const maxSort=window.__ops.cards.filter(x=>x.group_id===groupId).reduce((m,x)=>Math.max(m,x.sort_order||0),0);
+  c.group_id=groupId; c.sort_order=maxSort+1;
+  document.getElementById('opsBoard').innerHTML=opsGroupsHtml();
+  await sb.from('ops_cards').update({group_id:groupId,sort_order:c.sort_order,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',cardId);
+}
+
+// ── 카드 편집 모달 ──
+function opsFieldsForType(typeName){
+  const O=window.__ops;
+  if(!typeName) return O.fields.map(f=>f.key);
+  const t=O.cardTypes.find(x=>x.name===typeName);
+  return (t&&t.fields&&t.fields.length)?t.fields:O.fields.map(f=>f.key);
+}
+function opsFieldInput(f,val){
+  const id='opsf-'+f.key;
+  if(f.type==='textarea') return `<textarea id="${id}" class="form-input" style="min-height:80px">${esc(val||'')}</textarea>`;
+  if(f.type==='number') return `<input id="${id}" type="number" class="form-input" value="${val!=null?esc(String(val)):''}">`;
+  if(f.type==='date') return `<input id="${id}" type="date" class="form-input" value="${esc(val||'')}">`;
+  if(f.type==='checkbox') return `<label style="display:flex;align-items:center;gap:8px"><input id="${id}" type="checkbox" ${val?'checked':''}> 예</label>`;
+  if(f.type==='select'){ const opts=(f.options||[]).map(o=>`<option value="${esc(o)}"${val===o?' selected':''}>${esc(o)}</option>`).join(''); return `<select id="${id}" class="form-input"><option value="">선택</option>${opts}</select>`; }
+  if(f.type==='person'){
+    const sel=(val||[]).map(String);
+    const chips=sel.map(id2=>`<span class="ops-pchip">${esc(opsPersonName(id2))} <i class="ti ti-x" onclick="opsTogglePerson('${f.key}','${id2}')"></i></span>`).join('');
+    const users=(window.__allActiveUsers||[]).filter(u=>u.active!==false).map(u=>`<option value="${u.id}">${esc(u.name)} (${esc(u.store||'')})</option>`).join('');
+    return `<div id="${id}" data-sel='${JSON.stringify(sel)}'><div class="ops-pchips">${chips}</div>
+      <select class="form-input" onchange="opsAddPerson('${f.key}',this.value);this.value='';"><option value="">+ 담당자 추가</option>${users}</select></div>`;
+  }
+  return `<input id="${id}" class="form-input" value="${esc(val||'')}">`;
+}
+function opsTogglePerson(key,uid){ opsRemovePerson(key,uid); }
+function opsAddPerson(key,uid){ if(!uid) return; const box=document.getElementById('opsf-'+key); let sel=JSON.parse(box.getAttribute('data-sel')||'[]'); if(!sel.map(String).includes(String(uid))) sel.push(uid); box.setAttribute('data-sel',JSON.stringify(sel)); opsRenderPersonChips(key,sel); }
+function opsRemovePerson(key,uid){ const box=document.getElementById('opsf-'+key); let sel=JSON.parse(box.getAttribute('data-sel')||'[]').filter(x=>String(x)!==String(uid)); box.setAttribute('data-sel',JSON.stringify(sel)); opsRenderPersonChips(key,sel); }
+function opsRenderPersonChips(key,sel){ const box=document.getElementById('opsf-'+key); const chips=sel.map(id2=>`<span class="ops-pchip">${esc(opsPersonName(id2))} <i class="ti ti-x" onclick="opsRemovePerson('${key}','${id2}')"></i></span>`).join(''); box.querySelector('.ops-pchips').innerHTML=chips; }
+
+function opsOpenCard(cardId, groupId){
+  const O=window.__ops;
+  const c = cardId ? O.cards.find(x=>x.id===cardId) : { id:null, group_id:groupId, card_type:(O.cardTypes[0]&&O.cardTypes[0].name)||'', title:'', data:{}, attachments:[] };
+  window.__opsEditingCard=JSON.parse(JSON.stringify(c));
+  window.__opsModalOpen=true;
+  if(cardId) opsBroadcastEditing(cardId,true);
+  const typeSel=O.cardTypes.map(t=>`<option value="${esc(t.name)}"${c.card_type===t.name?' selected':''}>${esc(t.name)}</option>`).join('');
+  const visKeys=opsFieldsForType(c.card_type);
+  const fieldsHtml=O.fields.filter(f=>visKeys.includes(f.key)).map(f=>`
+    <div class="form-row"><label class="form-label">${esc(f.label)}${f.required?' <span style="color:var(--rd)">*</span>':''}</label>
+      ${opsFieldInput(f, c.data?c.data[f.key]:'')}</div>`).join('');
+  const attHtml=(c.attachments||[]).map((a,i)=>`<div class="ops-att"><a href="${esc(a.url)}" target="_blank"><i class="ti ti-paperclip"></i> ${esc(a.name)}</a> <i class="ti ti-x" onclick="opsRemoveAtt(${i})"></i></div>`).join('');
+  const delBtn=cardId&&opsCanManage()?`<button class="btn-cancel-sm" style="color:var(--rd)" onclick="opsDeleteCard(${cardId})"><i class="ti ti-trash"></i> 삭제</button>`:'';
+  const modal=document.createElement('div');
+  modal.className='modal-overlay'; modal.id='opsCardModal';
+  modal.innerHTML=`<div class="modal-box" style="max-width:560px">
+    <div class="modal-head"><b>${cardId?'카드 편집':'새 카드'}</b><button onclick="opsCloseCard()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+    <div class="modal-body" style="max-height:70vh;overflow-y:auto">
+      <div class="form-row"><label class="form-label">유형</label><select id="opsCardType" class="form-input" onchange="opsChangeType(this.value)">${typeSel}</select></div>
+      <div class="form-row"><label class="form-label">제목 <span style="color:var(--rd)">*</span></label><input id="opsCardTitle" class="form-input" value="${esc(c.title||'')}"></div>
+      <div id="opsCardFields">${fieldsHtml}</div>
+      <div class="form-row"><label class="form-label">첨부파일</label>
+        <div id="opsAttList">${attHtml}</div>
+        <input type="file" id="opsAttFile" style="display:none" onchange="opsUploadAtt(this)">
+        <button class="btn-cancel-sm" style="margin-top:6px" onclick="document.getElementById('opsAttFile').click()"><i class="ti ti-upload"></i> 파일 추가</button>
+      </div>
+    </div>
+    <div class="modal-foot" style="display:flex;gap:8px;justify-content:space-between">
+      <div>${delBtn}</div>
+      <div style="display:flex;gap:8px"><button class="btn-cancel-sm" onclick="opsCloseCard()">취소</button><button class="btn-submit" onclick="opsSaveCard()">저장</button></div>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+function opsChangeType(typeName){
+  const O=window.__ops; window.__opsEditingCard.card_type=typeName;
+  // 현재 입력값 보존
+  opsCollectInto(window.__opsEditingCard);
+  const c=window.__opsEditingCard;
+  const visKeys=opsFieldsForType(typeName);
+  document.getElementById('opsCardFields').innerHTML=O.fields.filter(f=>visKeys.includes(f.key)).map(f=>`
+    <div class="form-row"><label class="form-label">${esc(f.label)}${f.required?' <span style="color:var(--rd)">*</span>':''}</label>
+      ${opsFieldInput(f, c.data?c.data[f.key]:'')}</div>`).join('');
+}
+function opsCollectInto(c){
+  const O=window.__ops; c.data=c.data||{};
+  const t=document.getElementById('opsCardTitle'); if(t) c.title=t.value.trim();
+  const visKeys=opsFieldsForType(document.getElementById('opsCardType')?document.getElementById('opsCardType').value:c.card_type);
+  O.fields.filter(f=>visKeys.includes(f.key)).forEach(f=>{
+    const el=document.getElementById('opsf-'+f.key);
+    if(!el) return;
+    if(f.type==='checkbox') c.data[f.key]=el.checked;
+    else if(f.type==='person') c.data[f.key]=JSON.parse(el.getAttribute('data-sel')||'[]');
+    else c.data[f.key]=el.value;
+  });
+}
+async function opsUploadAtt(input){
+  const file=input.files&&input.files[0]; if(!file) return;
+  if(isTestMode()){ alert('테스트 모드에서는 첨부할 수 없습니다.'); input.value=''; return; }
+  const list=document.getElementById('opsAttList');
+  const tmp=document.createElement('div'); tmp.className='ops-att'; tmp.textContent='업로드 중...'; list.appendChild(tmp);
+  const url=await nUploadFile(file,'opsboard');
+  tmp.remove();
+  if(!url){ alert('업로드 실패'); return; }
+  window.__opsEditingCard.attachments=window.__opsEditingCard.attachments||[];
+  window.__opsEditingCard.attachments.push({name:file.name,url});
+  list.insertAdjacentHTML('beforeend',`<div class="ops-att"><a href="${esc(url)}" target="_blank"><i class="ti ti-paperclip"></i> ${esc(file.name)}</a> <i class="ti ti-x" onclick="opsRemoveAtt(${window.__opsEditingCard.attachments.length-1})"></i></div>`);
+  input.value='';
+}
+function opsRemoveAtt(i){ const c=window.__opsEditingCard; c.attachments.splice(i,1);
+  document.getElementById('opsAttList').innerHTML=(c.attachments||[]).map((a,j)=>`<div class="ops-att"><a href="${esc(a.url)}" target="_blank"><i class="ti ti-paperclip"></i> ${esc(a.name)}</a> <i class="ti ti-x" onclick="opsRemoveAtt(${j})"></i></div>`).join(''); }
+
+async function opsSaveCard(){
+  if(isTestMode()){ alert('테스트 모드에서는 저장할 수 없습니다.'); return; }
+  const c=window.__opsEditingCard;
+  opsCollectInto(c);
+  if(!c.title){ alert('제목을 입력해주세요.'); return; }
+  // 날짜 필수 검사 (해당 유형에 마감일 필드가 있으면)
+  const O=window.__ops;
+  const visKeys=opsFieldsForType(c.card_type);
+  const dueField=O.fields.find(f=>f.key==='_due'&&f.required&&visKeys.includes('_due'));
+  if(dueField && !(c.data&&c.data._due)){ alert('마감일을 입력해주세요.'); return; }
+  const payload={ board_id:O.boardId, group_id:c.group_id, card_type:c.card_type, title:c.title, data:c.data||{}, attachments:c.attachments||[], updated_by:currentUser.id, updated_at:new Date().toISOString() };
+  let saved;
+  if(c.id){ const {data,error}=await sb.from('ops_cards').update(payload).eq('id',c.id).select().single(); if(error){alert('오류: '+error.message);return;} saved=data; }
+  else { payload.created_by=currentUser.id; const maxSort=O.cards.filter(x=>x.group_id===c.group_id).reduce((m,x)=>Math.max(m,x.sort_order||0),0); payload.sort_order=maxSort+1; const {data,error}=await sb.from('ops_cards').insert(payload).select().single(); if(error){alert('오류: '+error.message);return;} saved=data; }
+  // 로컬 갱신
+  const idx=O.cards.findIndex(x=>x.id===saved.id);
+  if(idx>=0) O.cards[idx]=saved; else O.cards.push(saved);
+  if(c.id) opsBroadcastEditing(c.id,false);
+  opsCloseCard();
+  document.getElementById('opsBoard').innerHTML=opsGroupsHtml();
+  opsSyncSheet(saved).catch(()=>{});
+}
+async function opsDeleteCard(id){
+  if(!confirm('이 카드를 삭제할까요?')) return;
+  await sb.from('ops_cards').delete().eq('id',id);
+  window.__ops.cards=window.__ops.cards.filter(c=>c.id!==id);
+  opsBroadcastEditing(id,false);
+  opsCloseCard();
+  document.getElementById('opsBoard').innerHTML=opsGroupsHtml();
+}
+function opsCloseCard(){
+  const c=window.__opsEditingCard;
+  if(c&&c.id) opsBroadcastEditing(c.id,false);
+  window.__opsModalOpen=false; window.__opsEditingCard=null;
+  document.getElementById('opsCardModal')?.remove();
+  if(window.__opsPendingReload){ window.__opsPendingReload=false; opsReloadSoft(); }
+}
+
+// ── 속성/유형 관리 ──
+function opsOpenFields(){
+  const O=window.__ops;
+  const fieldRows=O.fields.map((f,i)=>`
+    <div class="ops-fieldrow" data-i="${i}">
+      <input class="form-input ops-fl" style="flex:2" value="${esc(f.label)}" placeholder="속성명">
+      <select class="form-input ops-ft" style="flex:1"${f.core?' disabled':''}>
+        ${['text','textarea','select','date','number','checkbox','person'].map(t=>`<option value="${t}"${f.type===t?' selected':''}>${({text:'텍스트',textarea:'긴글',select:'선택',date:'날짜',number:'숫자',checkbox:'체크',person:'담당자'})[t]}</option>`).join('')}
+      </select>
+      <input class="form-input ops-fo" style="flex:2" value="${esc((f.options||[]).join(', '))}" placeholder="선택 옵션(쉼표)"${f.type!=='select'?' style="display:none"':''}>
+      <label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="ops-fr" ${f.required?'checked':''}> 필수</label>
+      ${f.core?'<span style="font-size:10px;color:var(--th);width:44px">기본</span>':`<button class="ops-col-del" onclick="this.closest('.ops-fieldrow').remove()"><i class="ti ti-trash"></i></button>`}
+      <input type="hidden" class="ops-fk" value="${esc(f.key)}"><input type="hidden" class="ops-fc" value="${f.core?'1':''}">
+    </div>`).join('');
+  const typeRows=O.cardTypes.map((t,i)=>`
+    <div class="ops-typerow" data-i="${i}">
+      <input class="form-input ops-tn" style="flex:1" value="${esc(t.name)}" placeholder="유형명">
+      <div class="ops-tfields" style="flex:2">${O.fields.map(f=>`<label style="font-size:11px;margin-right:8px;white-space:nowrap"><input type="checkbox" class="ops-tf" data-key="${f.key}" ${(t.fields||[]).includes(f.key)?'checked':''}> ${esc(f.label)}</label>`).join('')}</div>
+      <button class="ops-col-del" onclick="this.closest('.ops-typerow').remove()"><i class="ti ti-trash"></i></button>
+    </div>`).join('');
+  const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='opsFieldsModal';
+  modal.innerHTML=`<div class="modal-box" style="max-width:680px">
+    <div class="modal-head"><b>속성 · 카드 유형 관리</b><button onclick="document.getElementById('opsFieldsModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+    <div class="modal-body" style="max-height:70vh;overflow-y:auto">
+      <div class="section-label">속성 (항목/입력형식)</div>
+      <div id="opsFieldRows">${fieldRows}</div>
+      <button class="btn-cancel-sm" style="margin:8px 0" onclick="opsAddFieldRow()"><i class="ti ti-plus"></i> 속성 추가</button>
+      <div class="section-label" style="margin-top:16px">카드 유형 (유형별 표시 속성 선택)</div>
+      <div id="opsTypeRows">${typeRows}</div>
+      <button class="btn-cancel-sm" style="margin:8px 0" onclick="opsAddTypeRow()"><i class="ti ti-plus"></i> 유형 추가</button>
+    </div>
+    <div class="modal-foot" style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-cancel-sm" onclick="document.getElementById('opsFieldsModal').remove()">취소</button>
+      <button class="btn-submit" onclick="opsSaveFields()">저장</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.querySelectorAll('.ops-ft').forEach(sel=>sel.addEventListener('change',function(){ const fo=this.closest('.ops-fieldrow').querySelector('.ops-fo'); fo.style.display=this.value==='select'?'':'none'; }));
+}
+function opsAddFieldRow(){ const box=document.getElementById('opsFieldRows'); const div=document.createElement('div'); div.className='ops-fieldrow';
+  div.innerHTML=`<input class="form-input ops-fl" style="flex:2" placeholder="속성명">
+    <select class="form-input ops-ft" style="flex:1">${['text','textarea','select','date','number','checkbox','person'].map(t=>`<option value="${t}">${({text:'텍스트',textarea:'긴글',select:'선택',date:'날짜',number:'숫자',checkbox:'체크',person:'담당자'})[t]}</option>`).join('')}</select>
+    <input class="form-input ops-fo" style="flex:2;display:none" placeholder="선택 옵션(쉼표)">
+    <label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="ops-fr"> 필수</label>
+    <button class="ops-col-del" onclick="this.closest('.ops-fieldrow').remove()"><i class="ti ti-trash"></i></button>
+    <input type="hidden" class="ops-fk" value=""><input type="hidden" class="ops-fc" value="">`;
+  box.appendChild(div);
+  div.querySelector('.ops-ft').addEventListener('change',function(){ div.querySelector('.ops-fo').style.display=this.value==='select'?'':'none'; });
+}
+function opsAddTypeRow(){ const O=window.__ops; const box=document.getElementById('opsTypeRows'); const div=document.createElement('div'); div.className='ops-typerow';
+  div.innerHTML=`<input class="form-input ops-tn" style="flex:1" placeholder="유형명">
+    <div class="ops-tfields" style="flex:2">${O.fields.map(f=>`<label style="font-size:11px;margin-right:8px;white-space:nowrap"><input type="checkbox" class="ops-tf" data-key="${f.key}"> ${esc(f.label)}</label>`).join('')}</div>
+    <button class="ops-col-del" onclick="this.closest('.ops-typerow').remove()"><i class="ti ti-trash"></i></button>`;
+  box.appendChild(div);
+}
+async function opsSaveFields(){
+  const fields=[]; const usedKeys={};
+  document.querySelectorAll('#opsFieldRows .ops-fieldrow').forEach(row=>{
+    const label=row.querySelector('.ops-fl').value.trim(); if(!label) return;
+    const type=row.querySelector('.ops-ft').value;
+    let key=row.querySelector('.ops-fk').value; const core=row.querySelector('.ops-fc').value==='1';
+    if(!key){ key='f_'+label.replace(/[^a-zA-Z0-9가-힣]/g,'').slice(0,12)+'_'+Math.random().toString(36).slice(2,6); }
+    if(usedKeys[key]) key=key+'_'+Math.random().toString(36).slice(2,5); usedKeys[key]=1;
+    const f={key,label,type,core:core||undefined};
+    if(type==='select') f.options=row.querySelector('.ops-fo').value.split(',').map(s=>s.trim()).filter(Boolean);
+    if(row.querySelector('.ops-fr').checked) f.required=true;
+    fields.push(f);
+  });
+  const cardTypes=[];
+  document.querySelectorAll('#opsTypeRows .ops-typerow').forEach(row=>{
+    const name=row.querySelector('.ops-tn').value.trim(); if(!name) return;
+    const fkeys=[...row.querySelectorAll('.ops-tf:checked')].map(x=>x.getAttribute('data-key'));
+    cardTypes.push({name,fields:fkeys});
+  });
+  const {error}=await sb.from('ops_boards').update({fields,card_types:cardTypes}).eq('id',window.__ops.boardId);
+  if(error){alert('오류: '+error.message);return;}
+  const b=window.__ops.boards.find(x=>x.id===window.__ops.boardId); if(b){b.fields=fields;b.card_types=cardTypes;}
+  window.__ops.fields=fields; window.__ops.cardTypes=cardTypes;
+  document.getElementById('opsFieldsModal').remove();
+  opsRender(document.getElementById('contentArea'));
+}
+
+// ── 실시간 동기화 + 편집중 표시 ──
+function opsSubscribe(){
+  const O=window.__ops;
+  if(O.channel){ try{ sb.removeChannel(O.channel); }catch(e){} O.channel=null; }
+  const bid=O.boardId;
+  const ch=sb.channel('ops_board_'+bid, {config:{broadcast:{self:false}}});
+  ch.on('postgres_changes',{event:'*',schema:'public',table:'ops_cards',filter:'board_id=eq.'+bid},()=>opsReloadSoft())
+    .on('postgres_changes',{event:'*',schema:'public',table:'ops_groups',filter:'board_id=eq.'+bid},()=>opsReloadSoft())
+    .on('broadcast',{event:'editing'},({payload})=>{ if(!payload) return; O.editing[payload.cardId]=payload.on?payload:null; if(!payload.on) delete O.editing[payload.cardId]; if(currentPage==='opsboard'&&!window.__opsModalOpen){ const b=document.getElementById('opsBoard'); if(b) b.innerHTML=opsGroupsHtml(); } })
+    .subscribe();
+  O.channel=ch;
+}
+function opsBroadcastEditing(cardId,on){ const O=window.__ops; if(!O.channel) return; try{ O.channel.send({type:'broadcast',event:'editing',payload:{cardId,on,userId:currentUser.id,name:currentUser.name}}); }catch(e){} }
+let __opsReloadT=null;
+function opsReloadSoft(){
+  if(currentPage!=='opsboard') return;
+  if(window.__opsModalOpen){ window.__opsPendingReload=true; return; }
+  clearTimeout(__opsReloadT);
+  __opsReloadT=setTimeout(async()=>{ await opsLoadBoardData(); const b=document.getElementById('opsBoard'); if(b) b.innerHTML=opsGroupsHtml(); },400);
+}
+
+// ── 총괄 백업 / 시트 동기화 ──
+async function opsBackup(){
+  if(!opsIsMaster()){ alert('백업 권한이 없습니다.'); return; }
+  const O=window.__ops;
+  const board=O.boards.find(b=>b.id===O.boardId);
+  const {data:groups}=await sb.from('ops_groups').select('*').eq('board_id',O.boardId);
+  const {data:cards}=await sb.from('ops_cards').select('*').eq('board_id',O.boardId);
+  // JSON
+  const backup={_meta:{created_at:new Date().toISOString(),board:board?board.name:'',by:currentUser.name},board,groups:groups||[],cards:cards||[]};
+  const now=new Date(); const ts=now.getFullYear()+('0'+(now.getMonth()+1)).slice(-2)+('0'+now.getDate()).slice(-2)+'_'+('0'+now.getHours()).slice(-2)+('0'+now.getMinutes()).slice(-2);
+  opsDownload(JSON.stringify(backup,null,2),'application/json','운영보드_'+ (board?board.name:'') +'_'+ts+'.json');
+  // CSV (요약)
+  const gmap={}; (groups||[]).forEach(g=>gmap[g.id]=g.name);
+  const hdr=['묶음','유형','제목','상태','담당자','마감일','우선순위','내용','첨부수','수정일'];
+  const rows=[hdr.join(',')];
+  (cards||[]).forEach(c=>{ const d=c.data||{}; const as=(d._assignees||[]).map(opsPersonName).join(' '); const row=[gmap[c.group_id]||'',c.card_type||'',c.title||'',d._status||'',as,d._due||'',d._priority||'',(d._body||'').replace(/\n/g,' '),(c.attachments||[]).length,(c.updated_at||'').slice(0,10)].map(v=>'"'+String(v).replace(/"/g,'""')+'"'); rows.push(row.join(',')); });
+  opsDownload('﻿'+rows.join('\n'),'text/csv','운영보드_'+(board?board.name:'')+'_'+ts+'.csv');
+  alert('백업(JSON+CSV)이 다운로드되었습니다. 안전한 곳에 보관하세요.');
+}
+function opsDownload(content,type,filename){ const blob=new Blob([content],{type}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); }
+async function opsSheetSetup(){
+  if(!opsIsMaster()) return;
+  const {data}=await sb.from('app_settings').select('value').eq('key','ops_board_sheet_webhook').maybeSingle();
+  const cur=data&&data.value?data.value:'';
+  const url=prompt('스프레드시트 요약 동기화 웹훅 URL (Google Apps Script /exec).\n비우면 동기화 안 함:',cur);
+  if(url===null) return;
+  await sb.from('app_settings').upsert({key:'ops_board_sheet_webhook',value:url.trim()},{onConflict:'key'});
+  alert(url.trim()?'저장되었습니다. 이후 카드 저장 시 요약이 시트로 전송됩니다.':'동기화가 해제되었습니다.');
+}
+async function opsSyncSheet(card){
+  try{
+    const {data}=await sb.from('app_settings').select('value').eq('key','ops_board_sheet_webhook').maybeSingle();
+    const url=data&&data.value?data.value:''; if(!url) return;
+    const O=window.__ops; const board=O.boards.find(b=>b.id===O.boardId); const g=O.groups.find(x=>x.id===card.group_id);
+    const d=card.data||{};
+    const payload={action:'ops_card',board:board?board.name:'',group:g?g.name:'',type:card.card_type||'',title:card.title||'',status:d._status||'',assignees:(d._assignees||[]).map(opsPersonName).join(' '),due:d._due||'',priority:d._priority||'',body:d._body||'',updated_at:card.updated_at||'',by:currentUser.name};
+    await fetch(url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  }catch(e){}
+}
+
 
 async function saveUISettings(){
   const name = document.getElementById('cfg-name')?.value.trim()||APP.app_name;
@@ -7167,6 +7714,8 @@ function applyMenuPermissions() {
   // 관리 섹션: 관리 관련 권한이 하나라도 있으면 표시
   const anyAdmin = hasPerm('staff_view') || hasPerm('notice_stats') || hasPerm('notif_setting') || hasPerm('app_manage') || hasPerm('manual_edit') || hasPerm('perm_setting');
   show('adminNav', anyAdmin);
+  show('opsNav', opsCanSee());
+  if(window.__ops && !window.__ops.__allowedLoaded && typeof opsLoadAllowed==='function'){ opsLoadAllowed().then(function(){ window.__ops.__allowedLoaded=true; const el=document.getElementById('opsNav'); if(el) el.style.display=opsCanSee()?'':'none'; }); }
   // 업무 신청 섹션
   show('requestNav', hasPerm('req_write') || hasPerm('req_process'));
   // 완료 내역: 매니저·관리자 전원 열람 (매장 일반 직원 제외)
