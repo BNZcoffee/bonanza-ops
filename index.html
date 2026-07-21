@@ -8329,6 +8329,12 @@ async function submitRequest() {
     formData[fields[i].label] = val;
   }
 
+  // 테스트 모드: 실제 저장·알림 없이 종료 (검증 흐름은 위에서 이미 체험)
+  if (isTestMode()) {
+    alert('✅ 테스트 모드입니다.\n입력하신 내용은 실제로 접수되거나 담당자에게 알림이 가지 않습니다.');
+    return;
+  }
+
   // 중복 접수 방지 (연타/재시도로 같은 신청 여러 건 생성되는 문제 차단)
   if (window.__reqSubmitting) return;
   window.__reqSubmitting = true;
