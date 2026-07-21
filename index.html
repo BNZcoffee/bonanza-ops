@@ -305,6 +305,8 @@ textarea.form-input{min-height:120px;resize:vertical}
 .ops-reorder{display:inline-flex;flex-direction:column;flex-shrink:0}
 .ops-reorder button{background:none;border:none;cursor:pointer;color:var(--th);font-size:12px;line-height:1;padding:0}
 .ops-cfrow{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--crd)}
+.ops-cc{padding:7px 0;border-bottom:0.5px solid var(--crd)}
+.ops-cc.rep{margin-left:16px;background:var(--crm);border-radius:8px;padding:7px 9px;border-bottom:none;margin-top:5px}
 .ops-card-snip{font-size:11px;color:var(--th);margin-top:4px;line-height:1.4;max-height:30px;overflow:hidden}
 #opsDocBox{background:#fff;border-radius:0 0 8px 8px}
 #opsDocBox .ql-editor{min-height:150px;font-size:13px}
@@ -6468,6 +6470,7 @@ function opsRender(area){
   const isMind = board && board.type==='mind';
   const boardBtns = opsCanManage()?`<button class="btn-cancel-sm" onclick="opsRenameBoard()"><i class="ti ti-edit"></i> 이름</button>`:'';
   const delBoardBtn = opsIsMaster()?`<button class="btn-cancel-sm" style="color:var(--rd)" onclick="opsDeleteBoard()" title="이 항목 삭제(총괄)"><i class="ti ti-trash"></i></button>`:'';
+  const dupBoardBtn = opsCanManage()?`<button class="btn-cancel-sm" onclick="opsDuplicateBoard()"><i class="ti ti-copy"></i> 복제</button>`:'';
   const __parts=(window.__opsPeople||[]).filter(u=>u.active!==false && (u.is_master||(O.allowed||[]).map(String).includes(String(u.id))));
   const partStrip = `<div class="ops-parts"><i class="ti ti-users"></i> <b>참여</b> <span>${__parts.map(u=>esc(u.name)).join(', ')||'(총괄만)'}</span> ${opsIsMaster()?`<button class="ops-parts-edit" onclick="opsPermMgr()"><i class="ti ti-settings"></i> 참여 인원 관리</button>`:''}</div>`;
   area.innerHTML = `
@@ -6475,7 +6478,7 @@ function opsRender(area){
     ${partStrip}
     <div class="ops-header">
       <div class="ops-tabs">${tabs}${addBoardBtn}</div>
-      <div class="ops-actions">${isMind?'':(manageBtns+masterBtns)}${boardBtns}${delBoardBtn}</div>
+      <div class="ops-actions">${isMind?'':(manageBtns+masterBtns)}${boardBtns}${dupBoardBtn}${delBoardBtn}</div>
     </div>
     ${isMind ? opsMindShell() : `
     <div class="ops-toolbar">
@@ -6689,7 +6692,7 @@ function opsEditCard(cardId, groupId){
   </div>`;
   document.body.appendChild(modal);
   try{
-    window.__opsQuill=new Quill('#opsDocBox',{theme:'snow',placeholder:'자유롭게 작성하세요 — 제목/목록/체크리스트/이미지/링크',modules:{toolbar:{container:[[{header:[1,2,3,false]}],['bold','italic','underline','strike'],[{list:'ordered'},{list:'bullet'},{list:'check'}],['blockquote','code-block'],['link','image'],['clean']],handlers:{image:opsDocImage}}}});
+    window.__opsQuill=new Quill('#opsDocBox',{theme:'snow',placeholder:'자유롭게 작성하세요 — 제목/목록/체크리스트/이미지/링크',modules:{toolbar:{container:[[{header:[1,2,3,false]}],['bold','italic','underline','strike'],[{background:['#fff59d','#b2f2bb','#ffc9c9','#a5d8ff','#ffd8a8',false]},{color:[]}],[{list:'ordered'},{list:'bullet'},{list:'check'}],['blockquote','code-block'],['link','image'],['clean']],handlers:{image:opsDocImage}}}});
     if(c.data&&c.data._doc) window.__opsQuill.root.innerHTML=c.data._doc;
   }catch(e){ window.__opsQuill=null; }
   modal.addEventListener('input', opsAutosaveDeb);
@@ -6856,11 +6859,45 @@ function opsSaveCardFields(){
 }
 function opsMoveFieldRow(btn,dir){ const row=btn.closest('.ops-fieldrow'); if(dir<0&&row.previousElementSibling) row.parentNode.insertBefore(row,row.previousElementSibling); else if(dir>0&&row.nextElementSibling) row.parentNode.insertBefore(row.nextElementSibling,row); }
 function opsPickTypeColor(el){ const row=el.closest('.ops-typerow'); row.querySelector('.ops-tcolor').value=el.getAttribute('data-c'); row.querySelectorAll('.ops-cdot').forEach(d=>d.style.outline=(d===el)?'2px solid #2b1a0e':'none'); }
+async function opsDuplicateBoard(){
+  if(!opsCanManage()) return;
+  const O=window.__ops; const b=O.boards.find(x=>x.id===O.boardId); if(!b) return;
+  if(!confirm('"'+b.name+'" 항목을 복제할까요?\n안의 내용도 함께 복사됩니다.')) return;
+  const so=O.boards.length;
+  const {data:nb,error}=await sb.from('ops_boards').insert({name:b.name+' (복사)',type:b.type||'board',fields:b.fields,card_types:b.card_types,sort_order:so}).select().single();
+  if(error){ alert('오류: '+error.message); return; }
+  try{
+    if((b.type||'board')==='mind'){
+      const {data:nodes}=await sb.from('ops_mind_nodes').select('*').eq('board_id',b.id); const idMap={};
+      for(const n of (nodes||[])){ const {data:nn}=await sb.from('ops_mind_nodes').insert({board_id:nb.id,text:n.text,x:n.x,y:n.y,color:n.color,data:n.data||{},created_by:currentUser.id,updated_by:currentUser.id}).select().single(); if(nn) idMap[n.id]=nn.id; }
+      const {data:edges}=await sb.from('ops_mind_edges').select('*').eq('board_id',b.id);
+      for(const e of (edges||[])){ const ff=idMap[e.from_id], tt=idMap[e.to_id]; if(ff&&tt){ try{ await sb.from('ops_mind_edges').insert({board_id:nb.id,from_id:ff,to_id:tt}); }catch(x){} } }
+    } else {
+      const {data:groups}=await sb.from('ops_groups').select('*').eq('board_id',b.id).order('sort_order'); const gMap={};
+      for(const g of (groups||[])){ const {data:ng}=await sb.from('ops_groups').insert({board_id:nb.id,name:g.name,color:g.color,sort_order:g.sort_order}).select().single(); if(ng) gMap[g.id]=ng.id; }
+      const {data:cards}=await sb.from('ops_cards').select('*').eq('board_id',b.id);
+      for(const c of (cards||[])){ await sb.from('ops_cards').insert({board_id:nb.id,group_id:gMap[c.group_id]||null,card_type:c.card_type,title:c.title,data:c.data||{},attachments:c.attachments||[],sort_order:c.sort_order,created_by:currentUser.id,updated_by:currentUser.id}); }
+    }
+  }catch(e){ alert('내용 복제 중 일부 오류: '+e.message); }
+  O.boards.push(nb); O.boardId=nb.id; O.filter={}; O.view='board';
+  await opsLoadBoardData(); opsSubscribe(); opsRender(document.getElementById('contentArea'));
+  alert('복제되었습니다.');
+}
+async function opsDuplicateGroup(id){
+  const O=window.__ops; const g=O.groups.find(x=>x.id===id); if(!g) return;
+  const so=O.groups.length;
+  const {data:ng,error}=await sb.from('ops_groups').insert({board_id:O.boardId,name:g.name+' (복사)',color:g.color,sort_order:so}).select().single();
+  if(error){ alert('오류: '+error.message); return; }
+  O.groups.push(ng);
+  const cards=O.cards.filter(c=>c.group_id===id);
+  for(const c of cards){ const {data:nc}=await sb.from('ops_cards').insert({board_id:O.boardId,group_id:ng.id,card_type:c.card_type,title:c.title,data:c.data||{},attachments:c.attachments||[],sort_order:c.sort_order,created_by:currentUser.id,updated_by:currentUser.id}).select().single(); if(nc) O.cards.push(nc); }
+  document.getElementById('opsBoard').innerHTML=opsGroupsHtml();
+}
 function opsGroupMenu(e,id){
   e.stopPropagation();
   document.getElementById('opsGroupMenu')?.remove();
   const m=document.createElement('div'); m.id='opsGroupMenu'; m.className='ops-menu';
-  m.innerHTML=`<button onclick="opsCloseGroupMenu();opsRenameGroup(${id})"><i class="ti ti-edit"></i> 이름 수정</button><button onclick="opsCloseGroupMenu();opsDeleteGroup(${id})" style="color:var(--rd)"><i class="ti ti-trash"></i> 삭제 (총괄)</button>`;
+  m.innerHTML=`<button onclick="opsCloseGroupMenu();opsRenameGroup(${id})"><i class="ti ti-edit"></i> 이름 수정</button><button onclick="opsCloseGroupMenu();opsDuplicateGroup(${id})"><i class="ti ti-copy"></i> 복제</button><button onclick="opsCloseGroupMenu();opsDeleteGroup(${id})" style="color:var(--rd)"><i class="ti ti-trash"></i> 삭제 (총괄)</button>`;
   document.body.appendChild(m);
   const r=e.target.getBoundingClientRect(); m.style.left=Math.max(8,r.left-90)+'px'; m.style.top=(r.bottom+4)+'px';
   setTimeout(()=>document.addEventListener('click',opsCloseGroupMenu,{once:true}),0);
@@ -6884,11 +6921,37 @@ function opsOpenCard(cardId, groupId){
   const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='opsCardModal';
   modal.innerHTML=`<div class="modal-box" style="max-width:560px">
     <div class="modal-head"><span style="display:flex;align-items:center;gap:8px">${c.card_type?`<span class="ops-type" style="background:${tcolor};color:#fff;border-color:${tcolor}">${esc(c.card_type)}</span>`:''}<b>${esc(c.title||'(제목 없음)')}</b></span><button onclick="document.getElementById('opsCardModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
-    <div class="modal-body" style="max-height:66vh;overflow-y:auto">${fieldsHtml}${(c.data&&c.data._doc&&c.data._doc.replace(/<[^>]+>/g,'').trim())?`<div class="ops-doc">${c.data._doc}</div>`:''}${(!fieldsHtml&&!(c.data&&c.data._doc))?'<div style="color:var(--th);font-size:13px">내용이 없습니다.</div>':''}${attHtml}<div style="margin-top:14px;font-size:11px;color:var(--th);border-top:0.5px solid var(--crd);padding-top:10px">${meta}${lockBadge?' · '+lockBadge:''}</div></div>
+    <div class="modal-body" style="max-height:66vh;overflow-y:auto">${fieldsHtml}${(c.data&&c.data._doc&&c.data._doc.replace(/<[^>]+>/g,'').trim())?`<div class="ops-doc">${c.data._doc}</div>`:''}${(!fieldsHtml&&!(c.data&&c.data._doc))?'<div style="color:var(--th);font-size:13px">내용이 없습니다.</div>':''}${attHtml}<div style="margin-top:14px;font-size:11px;color:var(--th);border-top:0.5px solid var(--crd);padding-top:10px">${meta}${lockBadge?' · '+lockBadge:''}</div><div id="opsCcSection" style="margin-top:12px"></div></div>
     <div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="opsCopyCardLink(${cardId})"><i class="ti ti-link"></i> 링크 복사</button><button class="btn-cancel-sm" onclick="document.getElementById('opsCardModal').remove()">닫기</button>${actionBtns}</div>
   </div>`;
   document.body.appendChild(modal);
+  opsLoadCardComments(cardId);
 }
+async function opsLoadCardComments(cardId){
+  const box=document.getElementById('opsCcSection'); if(!box) return;
+  let list=[];
+  try{ const {data}=await sb.from('ops_card_comments').select('*').eq('card_id',cardId).order('created_at'); list=data||[]; }
+  catch(e){ box.innerHTML='<div style="font-size:11px;color:var(--th)">피드백 기능 준비 중 (총괄에게 문의: ops_card_comments.sql)</div>'; return; }
+  const top=list.filter(c=>!c.parent_id); const reps={}; list.filter(c=>c.parent_id).forEach(c=>{(reps[c.parent_id]=reps[c.parent_id]||[]).push(c);});
+  const one=(c,isRep)=>{ const mine=String(c.author_id)===String(currentUser.id); const del=(mine||opsIsMaster())?`<i class="ti ti-trash" style="cursor:pointer;color:var(--th);font-size:12px" onclick="opsCardCommentDelete(${c.id},${cardId})"></i>`:''; const rep=!isRep?`<i class="ti ti-corner-down-right" style="cursor:pointer;color:var(--th);font-size:12px" title="답글" onclick="opsCardCommentReplyUI(${c.id},${cardId},event)"></i>`:''; return `<div class="ops-cc${isRep?' rep':''}"><div style="display:flex;gap:6px;align-items:center"><b style="font-size:12px">${esc(opsPersonName(c.author_id))}</b><span style="font-size:10px;color:var(--th)">${fmtDateTime(c.created_at)}</span><span style="margin-left:auto;display:flex;gap:8px">${rep}${del}</span></div><div style="font-size:13px;white-space:pre-wrap;word-break:break-word">${esc(c.body)}</div></div>`; };
+  const html=top.map(c=>one(c,false)+((reps[c.id]||[]).map(r=>one(r,true)).join(''))).join('')||'<div style="font-size:12px;color:var(--th)">아직 피드백이 없습니다.</div>';
+  box.innerHTML=`<div class="section-label" style="font-size:12px;margin-bottom:6px"><i class="ti ti-messages"></i> 피드백 (${list.length})</div>${html}<div style="display:flex;gap:6px;margin-top:8px"><textarea id="opsCcInput" class="form-input" style="min-height:40px;font-size:13px" placeholder="피드백을 남겨주세요 (본문 하이라이트 부분 언급 가능)"></textarea><button class="btn-comment-submit" onclick="opsCardCommentSubmit(${cardId},null)">등록</button></div>`;
+}
+async function opsCardCommentSubmit(cardId,parentId){
+  if(isTestMode()){ alert('테스트 모드에서는 작성할 수 없습니다.'); return; }
+  const inp=document.getElementById(parentId?('opsCcReplyInput_'+parentId):'opsCcInput'); const body=inp?inp.value.trim():''; if(!body) return;
+  const {error}=await sb.from('ops_card_comments').insert({card_id:cardId,board_id:window.__ops.boardId,author_id:currentUser.id,body,parent_id:parentId});
+  if(error){ alert('오류: '+error.message); return; }
+  opsLoadCardComments(cardId);
+}
+function opsCardCommentReplyUI(parentId,cardId,e){
+  if(document.getElementById('opsCcReplyBox_'+parentId)) return;
+  const anchor=e.target.closest('.ops-cc'); if(!anchor) return;
+  const div=document.createElement('div'); div.id='opsCcReplyBox_'+parentId; div.style.cssText='display:flex;gap:6px;margin:6px 0';
+  div.innerHTML=`<textarea id="opsCcReplyInput_${parentId}" class="form-input" style="min-height:34px;font-size:12px" placeholder="답글"></textarea><button class="btn-comment-submit" onclick="opsCardCommentSubmit(${cardId},${parentId})">등록</button>`;
+  anchor.appendChild(div);
+}
+async function opsCardCommentDelete(id,cardId){ if(!confirm('삭제할까요?')) return; await sb.from('ops_card_comments').delete().eq('id',id); opsLoadCardComments(cardId); }
 // 마인드맵 연결모드 / 검색 / 위치이동
 function opsMindToggleLink(){ window.__mindConnectMode=!window.__mindConnectMode; window.__mindLinkFrom=null; const b=document.getElementById('opsMindLinkBtn'); if(b) b.classList.toggle('active',window.__mindConnectMode); opsMindSetHint(window.__mindConnectMode?'연결모드: 이어붙일 두 노드를 차례로 클릭하세요 (다시 누르면 해제)':''); opsMindRender(); }
 function opsMindSearch(q){
