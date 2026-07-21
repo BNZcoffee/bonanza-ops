@@ -287,6 +287,19 @@ textarea.form-input{min-height:120px;resize:vertical}
 .mind-edges{position:absolute;top:0;left:0;overflow:visible;pointer-events:none}
 .mind-edges line{stroke:#b9a894;stroke-width:2.5;pointer-events:stroke;cursor:pointer}
 .mind-node.highlight{outline:3px solid #4a90d9;outline-offset:2px}
+.mind-group{position:absolute;border-radius:14px;box-sizing:border-box;cursor:grab;touch-action:none}
+.mind-group-label{position:absolute;top:6px;left:10px;font-size:12px;font-weight:700;color:var(--ts);background:rgba(255,255,255,.6);border-radius:6px;padding:1px 8px;cursor:pointer}
+.mind-group-resize{position:absolute;right:2px;bottom:2px;width:16px;height:16px;cursor:nwse-resize;border-radius:0 0 10px 0;background:linear-gradient(135deg,transparent 45%,rgba(43,26,14,.35) 45%)}
+#opsMindGroups{position:absolute;top:0;left:0}
+.toggle-block{border:1px solid var(--crd);border-radius:8px;margin:6px 0;overflow:hidden}
+.toggle-block summary{cursor:pointer;padding:7px 12px;font-weight:600;background:var(--crm);list-style:none;display:flex;align-items:center;gap:6px}
+.toggle-block summary::-webkit-details-marker{display:none}
+.toggle-block summary::before{content:'▶';font-size:10px;color:var(--th)}
+.toggle-block[open] summary::before{content:'▼'}
+.toggle-block .toggle-content{padding:8px 12px;border-top:1px solid var(--crd);background:#fff;font-size:13px}
+.tg-edit{display:none;margin-left:auto;color:var(--th);cursor:pointer;font-size:13px}
+.ql-editor .tg-edit{display:inline}
+.ql-toggle{margin:6px 0}
 .ops-mind-search{position:relative}
 .ops-mind-search input{border:0.5px solid var(--crd);border-radius:8px;padding:6px 10px;font-size:12px;min-width:150px;outline:none}
 .ops-mind-results{position:absolute;top:100%;left:0;margin-top:4px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);max-height:220px;overflow-y:auto;min-width:190px;display:none;z-index:8}
@@ -2480,15 +2493,7 @@ function renderNewPost(area, ex) {
               if(url){const r=nQuill.getSelection()||{index:0};nQuill.insertEmbed(r.index,'image',url);}
             };
           },
-          toggle:()=>{
-            const sel = nQuill.getSelection()||{index:nQuill.getLength()-1,length:0};
-            const selText = sel.length > 0 ? nQuill.getText(sel.index, sel.length) : '제목';
-            const idx = sel.index;
-            // 선택 텍스트 지우고 토글 HTML 삽입
-            if(sel.length > 0) nQuill.deleteText(idx, sel.length);
-            const html = '<details class="toggle-block"><summary>' + selText + '</summary><div class="toggle-content">내용을 입력하세요</div></details>';
-            nQuill.clipboard.dangerouslyPasteHTML(idx, html);
-          }
+          toggle:()=>{ opsInsertToggle(nQuill); }
         }
       }},
       placeholder:'공지 내용을 입력하세요...'
@@ -6683,7 +6688,7 @@ function opsEditCard(cardId, groupId){
       <div class="form-row"><label class="form-label">제목 <span style="color:var(--rd)">*</span></label><input id="opsCardTitle" class="form-input" value="${esc(c.title||'')}"></div>
       <div style="display:flex;justify-content:flex-end;margin-bottom:4px"><button class="btn-cancel-sm" style="font-size:11px;padding:4px 8px" onclick="opsCardFieldsConfig()"><i class="ti ti-adjustments-horizontal"></i> 표시 속성·순서</button></div>
       <div id="opsCardFields">${fieldsHtml}</div>
-      <div class="form-row"><label class="form-label">문서 (자유 편집) <span style="font-size:10px;color:var(--th);font-weight:400">· @이름 멘션 · 형광펜(툴바 배경색)</span></label><div class="ops-docbar"><button type="button" class="btn-cancel-sm" onclick="opsDocTableInsert()"><i class="ti ti-table"></i> 표</button><button type="button" class="btn-cancel-sm" onclick="opsDocColumns()"><i class="ti ti-columns"></i> 다단</button><button type="button" class="btn-cancel-sm" onclick="opsDocTable('insertRowBelow')">행+</button><button type="button" class="btn-cancel-sm" onclick="opsDocTable('deleteRow')">행-</button><button type="button" class="btn-cancel-sm" onclick="opsDocTable('insertColumnRight')">열+</button><button type="button" class="btn-cancel-sm" onclick="opsDocTable('deleteColumn')">열-</button><button type="button" class="btn-cancel-sm" onclick="opsDocTable('deleteTable')">표삭제</button></div><div id="opsDocBox"></div></div>
+      <div class="form-row"><label class="form-label">문서 (자유 편집) <span style="font-size:10px;color:var(--th);font-weight:400">· @이름 멘션 · 형광펜(툴바 배경색)</span></label><div class="ops-docbar"><button type="button" class="btn-cancel-sm" onclick="opsInsertToggle(window.__opsQuill)"><i class="ti ti-chevrons-down"></i> 토글</button><button type="button" class="btn-cancel-sm" onclick="opsDocTableInsert()"><i class="ti ti-table"></i> 표</button><button type="button" class="btn-cancel-sm" onclick="opsDocColumns()"><i class="ti ti-columns"></i> 다단</button><button type="button" class="btn-cancel-sm" onclick="opsDocTable('insertRowBelow')">행+</button><button type="button" class="btn-cancel-sm" onclick="opsDocTable('deleteRow')">행-</button><button type="button" class="btn-cancel-sm" onclick="opsDocTable('insertColumnRight')">열+</button><button type="button" class="btn-cancel-sm" onclick="opsDocTable('deleteColumn')">열-</button><button type="button" class="btn-cancel-sm" onclick="opsDocTable('deleteTable')">표삭제</button></div><div id="opsDocBox"></div></div>
       <div class="form-row"><label class="form-label">첨부파일</label>
         <div id="opsAttList">${attHtml}</div>
         <input type="file" id="opsAttFile" style="display:none" onchange="opsUploadAtt(this)">
@@ -6706,6 +6711,11 @@ function opsDocEnsureSel(){ const q=window.__opsQuill; if(!q) return; q.focus();
 function opsDocTable(method){ try{ const t=window.__opsQuill&&window.__opsQuill.getModule('table'); if(!t) return; opsDocEnsureSel(); t[method](); }catch(e){} }
 function opsDocTableInsert(){ const r=parseInt(prompt('행 수 (1~12):','3')||'0',10); if(!r) return; const c=parseInt(prompt('열 수 (1~8):','3')||'0',10); if(!c) return; try{ opsDocEnsureSel(); window.__opsQuill.getModule('table').insertTable(Math.min(12,Math.max(1,r)),Math.min(8,Math.max(1,c))); }catch(e){ alert('표 삽입 실패: '+e.message); } }
 function opsDocColumns(){ const n=parseInt(prompt('분할 수 (2~5): 이미지·텍스트를 가로로 나눠 배치합니다','2')||'0',10); if(!n) return; try{ opsDocEnsureSel(); window.__opsQuill.getModule('table').insertTable(1,Math.min(5,Math.max(2,n))); }catch(e){ alert('다단 삽입 실패: '+e.message); } }
+(function(){ try{ if(!window.Quill||window.__toggleReg) return; window.__toggleReg=true; const BE=Quill.import('blots/block/embed'); class TG extends BE{ static create(v){ const node=super.create(); v=v||{}; const t=v.title||'접기 제목'; const b=v.body||'내용'; node.setAttribute('data-tt',t); node.setAttribute('data-bb',b); const d=document.createElement('details'); d.className='toggle-block'; const sm=document.createElement('summary'); sm.innerHTML=esc(t)+' <span class="tg-edit" title="편집">✎</span>'; const bd=document.createElement('div'); bd.className='toggle-content'; bd.innerHTML=b; d.appendChild(sm); d.appendChild(bd); node.appendChild(d); return node; } static value(node){ return {title:node.getAttribute('data-tt')||'', body:node.getAttribute('data-bb')||''}; } } TG.blotName='toggleblock'; TG.tagName='DIV'; TG.className='ql-toggle'; Quill.register(TG,true); }catch(e){} })();
+function opsInsertToggle(q){ if(!q) return; const sel=q.getSelection(true); const idx=sel?sel.index:q.getLength(); q.insertEmbed(idx,'toggleblock',{title:'접기 제목',body:'내용'}); q.setSelection(idx+1,0); setTimeout(function(){ const ns=q.root.querySelectorAll('.ql-toggle'); if(ns.length) opsToggleEdit(ns[ns.length-1]); },30); }
+function opsToggleEdit(node){ if(!node) return; window.__tgNode=node; const title=node.getAttribute('data-tt')||''; const bodyHtml=node.getAttribute('data-bb')||''; const bodyText=bodyHtml.replace(/<br\s*\/?>/gi,'\n').replace(/<[^>]+>/g,''); const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='tgEditModal'; modal.style.zIndex='340'; modal.innerHTML=`<div class="modal-box" style="max-width:440px"><div class="modal-head"><b>토글(접기) 편집</b><button onclick="document.getElementById('tgEditModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body"><label class="form-label">제목</label><input id="tgTitle" class="form-input" value="${esc(title)}"><label class="form-label" style="margin-top:10px">내용</label><textarea id="tgBody" class="form-input" style="min-height:110px">${esc(bodyText)}</textarea></div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('tgEditModal').remove()">취소</button><button class="btn-submit" onclick="opsToggleSave()">저장</button></div></div>`; document.body.appendChild(modal); }
+function opsToggleSave(){ const node=window.__tgNode; if(!node){ document.getElementById('tgEditModal')?.remove(); return; } const title=document.getElementById('tgTitle').value; const bodyHtml=esc(document.getElementById('tgBody').value).replace(/\n/g,'<br>'); node.setAttribute('data-tt',title); node.setAttribute('data-bb',bodyHtml); const sm=node.querySelector('summary'); if(sm) sm.innerHTML=esc(title)+' <span class="tg-edit" title="편집">✎</span>'; const bd=node.querySelector('.toggle-content'); if(bd) bd.innerHTML=bodyHtml; document.getElementById('tgEditModal').remove(); }
+document.addEventListener('click',function(e){ const t=e.target; if(t&&t.classList&&t.classList.contains('tg-edit')){ e.preventDefault(); e.stopPropagation(); const host=t.closest('.ql-toggle'); if(host) opsToggleEdit(host); } });
 function opsDocImage(){ const q=window.__opsQuill; if(!q) return; if(isTestMode()){ alert('테스트 모드에서는 첨부할 수 없습니다.'); return; } const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.onchange=async()=>{ const fl=inp.files&&inp.files[0]; if(!fl) return; const url=await nUploadFile(fl,'opsboard'); if(url){ const r=q.getSelection()||{index:q.getLength()}; q.insertEmbed(r.index,'image',url); q.setSelection(r.index+1); } }; inp.click(); }
 function opsChangeType(typeName){
   const O=window.__ops; opsCollectInto(window.__opsEditingCard);
@@ -7231,6 +7241,7 @@ function opsMindShell(){
   return `<div class="ops-mind" id="opsMind">
     <div class="ops-mind-tools">
       <button class="btn-cancel-sm" onclick="opsMindAddNode()"><i class="ti ti-plus"></i> 항목</button>
+      <button class="btn-cancel-sm" onclick="opsMindAddGroup()"><i class="ti ti-box"></i> 꾸러미</button>
       <button class="btn-cancel-sm" id="opsMindLinkBtn" onclick="opsMindToggleLink()"><i class="ti ti-link"></i> 연결모드</button>
       <button class="btn-cancel-sm" onclick="opsMindTemplateMenu(event)"><i class="ti ti-template"></i> 템플릿</button>
       <button class="btn-cancel-sm" onclick="opsMindExportImage()"><i class="ti ti-photo-down"></i> 이미지 저장</button>
@@ -7244,6 +7255,7 @@ function opsMindShell(){
     </div>
     <div class="ops-mind-vp" id="opsMindVp" onpointerdown="opsMindPanStart(event)" onwheel="opsMindWheel(event)">
       <div class="ops-mind-world" id="opsMindWorld">
+        <div id="opsMindGroups"></div>
         <svg class="mind-edges" id="opsMindEdges" width="8000" height="8000"></svg>
         <div id="opsMindNodes"></div>
       </div>
@@ -7287,7 +7299,11 @@ function opsMindApplyTransform(){
 function opsMindRender(){
   const nodesDiv=document.getElementById('opsMindNodes'); if(!nodesDiv) return;
   const m=window.__mind;
-  nodesDiv.innerHTML=m.nodes.map(n=>`<div class="mind-node${window.__mindLinkFrom===n.id?' linking':''}${window.__mindHighlight===n.id?' highlight':''}" style="left:${n.x}px;top:${n.y}px;border-left:5px solid ${n.color||'#c98a3a'}" onpointerdown="opsMindNodeDown(event,${n.id})">${(n.data&&n.data._link)?'<i class="ti ti-link" style="color:#4a90d9;font-size:11px"></i> ':''}${esc(n.text||'')}</div>`).join('');
+  const items=m.nodes.filter(n=>!(n.data&&n.data.shape==='group'));
+  const groups=m.nodes.filter(n=>n.data&&n.data.shape==='group');
+  nodesDiv.innerHTML=items.map(n=>`<div class="mind-node${window.__mindLinkFrom===n.id?' linking':''}${window.__mindHighlight===n.id?' highlight':''}" data-nid="${n.id}" style="left:${n.x}px;top:${n.y}px;border-left:5px solid ${n.color||'#c98a3a'}" onpointerdown="opsMindNodeDown(event,${n.id})">${(n.data&&n.data._link)?'<i class="ti ti-link" style="color:#4a90d9;font-size:11px"></i> ':''}${esc(n.text||'')}</div>`).join('');
+  const gDiv=document.getElementById('opsMindGroups');
+  if(gDiv) gDiv.innerHTML=groups.map(g=>{ const w=(g.data&&g.data.w)||300,h=(g.data&&g.data.h)||200,label=(g.data&&g.data.label)||'꾸러미',col=g.color||'#e9e2d6'; return `<div class="mind-group" data-nid="${g.id}" style="left:${g.x}px;top:${g.y}px;width:${w}px;height:${h}px;background:${col}59;border:1.5px dashed ${col}" onpointerdown="opsMindNodeDown(event,${g.id})"><div class="mind-group-label" onpointerdown="event.stopPropagation()" onclick="opsMindGroupEdit(${g.id})">${esc(label)}</div><div class="mind-group-resize" onpointerdown="opsMindGroupResizeDown(event,${g.id})"></div></div>`; }).join('');
   opsMindRenderEdges();
 }
 
@@ -7307,7 +7323,8 @@ function opsMindPointerMove(e){
   const dx=e.clientX-m.drag.sx, dy=e.clientY-m.drag.sy;
   if(Math.abs(dx)+Math.abs(dy)>3) m.drag.moved=true;
   if(m.drag.kind==='pan'){ m.panX=m.drag.ox+dx; m.panY=m.drag.oy+dy; opsMindApplyTransform(); }
-  else { const n=m.nodes.find(x=>x.id===m.drag.id); if(n){ n.x=Math.round(m.drag.ox+dx/m.zoom); n.y=Math.round(m.drag.oy+dy/m.zoom); const el=[...document.querySelectorAll('#opsMindNodes .mind-node')].find(x=>x.getAttribute('onpointerdown').includes('opsMindNodeDown(event,'+n.id+')')); if(el){ el.style.left=n.x+'px'; el.style.top=n.y+'px'; } opsMindRenderEdges(); } }
+  else if(m.drag.kind==='gresize'){ const g=m.nodes.find(x=>x.id===m.drag.id); if(g){ g.data=g.data||{}; g.data.w=Math.max(120,Math.round(m.drag.ow+dx/m.zoom)); g.data.h=Math.max(80,Math.round(m.drag.oh+dy/m.zoom)); const el=document.querySelector('.mind-group[data-nid="'+g.id+'"]'); if(el){ el.style.width=g.data.w+'px'; el.style.height=g.data.h+'px'; } } }
+  else { const n=m.nodes.find(x=>x.id===m.drag.id); if(n){ n.x=Math.round(m.drag.ox+dx/m.zoom); n.y=Math.round(m.drag.oy+dy/m.zoom); const el=document.querySelector('[data-nid="'+n.id+'"]'); if(el){ el.style.left=n.x+'px'; el.style.top=n.y+'px'; } opsMindRenderEdges(); } }
 }
 function opsMindRenderEdges(){
   const svg=document.getElementById('opsMindEdges'); if(!svg) return;
@@ -7317,6 +7334,7 @@ function opsMindRenderEdges(){
 async function opsMindPointerUp(e){
   const m=window.__mind; if(!m.drag) return;
   const d=m.drag; m.drag=null;
+  if(d.kind==='gresize'){ const g=m.nodes.find(x=>x.id===d.id); if(g){ try{ await sb.from('ops_mind_nodes').update({data:g.data,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',g.id); }catch(e){} } return; }
   if(d.kind==='node'){
     if(d.moved){ const n=m.nodes.find(x=>x.id===d.id); if(n){ try{ await sb.from('ops_mind_nodes').update({x:n.x,y:n.y,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',n.id); }catch(err){} } }
     else { opsMindNodeClick(d.id); }
@@ -7337,7 +7355,14 @@ async function opsMindAddNode(){
   if(error){ alert('오류: '+error.message); return; }
   m.nodes.push(data); opsMindRender(); opsMindOpenNode(data.id);
 }
+function opsMindGroupResizeDown(e,id){ e.stopPropagation(); const g=window.__mind.nodes.find(x=>x.id===id); if(!g) return; window.__mind.drag={kind:'gresize',id,sx:e.clientX,sy:e.clientY,ow:(g.data&&g.data.w)||300,oh:(g.data&&g.data.h)||200,moved:false}; }
+async function opsMindAddGroup(){ if(isTestMode()){ alert('테스트 모드에서는 추가할 수 없습니다.'); return; } const vp=document.getElementById('opsMindVp'); const m=window.__mind; const cx=Math.round((-m.panX+(vp?vp.clientWidth/2:300))/m.zoom)-150; const cy=Math.round((-m.panY+(vp?vp.clientHeight/2:200))/m.zoom)-100; const {data,error}=await sb.from('ops_mind_nodes').insert({board_id:window.__ops.boardId,text:'',x:cx,y:cy,color:'#c9b8a4',data:{shape:'group',w:320,h:220,label:'꾸러미'},created_by:currentUser.id,updated_by:currentUser.id}).select().single(); if(error){ if(/data|column|schema|42703/i.test((error.message||'')+(error.code||''))){ alert('꾸러미는 ops_mind_link.sql(data 컬럼) 적용이 필요합니다.'); } else alert('오류: '+error.message); return; } m.nodes.push(data); opsMindRender(); }
+function opsMindGroupEdit(id){ const g=window.__mind.nodes.find(x=>x.id===id); if(!g) return; window.__mindGroupId=id; window.__mindGroupColor=g.color||'#c9b8a4'; const cols=['#c9b8a4','#8fb8d9','#8fc99a','#e0989a','#b79fd9','#e0b56b']; const sw=cols.map(c=>`<span onclick="opsMindGroupColor('${c}')" data-c="${c}" style="width:24px;height:24px;border-radius:6px;background:${c};cursor:pointer;display:inline-block;border:2px solid ${g.color===c?'#2b1a0e':'#fff'}"></span>`).join(''); const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='mindGroupModal'; modal.innerHTML=`<div class="modal-box" style="max-width:360px"><div class="modal-head"><b>꾸러미</b><button onclick="document.getElementById('mindGroupModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body"><label class="form-label">이름</label><input id="mindGroupLabel" class="form-input" value="${esc((g.data&&g.data.label)||'꾸러미')}"><div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">색상 ${sw}</div></div><div class="modal-foot" style="display:flex;justify-content:space-between;gap:8px"><button class="btn-cancel-sm" style="color:var(--rd)" onclick="opsMindGroupDelete(${id})"><i class="ti ti-trash"></i> 삭제</button><div style="display:flex;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('mindGroupModal').remove()">취소</button><button class="btn-submit" onclick="opsMindGroupSave()">저장</button></div></div></div>`; document.body.appendChild(modal); }
+function opsMindGroupColor(c){ window.__mindGroupColor=c; document.querySelectorAll('#mindGroupModal [data-c]').forEach(sp=>sp.style.border='2px solid '+(sp.getAttribute('data-c')===c?'#2b1a0e':'#fff')); }
+async function opsMindGroupSave(){ const id=window.__mindGroupId; const g=window.__mind.nodes.find(x=>x.id===id); if(!g) return; const label=document.getElementById('mindGroupLabel').value; const color=window.__mindGroupColor||g.color; g.data=g.data||{}; g.data.label=label; g.color=color; await sb.from('ops_mind_nodes').update({color,data:g.data,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',id); document.getElementById('mindGroupModal').remove(); opsMindRender(); }
+async function opsMindGroupDelete(id){ if(!confirm('이 꾸러미를 삭제할까요? (안의 항목은 그대로 유지됩니다)')) return; await sb.from('ops_mind_nodes').delete().eq('id',id); window.__mind.nodes=window.__mind.nodes.filter(n=>n.id!==id); document.getElementById('mindGroupModal')?.remove(); opsMindRender(); }
 function opsMindNodeClick(id){
+  const gn=window.__mind.nodes.find(x=>x.id===id); if(gn&&gn.data&&gn.data.shape==='group'){ opsMindGroupEdit(id); return; }
   if(window.__mindConnectMode || window.__mindLinkFrom){
     if(!window.__mindLinkFrom){ window.__mindLinkFrom=id; opsMindSetHint('연결할 다른 노드를 클릭하세요'); opsMindRender(); return; }
     if(window.__mindLinkFrom!==id){ opsMindCreateEdge(window.__mindLinkFrom,id); }
