@@ -155,7 +155,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--cr);color:var(
 .comment-item:last-child{border-bottom:none}
 .comment-head{display:flex;align-items:center;gap:8px;margin-bottom:5px}
 .comment-avatar{width:28px;height:28px;border-radius:50%;background:var(--crm);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--br);flex-shrink:0}
-.comment-body{font-size:13px;color:var(--tm);line-height:1.6;padding-left:36px}
+.comment-body{font-size:13px;color:var(--tm);line-height:1.6;padding-left:36px;white-space:pre-wrap;word-break:break-word}
 .comment-reply-wrap{margin-left:16px;padding-left:12px;border-left:2px solid var(--crd);margin-top:2px}
 .comment-reply{background:var(--crm);border-radius:8px;padding:8px 8px 8px 4px;margin-top:4px}
 .comment-input-row{display:flex;gap:8px;margin-top:14px;align-items:flex-start}
@@ -1967,7 +1967,7 @@ let readListHtml = '';
           <span style="font-size:11px;color:var(--th);margin-left:auto">${fmtDateTime(c.created_at)}</span>
           <button onclick="startReply(${p.id},${c.id},'${safeName}')" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:6px" title="\uB2F5\uAE00"><i class="ti ti-corner-down-right"></i></button>
           ${isMine ? `<button onclick="editCmt(${c.id})" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:2px"><i class="ti ti-edit"></i></button>` : ''}
-          ${(isMine||isAdminUser) ? `<button onclick="delCmt(${c.id},${p.id})" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:2px"><i class="ti ti-trash"></i></button>` : ''}
+          ${(isMine||isAdminUser||currentUser.is_master||currentUser.is_vice_master) ? `<button onclick="delCmt(${c.id},${p.id})" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px;margin-left:2px"><i class="ti ti-trash"></i></button>` : ''}
         </div>
         <div class="comment-body" id="cbody-${c.id}">${esc(c.body)}</div>
         ${imgHtml}
@@ -5937,7 +5937,9 @@ function cmtRemoveImage(postId){
 
 // ── 댓글 수정/삭제 ───────────────────────────────────────────────
 async function delCmt(cmtId, postId){
-  if (!confirm('댓글을 삭제할까요?')) return;
+  const pw = prompt('댓글을 삭제하려면 비밀번호를 입력하세요.\n(실수 삭제 방지를 위한 확인입니다)');
+  if (!pw) return;
+  if (!(await reauth(pw))) { alert('비밀번호가 일치하지 않습니다.'); return; }
   await sb.from('comments').delete().eq('id',cmtId);
   openPostById(postId);
 }
