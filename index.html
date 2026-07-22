@@ -1429,7 +1429,7 @@ async function updateNotifDot() {
     
     // 1. 단순하게 posts 가져오기
     const { data: posts, error: postErr } = await sb.from('posts')
-      .select('id, category_id')
+      .select('id, category_id, require_read')
       .gte('created_at', week)
       .eq('status', 'published');
       
@@ -1438,7 +1438,7 @@ async function updateNotifDot() {
 
     const { data: myReads } = await sb.from('post_reads').select('post_id').eq('user_id', currentUser.id);
     const readIds = new Set((myReads || []).map(r => r.post_id));
-    const unread = posts.filter(p => !readIds.has(p.id));
+    const unread = posts.filter(p => !readIds.has(p.id) && p.require_read!==false);
 
     // 나에게 배정된 미완료 신청 개수
     let myReqCount = 0;
@@ -1862,7 +1862,7 @@ async function renderPostDetail(area) {
   const accLbl = p.access==='all'?'전 직원':'매니저 이상';
 
   let confirmHtml = '';
-  if (!isAdmin) {
+  if (!isAdmin && p.require_read!==false) {
     if (myRead) {
       confirmHtml = `<div class="confirm-section"><button class="btn-confirm done" disabled><i class="ti ti-check"></i> 확인 완료</button><div class="confirm-time">확인 일시: ${fmtDate(myRead.read_at)} ${myRead.read_at?.slice(11,16)||''}</div></div>`;
     } else {
@@ -2462,6 +2462,12 @@ function renderNewPost(area, ex) {
         </div>
       </div>
       <div class="form-row">
+        <div class="toggle-row">
+          <div><div class="toggle-label">확인 체크 사용</div><div class="toggle-sub">'확인했습니다' 버튼·미확인 리마인드를 사용합니다 (업무 박제용은 끄세요)</div></div>
+          <button class="toggle-switch${(!ex || ex.require_read!==false)?' on':''}" id="readToggle" onclick="this.classList.toggle('on')"></button>
+        </div>
+      </div>
+      <div class="form-row">
         <label class="form-label">첨부파일</label>
         <div id="existingAtts"></div>
         <div style="border:0.5px dashed var(--crd);border-radius:8px;padding:16px;background:var(--cr);text-align:center;cursor:pointer" onclick="document.getElementById('nFileInput').click()">
@@ -2974,9 +2980,10 @@ async function submitPost(isDraft=false) {
   }
 
   const payload = {category_id:catId, title, body, access:selectedAccess,
-    comments_on:commentsOn, author_id:currentUser.id, status,
+    comments_on:commentsOn, require_read:(document.getElementById('readToggle')?document.getElementById('readToggle').classList.contains('on'):true), author_id:currentUser.id, status,
     scheduled_at:scheduledAt, ref_post_ids:refIds, updated_at:new Date().toISOString()};
 
+  const __isNewPost = !nEditingId;
   let postId = nEditingId;
   if(nEditingId){
     const {error} = await sb.from('posts').update(payload).eq('id',nEditingId);
@@ -3009,8 +3016,8 @@ async function submitPost(isDraft=false) {
   updateNotifDot();
 
   // 슬랙 채널 알림 발송 (published 상태일 때만)
-  if(status === 'published' && postId) {
-    // ── 권한별 자동 알림 발송 ──
+  if(status === 'published' && postId && __isNewPost) {
+    // ── 권한별 자동 알림 발송 (신규 등록 시에만 — 수정 시 재발송 금지) ──
     await sendRoleBasedPostNotify(postId, title);
     // 채널 웹훅 발송 중단 — 개인 DM으로 일원화 (sendRoleBasedPostNotify가 각자 DM 발송)
     // sendPostSlackNotify(postId, title, catId);
@@ -4460,8 +4467,9 @@ function pickRemind(v){
 async function sendRemind(postId){
   const target = window.__remindModalTarget || 'unread';
   if(target==='all'){
-    // 전 직원 대상: 모든 읽음 기록 삭제 → 알림창에 다시 뜸
+    // 전 직원(현장) 대상: 읽음 기록 삭제 → 알림창에 다시 뜸. 단 본사(부서담당·부총괄·총괄·admin/hr)는 제외 처리
     await sb.from('post_reads').delete().eq('post_id',postId);
+    try{ const {data:__allu}=await sb.from('users').select('id,role,is_master,is_vice_master,part').eq('active',true); const __hq=(__allu||[]).filter(u=>u.is_master||u.is_vice_master||u.role==='admin'||u.role==='hr'||u.part); if(__hq.length){ const __now2=new Date().toISOString(); await sb.from('post_reads').insert(__hq.map(u=>({post_id:postId,user_id:u.id,read_at:__now2}))); } }catch(e){}
   } else {
     // 미확인자만: 아무것도 안 지움 (이미 미확인자에겐 알림창에 떠있음)
     // 단, 리마인드 기록만 남김
@@ -4483,6 +4491,7 @@ async function checkAndSend3DayReminders() {
     // 1. 설정창(두 번째 사진)에서 자동 리마인드 스위치가 켜져 있는지 확인
     const { data: ns } = await sb.from('notification_settings').select('remind_unread').single();
     if (!ns || !ns.remind_unread) return; // 스위치가 꺼져있으면 조용히 종료
+    { const __h=new Date(Date.now()+9*3600*1000).getUTCHours(); if(__h<9) return; } // 오전 9시(KST) 이후에만 발송
 
     // 2. 하루에 한 번만 실행되도록 방어막 설정 (중복 발송 방지)
     const today = new Date().toDateString();
@@ -4493,11 +4502,12 @@ async function checkAndSend3DayReminders() {
 
     // 4. 3일이 지난 공지사항 모두 찾기
     const { data: oldNotices } = await sb.from('posts')
-      .select('id, title')
+      .select('id, title, require_read')
       .eq('status', 'published')
       .lte('created_at', threeDaysAgo);
     
     if (!oldNotices || oldNotices.length === 0) return;
+    const __notices = oldNotices.filter(n=>n.require_read!==false); // 확인 체크 미사용(박제용) 공지는 리마인드 제외
 
     // 5. 첫 번째 사진의 완벽한 필터링 로직 적용 (admin, hr, 본사 직원 제외)
     const { data: activeUsers } = await sb.from('users').select('id,role,is_master,is_vice_master,part,slack_member_id').eq('active', true);
@@ -4508,7 +4518,7 @@ async function checkAndSend3DayReminders() {
     let sentCount = 0;
 
     // 6. 각 공지별로 안 읽은 현장 직원 찾아내서 슬랙 쏘기
-    for (const notice of oldNotices) {
+    for (const notice of __notices) {
       const { data: reads } = await sb.from('post_reads').select('user_id').eq('post_id', notice.id);
       const readUserIds = new Set((reads || []).map(r => r.user_id));
       
@@ -5942,6 +5952,7 @@ async function deletePart(id, name) {
 
 async function createNotification(userId, type, refId, refType, message) {
   if (!userId) return;
+  if (typeof notifEnabled==='function' && !notifEnabled(type)) return; // 알림설정에서 끈 종류는 앱 알림도 생성 안 함
   const { error } = await sb.from('notifications').insert({
     user_id: userId, type, ref_id: refId, ref_type: refType, message,
     is_read: false, created_at: new Date().toISOString()
