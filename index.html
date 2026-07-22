@@ -9216,6 +9216,18 @@ function canEditStaff() {
   return hasPerm('staff_edit');
 }
 
+function reqViewerReason(u, r, coPartNames){
+  if(!u) return '';
+  if(u.is_master) return '총괄';
+  if(u.role==='admin') return '운영팀';
+  if(r.author_id && String(u.id)===String(r.author_id)) return '작성자';
+  if(r.assignee_id && String(u.id)===String(r.assignee_id)) return '담당자';
+  if(u.part && r.part_name && u.part===r.part_name) return '담당파트';
+  if(u.part && Array.isArray(coPartNames) && coPartNames.indexOf(u.part)>=0) return '공동파트';
+  if(isManagerRole(u.role)){ const rs=(r.store||'').trim(); if((u.store||'').trim()===rs || (Array.isArray(u.sub_stores)&&u.sub_stores.map(x=>(x||'').trim()).indexOf(rs)>=0)) return '매니저'; }
+  if(Array.isArray(r.extra_viewers) && r.extra_viewers.map(String).indexOf(String(u.id))>=0) return '추가';
+  return '';
+}
 function canSeeReq(r) {
   if (!currentUser) return false;
   if (currentUser.is_master) return true;            // 마스터: 전체
@@ -9888,7 +9900,10 @@ async function renderReqDetail(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
 
   const { data: atts } = await sb.from('request_attachments').select('*').eq('request_id', r.id);
-  const { data: assignableUsers } = await sb.from('users').select('id,name,store,part,role').eq('active', true).order('name');
+  const { data: assignableUsers } = await sb.from('users').select('id,name,store,part,role,is_master,sub_stores').eq('active', true).order('name');
+  const { data: __typeRow } = await sb.from('request_types').select('co_parts').eq('id', r.type_id).maybeSingle();
+  if(!window.__parts||!window.__parts.length){ const {data:__pp}=await sb.from('parts').select('id,name'); window.__parts=__pp||[]; }
+  const __coPartNames = (((__typeRow&&__typeRow.co_parts)||[]).map(function(pid){ const p=(window.__parts||[]).find(x=>Number(x.id)===Number(pid)); return p?p.name:null; }).filter(Boolean));
   window.__assignable = assignableUsers || [];
   const st = REQ_STATUS[r.status] || REQ_STATUS.submitted;
   const typeName = r.request_types ? r.request_types.name : '신청';
@@ -9958,24 +9973,13 @@ async function renderReqDetail(area) {
       '<div style="font-size:11px;color:var(--th);margin-top:8px">처리 완료를 누르려면 <strong>담당자</strong>와 <strong>처리 완료일</strong>이 모두 지정되어야 합니다.</div></div>';
   }
 
-  // 열람 권한 부여 영역 (마스터/관리자만 — 교육 등 목적)
+  // 열람 권한 관리 (총괄/운영팀만 — 담당 파트 외 추가/제외)
   let viewerHtml = '';
   if (currentUser.is_master || currentUser.role === 'admin') {
-    const extraIds = Array.isArray(r.extra_viewers) ? r.extra_viewers : [];
-    let extraNames = '';
-    if (extraIds.length) {
-      const { data: evUsers } = await sb.from('users').select('id,name,store').in('id', extraIds);
-      extraNames = (evUsers||[]).map(u =>
-        `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--crm);border-radius:12px;padding:3px 10px;font-size:11px;margin:2px">
-          ${u.name}${u.store?' ('+u.store+')':''}
-          <i class="ti ti-x" style="cursor:pointer;color:var(--rd)" onclick="removeReqViewer(${r.id},'${u.id}')"></i>
-        </span>`).join('');
-    }
     viewerHtml =
       '<div style="border-top:0.5px solid var(--crd);margin-top:14px;padding-top:14px">' +
-      '<div class="section-label">열람 권한 부여 <span style="font-weight:400;color:var(--th)">(교육 등 목적으로 다른 직원에게 열람 허용)</span></div>' +
-      '<div style="margin:6px 0">' + (extraNames || '<span style="font-size:12px;color:var(--th)">추가 열람자가 없습니다.</span>') + '</div>' +
-      '<button class="btn-cancel-sm" onclick="openViewerPicker(' + r.id + ')"><i class="ti ti-user-plus"></i> 열람자 추가</button>' +
+      '<div class="section-label">열람 권한 관리 <span style="font-weight:400;color:var(--th)">(담당 파트 외 추가 열람 허용/해제)</span></div>' +
+      '<button class="btn-cancel-sm" onclick="openViewerPicker(' + r.id + ')"><i class="ti ti-user-cog"></i> 열람자 추가/관리</button>' +
       '</div>';
   }
 
@@ -9988,6 +9992,8 @@ async function renderReqDetail(area) {
   const authorName = r.author ? (r.author.name + (r.author.store ? ' ('+r.author.store+')' : '')) : '-';
   const assigneeName = r.assignee ? r.assignee.name : '(배정 대기)';
 
+  const __reqViewers = (assignableUsers||[]).filter(u=>reqViewerReason(u,r,__coPartNames)!=='');
+  const reqViewerStrip = '<div style="background:#eef4fb;border:1px solid #cddff0;border-left:4px solid #3b6fb0;border-radius:10px;padding:9px 12px;margin-bottom:12px"><div style="font-size:12px;font-weight:700;color:#2c5480;margin-bottom:5px"><i class="ti ti-eye"></i> 열람 권한자 · 담당 파트 <b>'+esc(r.part_name||'-')+'</b></div><div style="line-height:1.9">'+(__reqViewers.map(function(u){ var rn=reqViewerReason(u,r,__coPartNames); return '<span style=\'display:inline-block;background:#fff;border:0.5px solid #cddff0;border-radius:10px;padding:2px 9px;margin:2px;font-size:12px;color:#33475b\'>'+esc(u.name)+'<span style=\'font-size:10px;color:#6b8cae;margin-left:4px\'>'+rn+'</span></span>'; }).join('')||'<span style=\'font-size:12px;color:#6b8cae\'>-</span>')+'</div></div>';
   // 삭제 가능 여부: 작성자=접수됨만, 총괄=전 상태
   const canDelete = (r.author_id === currentUser.id && r.status === 'submitted') || currentUser.is_master;
   const deleteBtn = canDelete
@@ -10016,6 +10022,7 @@ async function renderReqDetail(area) {
         (r.due_date ? '<div style="display:flex;padding:4px 0"><div style="width:130px;color:var(--th)">처리 예정일</div><div>' + r.due_date + '</div></div>' : '') +
         (r.done_date ? '<div style="display:flex;padding:4px 0"><div style="width:130px;color:var(--th)">처리 완료일</div><div style="font-weight:600;color:var(--gn)">' + r.done_date + '</div></div>' : '') +
       '</div>' +
+      reqViewerStrip +
       '<div class="section-label">신청 내용</div>' +
       '<div style="margin-bottom:6px">' + contentHtml + '</div>' +
       attHtml + rejectHtml + manageHtml + viewerHtml +
@@ -10210,45 +10217,25 @@ async function submitReqComment(reqId) {
 }
 
 // 열람 권한 부여 (교육 등 목적)
-async function openViewerPicker(reqId) {
-  const { data: users } = await sb.from('users').select('id,name,store,role,part').eq('active',true).order('name');
-  const { data: req } = await sb.from('requests').select('extra_viewers,author_id,assignee_id').eq('id',reqId).single();
-  const already = new Set([...(req.extra_viewers||[]), req.author_id, req.assignee_id].filter(Boolean));
-  const candidates = (users||[]).filter(u => !already.has(u.id));
-  window.__viewerCands = candidates;
-  window.__viewerReqId = reqId;
-  const listHtml = candidates.length ? candidates.map(u =>
-    `<div onclick="addReqViewer('${u.id}')" style="padding:9px 12px;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:5px;cursor:pointer;display:flex;align-items:center;gap:8px">
-      <span style="flex:1;font-size:13px">${u.name}</span>
-      <span style="font-size:10px;color:var(--th)">${u.part?'['+u.part+'] ':''}${u.store||''}</span>
-    </div>`).join('') : '<div style="color:var(--th);font-size:13px;padding:10px">추가할 직원이 없습니다.</div>';
-  document.getElementById('catModalTitle').textContent = '열람자 추가';
-  document.getElementById('catList').innerHTML =
-    '<input class="form-input" id="viewerSearch" placeholder="이름 검색..." oninput="filterViewerList(this.value)" style="margin-bottom:10px"/>' +
-    '<div id="viewerCandList" style="max-height:300px;overflow-y:auto">' + listHtml + '</div>';
-  document.getElementById('catModalAddBtn').style.display = 'none';
-  document.getElementById('catModalOkBtn').style.display = 'none';
-  document.getElementById('catModal').classList.add('open');
+async function openViewerPicker(reqId){
+  const [{data:req},{data:users},pl] = await Promise.all([
+    sb.from('requests').select('extra_viewers,author_id,assignee_id,store,type_id, parts(name)').eq('id',reqId).single(),
+    sb.from('users').select('id,name,store,part,role,is_master,sub_stores').eq('active',true).order('name'),
+    (window.__parts&&window.__parts.length)?Promise.resolve({data:window.__parts}):sb.from('parts').select('id,name')
+  ]);
+  window.__parts=(pl&&pl.data)||window.__parts||[];
+  const { data:typeRow } = await sb.from('request_types').select('co_parts').eq('id',req.type_id).maybeSingle();
+  const coPartNames=(((typeRow&&typeRow.co_parts)||[]).map(function(pid){ const p=(window.__parts||[]).find(x=>Number(x.id)===Number(pid)); return p?p.name:null; }).filter(Boolean));
+  const r2={author_id:req.author_id, assignee_id:req.assignee_id, store:req.store, part_name:req.parts?req.parts.name:null, extra_viewers:req.extra_viewers};
+  window.__reqViewerId=reqId;
+  const rows=(users||[]).slice().sort(function(a,b){ const ra=reqViewerReason(a,r2,coPartNames)!==''&&reqViewerReason(a,r2,coPartNames)!=='추가'; const rb=reqViewerReason(b,r2,coPartNames)!==''&&reqViewerReason(b,r2,coPartNames)!=='추가'; return (rb?1:0)-(ra?1:0); }).map(function(u){ const rn=reqViewerReason(u,r2,coPartNames); const auto=rn!==''&&rn!=='추가'; const checked=rn!==''; const k=(String(u.name)+' '+String(u.store||'')+' '+String(u.part||'')).toLowerCase().replace(/"/g,''); return '<label class="rqv-row" data-k="'+k+'" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)"><input type="checkbox" class="rqv-ck" data-id="'+u.id+'" '+(checked?'checked':'')+' '+(auto?'disabled':'')+'> <span style="flex:1">'+esc(u.name)+' <span style="font-size:11px;color:var(--th)">'+esc(u.store||u.part||'')+'</span></span><span style="font-size:10px;color:'+(auto?'var(--gn)':'var(--th)')+'">'+(rn||'열람 추가')+'</span></label>'; }).join('');
+  const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='rqvModal'; modal.style.zIndex='340';
+  modal.innerHTML='<div class="modal-box" style="max-width:460px;width:94vw"><div class="modal-head"><b>열람자 추가/관리</b><button onclick="document.getElementById(\'rqvModal\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:66vh;overflow-y:auto"><input id="rqvSearch" class="form-input" placeholder="이름·매장·파트 검색" oninput="reqViewerFilter(this.value)" style="margin-bottom:10px" autocomplete="off"><p style="font-size:12px;color:var(--th);margin-bottom:10px">담당 파트·공동 파트·매니저·총괄·운영팀·작성자·담당자는 <b>기본 열람</b>(해제 불가)입니다. 나머지는 체크로 <b>추가</b>, 해제로 <b>제외</b>됩니다.</p><div id="rqvList">'+rows+'</div></div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById(\'rqvModal\').remove()">취소</button><button class="btn-submit" onclick="reqViewerSave()">저장</button></div></div>';
+  document.body.appendChild(modal);
 }
-function filterViewerList(q) {
-  const ql = q.toLowerCase();
-  const filtered = (window.__viewerCands||[]).filter(u => u.name.toLowerCase().includes(ql));
-  document.getElementById('viewerCandList').innerHTML = filtered.length ? filtered.map(u =>
-    `<div onclick="addReqViewer('${u.id}')" style="padding:9px 12px;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:5px;cursor:pointer;display:flex;align-items:center;gap:8px">
-      <span style="flex:1;font-size:13px">${u.name}</span><span style="font-size:10px;color:var(--th)">${u.part?'['+u.part+'] ':''}${u.store||''}</span>
-    </div>`).join('') : '<div style="color:var(--th);font-size:13px;padding:10px">검색 결과 없음</div>';
-}
-async function addReqViewer(userId) {
-  const reqId = window.__viewerReqId;
-  const { data: req } = await sb.from('requests').select('extra_viewers').eq('id',reqId).single();
-  const list = Array.isArray(req.extra_viewers) ? req.extra_viewers : [];
-  if (!list.includes(userId)) list.push(userId);
-  await sb.from('requests').update({extra_viewers:list}).eq('id',reqId);
-  document.getElementById('catModal').classList.remove('open');
-  document.getElementById('catModalAddBtn').style.display = '';
-  document.getElementById('catModalOkBtn').style.display = '';
-  openReqById(reqId);
-}
+function reqViewerFilter(q){ q=(q||'').trim().toLowerCase(); document.querySelectorAll('#rqvModal .rqv-row').forEach(function(r){ r.style.display=(!q||(r.getAttribute('data-k')||'').indexOf(q)>=0)?'':'none'; }); }
+async function reqViewerSave(){ const reqId=window.__reqViewerId; const ids=[...document.querySelectorAll('#rqvModal .rqv-ck')].filter(x=>x.checked&&!x.disabled).map(x=>x.getAttribute('data-id')); const {error}=await sb.from('requests').update({extra_viewers:ids}).eq('id',reqId); if(error){ alert('저장 오류: '+error.message); return; } const m=document.getElementById('rqvModal'); if(m) m.remove(); openReqById(reqId); }
+
 async function removeReqViewer(reqId, userId) {
   const { data: req } = await sb.from('requests').select('extra_viewers').eq('id',reqId).single();
   const list = (req.extra_viewers||[]).filter(x => x !== userId);
@@ -10358,14 +10345,15 @@ function isInterviewAdmin() {
 }
 // ── 면담 열람 권한 (운영프로젝트 기준: 총괄/운영팀 + 예외 지정) ──
 window.__ivAllowed = window.__ivAllowed || [];
-async function ivLoadAllowed(){ try{ const {data}=await sb.from('app_settings').select('value').eq('key','interview_allowed_users').maybeSingle(); const v=data&&data.value; window.__ivAllowed=(v?((typeof v==='string'?JSON.parse(v):v)||[]):[]).map(String); }catch(e){ window.__ivAllowed=[]; } }
-function isInterviewFull(u){ u=u||currentUser; if(!u) return false; return !!u.is_master || isOperationsPart(u) || (window.__ivAllowed||[]).includes(String(u.id)); }
+async function ivLoadAllowed(){ try{ const [a,e]=await Promise.all([sb.from('app_settings').select('value').eq('key','interview_allowed_users').maybeSingle(), sb.from('app_settings').select('value').eq('key','interview_excluded_users').maybeSingle()]); const pa=a.data&&a.data.value; const pe=e.data&&e.data.value; window.__ivAllowed=(pa?((typeof pa==='string'?JSON.parse(pa):pa)||[]):[]).map(String); window.__ivExcluded=(pe?((typeof pe==='string'?JSON.parse(pe):pe)||[]):[]).map(String); }catch(err){ window.__ivAllowed=window.__ivAllowed||[]; window.__ivExcluded=window.__ivExcluded||[]; } }
+function ivDefaultFull(u){ return !!(u && (u.is_master || isOperationsPart(u))); }
+function isInterviewFull(u){ u=u||currentUser; if(!u) return false; const id=String(u.id); if((window.__ivExcluded||[]).includes(id)) return false; return ivDefaultFull(u) || (window.__ivAllowed||[]).includes(id); }
 function ivAuthorIsFull(r){ if(!r) return false; const a=r.author||{}; return !!a.is_master || a.role==='admin' || a.part==='운영' || a.part==='운영팀' || (window.__ivAllowed||[]).includes(String(r.author_id)); }
 function canSeeInterview(r){ if(!currentUser||!r) return false; if(isInterviewFull()) return true; if(r.author_id&&String(r.author_id)===String(currentUser.id)) return true; const my=(currentUser.store||'').trim(); const rs=(r.store||(r.staff&&r.staff.store)||'').trim(); if(my&&rs===my&&!ivAuthorIsFull(r)) return true; return false; }
 function ivPermAuto(u){ return !!(u && (u.is_master || isOperationsPart(u))); }
-function ivPermMgr(){ if(!currentUser.is_master){ alert('총괄만 설정할 수 있습니다.'); return; } const allowed=(window.__ivAllowed||[]).map(String); const rows=(window.__ivPeople||[]).filter(u=>u.active!==false).slice().sort((a,b)=>(ivPermAuto(b)?1:0)-(ivPermAuto(a)?1:0)).map(u=>{ const isAuto=ivPermAuto(u); const checked=isAuto||allowed.includes(String(u.id)); const k=(String(u.name)+' '+String(u.store||'')+' '+String(u.part||'')).toLowerCase().replace(/"/g,''); return `<label class="ivperm-row" data-k="${k}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)"><input type="checkbox" class="ivperm-ck" data-id="${u.id}" ${checked?'checked':''} ${isAuto?'disabled':''}> <span style="flex:1">${esc(u.name)} <span style="font-size:11px;color:var(--th)">${esc(u.store||u.part||'')}</span></span><span style="font-size:10px;color:${isAuto?'var(--gn)':'var(--th)'}">${isAuto?'운영파트·항상 포함':'예외 지정'}</span></label>`; }).join(''); const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='ivPermModal'; modal.style.zIndex='340'; modal.innerHTML=`<div class="modal-box" style="max-width:460px;width:94vw"><div class="modal-head"><b>면담 열람 권한 관리</b><button onclick="document.getElementById('ivPermModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:66vh;overflow-y:auto"><input id="ivPermSearch" class="form-input" placeholder="이름·매장·파트 검색" oninput="ivPermFilter(this.value)" style="margin-bottom:10px" autocomplete="off"><p style="font-size:12px;color:var(--th);margin-bottom:10px">체크한 인원이 <b>전 매장 면담</b>을 열람합니다. 운영파트(코치 포함)·총괄은 <b>항상 포함</b>되어 해제할 수 없습니다. 나머지는 체크로 <b>추가</b>, 해제로 <b>제외</b>됩니다. (비활성 계정 제외)</p><div id="ivPermList">${rows||'<div style="color:var(--th);font-size:13px">대상 직원이 없습니다.</div>'}</div></div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('ivPermModal').remove()">취소</button><button class="btn-submit" onclick="ivPermSave()">저장</button></div></div>`; document.body.appendChild(modal); }
+function ivPermMgr(){ if(!currentUser.is_master){ alert('총괄만 설정할 수 있습니다.'); return; } const rows=(window.__ivPeople||[]).filter(u=>u.active!==false).slice().sort((a,b)=>(ivDefaultFull(b)?1:0)-(ivDefaultFull(a)?1:0)).map(u=>{ const def=ivDefaultFull(u); const checked=isInterviewFull(u); const tag=u.is_master?'총괄':(isOperationsPart(u)?'운영파트':((window.__ivAllowed||[]).includes(String(u.id))?'예외':'')); const k=(String(u.name)+' '+String(u.store||'')+' '+String(u.part||'')).toLowerCase().replace(/"/g,''); return `<label class="ivperm-row" data-k="${k}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)"><input type="checkbox" class="ivperm-ck" data-id="${u.id}" data-def="${def?1:0}" ${checked?'checked':''}> <span style="flex:1">${esc(u.name)} <span style="font-size:11px;color:var(--th)">${esc(u.store||u.part||'')}</span></span><span style="font-size:10px;color:${def?'var(--gn)':'var(--th)'}">${tag}</span></label>`; }).join(''); const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='ivPermModal'; modal.style.zIndex='340'; modal.innerHTML=`<div class="modal-box" style="max-width:460px;width:94vw"><div class="modal-head"><b>면담 열람 권한 관리 (총괄 전용)</b><button onclick="document.getElementById('ivPermModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:66vh;overflow-y:auto"><input id="ivPermSearch" class="form-input" placeholder="이름·매장·파트 검색" oninput="ivPermFilter(this.value)" style="margin-bottom:10px" autocomplete="off"><p style="font-size:12px;color:var(--th);margin-bottom:10px">운영파트(코치 포함)·총괄은 <b>기본 포함</b>됩니다. 직무상 열람이 불필요한 인원은 <b>체크 해제</b>로 제외할 수 있습니다. 나머지는 체크로 추가합니다. (총괄만 수정)</p><div id="ivPermList">${rows||'<div style="color:var(--th);font-size:13px">대상 직원이 없습니다.</div>'}</div></div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('ivPermModal').remove()">취소</button><button class="btn-submit" onclick="ivPermSave()">저장</button></div></div>`; document.body.appendChild(modal); }
 function ivPermFilter(q){ q=(q||'').trim().toLowerCase(); document.querySelectorAll('#ivPermModal .ivperm-row').forEach(function(r){ r.style.display=(!q||(r.getAttribute('data-k')||'').indexOf(q)>=0)?'':'none'; }); }
-async function ivPermSave(){ const ids=[...document.querySelectorAll('#ivPermModal .ivperm-ck')].filter(x=>x.checked&&!x.disabled).map(x=>x.getAttribute('data-id')); window.__ivAllowed=ids.map(String); const {error}=await sb.from('app_settings').upsert({key:'interview_allowed_users',value:JSON.stringify(window.__ivAllowed)},{onConflict:'key'}); if(error){ alert('저장 오류: '+error.message); return; } const m=document.getElementById('ivPermModal'); if(m) m.remove(); renderInterviews(document.getElementById('contentArea')); }
+async function ivPermSave(){ const boxes=[...document.querySelectorAll('#ivPermModal .ivperm-ck')]; const added=[]; const excluded=[]; boxes.forEach(function(x){ const id=x.getAttribute('data-id'); const def=x.getAttribute('data-def')==='1'; if(x.checked){ if(!def) added.push(id); } else { if(def) excluded.push(id); } }); window.__ivAllowed=added.map(String); window.__ivExcluded=excluded.map(String); const [r1,r2]=await Promise.all([ sb.from('app_settings').upsert({key:'interview_allowed_users',value:JSON.stringify(window.__ivAllowed)},{onConflict:'key'}), sb.from('app_settings').upsert({key:'interview_excluded_users',value:JSON.stringify(window.__ivExcluded)},{onConflict:'key'}) ]); if(r1.error||r2.error){ alert('저장 오류: '+((r1.error||r2.error).message)); return; } const m=document.getElementById('ivPermModal'); if(m) m.remove(); renderInterviews(document.getElementById('contentArea')); }
 function canWriteInterview() {
   return isInterviewAdmin() || isManagerRole(currentUser.role) || !!currentUser.part;
 }
@@ -10465,7 +10453,7 @@ async function renderInterviews(area) {
       </div>
     </div>` : '';
 
-  const __ivFull=(window.__ivPeople||[]).filter(u=>u.is_master||isOperationsPart(u)||(window.__ivAllowed||[]).includes(String(u.id)));
+  const __ivFull=(window.__ivPeople||[]).filter(u=>isInterviewFull(u));
   const viewerStrip=`<div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:var(--tm)"><i class="ti ti-eye"></i> <b>열람 권한</b> <span style="color:var(--ts)">${__ivFull.map(u=>esc(u.name)).join(' · ')||'-'}</span>${currentUser.is_master?` <button class="btn-cancel-sm" style="font-size:11px;padding:3px 9px;margin-left:6px" onclick="ivPermMgr()"><i class="ti ti-settings"></i> 열람 권한 관리</button>`:''}</div>`;
   area.innerHTML = `
     ${optModalHtml}
@@ -10584,7 +10572,7 @@ async function renderInterviewDetail(area) {
   const __authorFull = ivAuthorIsFull(r);
   const __rStore = (r.store || (r.staff && r.staff.store) || '').trim();
   const __allowed = window.__ivAllowed||[];
-  const __opsView = (window.__ivPeople||[]).filter(u=>u.is_master||isOperationsPart(u)||__allowed.includes(String(u.id)));
+  const __opsView = (window.__ivPeople||[]).filter(u=>isInterviewFull(u));
   let __viewers;
   if(__authorFull){ __viewers=__opsView.slice(); }
   else { const __mgrs=(window.__ivPeople||[]).filter(u=>isManagerRole(u.role) && (((u.store||'').trim()===__rStore) || (Array.isArray(u.sub_stores)&&u.sub_stores.map(x=>(x||'').trim()).includes(__rStore)))); const __seen=new Set(); __viewers=[...__mgrs,...__opsView].filter(u=>{ if(__seen.has(u.id)) return false; __seen.add(u.id); return true; }); }
