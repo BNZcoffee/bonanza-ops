@@ -6463,206 +6463,162 @@ async function opsLoadAllowed(){
     window.__ops.allowed = data && data.value ? (JSON.parse(data.value)||[]) : []; }catch(e){ window.__ops.allowed=[]; }
 }
 
+async function opsGuideLoad(){ try{ const {data}=await sb.from('app_settings').select('value').eq('key','ops_guide_content').maybeSingle(); window.__opsGuide=(data&&data.value)?(typeof data.value==='string'?JSON.parse(data.value):data.value):{}; }catch(e){ window.__opsGuide={}; } }
+function OPS_GUIDE_SVG(kind){
+  var C={bg:'#faf6ef',bd:'#e4d9c6',br:'#8a6d3b',tx:'#4a4038',mut:'#9a8f80',hi:'#fff3bf',grn:'#5cb85c',blu:'#5b8def'};
+  if(kind==='intro') return `<svg viewBox="0 0 640 130" style="width:100%;height:auto;border-radius:10px;border:0.5px solid ${C.bd}"><rect width="640" height="130" fill="${C.bg}"/><rect x="26" y="34" width="180" height="62" rx="10" fill="#fff" stroke="${C.bd}"/><text x="116" y="60" text-anchor="middle" font-size="13" font-weight="700" fill="${C.br}">운영팀 가이드·보드</text><text x="116" y="80" text-anchor="middle" font-size="11" fill="${C.mut}">만드는 곳 (기획·논의)</text><path d="M214 65 L300 65" stroke="${C.br}" stroke-width="2" marker-end="url(#ar)"/><defs><marker id="ar" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0 0 L8 3 L0 6 z" fill="${C.br}"/></marker></defs><rect x="308" y="34" width="150" height="62" rx="10" fill="#fff" stroke="${C.bd}"/><text x="383" y="60" text-anchor="middle" font-size="13" font-weight="700" fill="${C.grn}">검증</text><text x="383" y="80" text-anchor="middle" font-size="11" fill="${C.mut}">규칙 확정</text><path d="M466 65 L520 65" stroke="${C.br}" stroke-width="2" marker-end="url(#ar)"/><rect x="528" y="34" width="90" height="62" rx="10" fill="${C.br}"/><text x="573" y="60" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">웹 매뉴얼</text><text x="573" y="80" text-anchor="middle" font-size="10" fill="#f0e6d2">전 매장 배포</text></svg>`;
+  if(kind==='struct') return `<svg viewBox="0 0 640 130" style="width:100%;height:auto;border-radius:10px;border:0.5px solid ${C.bd}"><rect width="640" height="130" fill="#fff"/><rect x="0" y="0" width="640" height="42" fill="${C.bg}"/><rect x="16" y="10" width="120" height="24" rx="12" fill="${C.br}"/><text x="76" y="26" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">＋ 보드</text><rect x="146" y="10" width="130" height="24" rx="12" fill="#fff" stroke="${C.bd}"/><text x="211" y="26" text-anchor="middle" font-size="12" fill="${C.tx}">＋ 아이디어맵</text><rect x="360" y="10" width="264" height="24" rx="8" fill="none"/><text x="622" y="26" text-anchor="end" font-size="11" fill="${C.mut}">속성·묶음·백업·시트·복제·삭제</text><text x="16" y="66" font-size="11" fill="${C.mut}">참여</text><circle cx="52" cy="62" r="9" fill="${C.br}"/><circle cx="70" cy="62" r="9" fill="${C.blu}"/><circle cx="88" cy="62" r="9" fill="${C.grn}"/><text x="104" y="66" font-size="11" fill="${C.tx}">이선우 · 홍대진 · 박건하  (참여 인원 관리 →)</text><rect x="16" y="84" width="180" height="34" rx="8" fill="${C.bg}" stroke="${C.bd}"/><text x="106" y="105" text-anchor="middle" font-size="11" fill="${C.tx}">묶음: 진행중</text><rect x="206" y="84" width="180" height="34" rx="8" fill="${C.bg}" stroke="${C.bd}"/><text x="296" y="105" text-anchor="middle" font-size="11" fill="${C.tx}">묶음: 완료</text><rect x="396" y="84" width="120" height="34" rx="8" fill="#fff" stroke="${C.bd}" stroke-dasharray="4 3"/><text x="456" y="105" text-anchor="middle" font-size="11" fill="${C.mut}">＋ 카드</text></svg>`;
+  if(kind==='board') return `<svg viewBox="0 0 640 150" style="width:100%;height:auto;border-radius:10px;border:0.5px solid ${C.bd}"><rect width="640" height="150" fill="${C.bg}"/><rect x="30" y="20" width="360" height="110" rx="12" fill="#fff" stroke="${C.bd}"/><rect x="46" y="36" width="52" height="18" rx="9" fill="${C.br}"/><text x="72" y="49" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">과제</text><text x="46" y="78" font-size="14" font-weight="700" fill="${C.tx}">여름 신메뉴 레시피 리뉴얼</text><rect x="46" y="90" width="46" height="18" rx="9" fill="#eee"/><text x="69" y="103" text-anchor="middle" font-size="10" fill="#666">진행중</text><rect x="98" y="90" width="40" height="18" rx="9" fill="#ffe3c2"/><text x="118" y="103" text-anchor="middle" font-size="10" fill="${C.br}">높음</text><text x="150" y="103" font-size="10" fill="${C.mut}">📅 07-31</text><circle cx="220" cy="99" r="8" fill="${C.blu}"/><circle cx="234" cy="99" r="8" fill="${C.grn}"/><text x="250" y="102" font-size="10" fill="${C.mut}">담당 2</text><text x="342" y="49" font-size="11" fill="${C.mut}">🔒</text><rect x="410" y="20" width="200" height="110" rx="12" fill="#fff" stroke="${C.bd}"/><text x="426" y="44" font-size="11" font-weight="700" fill="${C.tx}">피드백</text><rect x="426" y="54" width="168" height="26" rx="8" fill="${C.bg}"/><text x="436" y="71" font-size="10" fill="${C.tx}">홍대진: 원가 확인 필요</text><rect x="440" y="86" width="154" height="24" rx="8" fill="#f0f5ff"/><text x="450" y="102" font-size="10" fill="${C.blu}">↩ 박건하: 반영했습니다</text></svg>`;
+  if(kind==='doc') return `<svg viewBox="0 0 640 160" style="width:100%;height:auto;border-radius:10px;border:0.5px solid ${C.bd}"><rect width="640" height="160" fill="#fff"/><rect x="0" y="0" width="640" height="32" fill="${C.bg}"/><g fill="${C.mut}"><rect x="16" y="11" width="16" height="10" rx="2"/><rect x="40" y="11" width="16" height="10" rx="2"/><rect x="64" y="11" width="16" height="10" rx="2"/></g><text x="96" y="20" font-size="10" fill="${C.br}">B  I  H  표  다단  토글  이미지  @</text><text x="20" y="56" font-size="12" fill="${C.tx}">레시피 기준: <tspan fill="${C.tx}"> </tspan></text><rect x="118" y="46" width="120" height="14" fill="${C.hi}"/><text x="122" y="56" font-size="12" fill="${C.tx}">추출 시간 26초 고정</text><rect x="20" y="70" width="280" height="60" fill="none" stroke="${C.bd}"/><line x1="20" y1="90" x2="300" y2="90" stroke="${C.bd}"/><line x1="20" y1="110" x2="300" y2="110" stroke="${C.bd}"/><line x1="160" y1="70" x2="160" y2="130" stroke="${C.bd}"/><text x="30" y="84" font-size="10" fill="${C.mut}">항목</text><text x="170" y="84" font-size="10" fill="${C.mut}">기준</text><text x="30" y="104" font-size="10" fill="${C.tx}">원두량</text><text x="170" y="104" font-size="10" fill="${C.tx}">18g</text><text x="30" y="124" font-size="10" fill="${C.tx}">물온도</text><text x="170" y="124" font-size="10" fill="${C.tx}">92℃</text><rect x="320" y="70" width="300" height="26" rx="6" fill="${C.bg}" stroke="${C.bd}"/><text x="332" y="87" font-size="11" fill="${C.tx}">▶ 상세 매뉴얼 (접기)</text><rect x="320" y="102" width="145" height="28" rx="6" fill="#f0f5ff"/><text x="330" y="120" font-size="10" fill="${C.blu}">이미지 A</text><rect x="475" y="102" width="145" height="28" rx="6" fill="#eefaf0"/><text x="485" y="120" font-size="10" fill="${C.grn}">이미지 B (다단)</text></svg>`;
+  if(kind==='mind') return `<svg viewBox="0 0 640 160" style="width:100%;height:auto;border-radius:10px;border:0.5px solid ${C.bd}"><rect width="640" height="160" fill="${C.bg}"/><rect x="40" y="24" width="300" height="112" rx="14" fill="#f3ebfa" stroke="#c9b3e6" stroke-dasharray="6 4"/><text x="52" y="44" font-size="11" font-weight="700" fill="#8256c4">꾸러미: 오픈 프로세스</text><rect x="66" y="58" width="96" height="34" rx="8" fill="#fff" stroke="${C.bd}"/><text x="114" y="79" text-anchor="middle" font-size="11" fill="${C.tx}">계약</text><rect x="214" y="58" width="96" height="34" rx="8" fill="#fff" stroke="${C.bd}"/><text x="262" y="79" text-anchor="middle" font-size="11" fill="${C.tx}">인테리어</text><rect x="140" y="100" width="96" height="30" rx="8" fill="#fff" stroke="${C.bd}"/><text x="188" y="120" text-anchor="middle" font-size="11" fill="${C.tx}">교육</text><path d="M162 75 L214 75" stroke="${C.br}" stroke-width="2" marker-end="url(#ar2)"/><path d="M262 92 L200 100" stroke="${C.br}" stroke-width="2" marker-end="url(#ar2)"/><defs><marker id="ar2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0 0 L8 3 L0 6 z" fill="${C.br}"/></marker></defs><rect x="380" y="40" width="230" height="80" rx="12" fill="#fff" stroke="${C.bd}"/><text x="396" y="64" font-size="11" font-weight="700" fill="${C.tx}">항목 편집</text><text x="396" y="84" font-size="10" fill="${C.mut}">색상 · @멘션 · 링크(보드 항목 연결)</text><rect x="396" y="94" width="120" height="18" rx="9" fill="${C.bg}"/><text x="456" y="107" text-anchor="middle" font-size="10" fill="${C.br}">🔗 카드로 연결</text></svg>`;
+  if(kind==='req') return `<svg viewBox="0 0 640 150" style="width:100%;height:auto;border-radius:10px;border:0.5px solid ${C.bd}"><rect width="640" height="150" fill="#fff"/><rect x="24" y="20" width="380" height="110" rx="10" fill="${C.bg}" stroke="${C.bd}"/><text x="40" y="44" font-size="12" font-weight="700" fill="${C.tx}">업무 신청 접수함</text><rect x="40" y="54" width="348" height="30" rx="7" fill="#fff" stroke="${C.bd}"/><rect x="50" y="62" width="46" height="15" rx="7" fill="#ffe3c2"/><text x="73" y="74" text-anchor="middle" font-size="9" fill="${C.br}">접수됨</text><text x="106" y="73" font-size="11" fill="${C.tx}">원두 추가 발주 — 성수점</text><rect x="40" y="90" width="348" height="30" rx="7" fill="#fff" stroke="${C.bd}"/><rect x="50" y="98" width="46" height="15" rx="7" fill="#dbeafe"/><text x="73" y="110" text-anchor="middle" font-size="9" fill="${C.blu}">진행중</text><text x="106" y="109" font-size="11" fill="${C.tx}">POS 오류 점검 — 연남점</text><rect x="424" y="34" width="192" height="82" rx="12" fill="#f4ede4" stroke="${C.bd}"/><text x="440" y="58" font-size="11" font-weight="700" fill="${C.tx}">📋 담당팀 DM</text><text x="440" y="80" font-size="10" fill="${C.tx}">새 업무 요청: 원두 발주</text><text x="440" y="98" font-size="9" fill="${C.mut}">…?request=… (앱 링크)</text></svg>`;
+  if(kind==='report') return `<svg viewBox="0 0 640 130" style="width:100%;height:auto;border-radius:10px;border:0.5px solid ${C.bd}"><rect width="640" height="130" fill="${C.bg}"/><rect x="24" y="22" width="330" height="88" rx="10" fill="#fff" stroke="${C.bd}"/><text x="40" y="46" font-size="12" font-weight="700" fill="${C.tx}">📝 업무 보고</text><text x="40" y="68" font-size="11" fill="${C.tx}">8월 1주차 매장 점검 — 홍대진</text><rect x="40" y="78" width="120" height="20" rx="6" fill="${C.bg}"/><text x="100" y="92" text-anchor="middle" font-size="10" fill="${C.mut}">🔒 2차 비밀번호</text><rect x="374" y="30" width="242" height="72" rx="12" fill="#f4ede4" stroke="${C.bd}"/><text x="390" y="54" font-size="11" font-weight="700" fill="${C.tx}">운영팀 전원 DM</text><text x="390" y="76" font-size="10" fill="${C.tx}">📝 [업무보고] 매장 점검</text><text x="390" y="92" font-size="9" fill="${C.mut}">작성 즉시 개인 DM 발송</text></svg>`;
+  if(kind==='noti') return `<svg viewBox="0 0 640 150" style="width:100%;height:auto;border-radius:10px;border:0.5px solid ${C.bd}"><rect width="640" height="150" fill="#fff"/><text x="24" y="30" font-size="12" font-weight="700" fill="${C.tx}">알림 문구·이모지 관리</text><g font-size="11" fill="${C.tx}"><rect x="24" y="40" width="360" height="26" rx="7" fill="${C.bg}"/><text x="36" y="57">📢 공지 등록</text><rect x="300" y="45" width="70" height="16" rx="8" fill="${C.br}"/><text x="335" y="57" text-anchor="middle" font-size="9" fill="#fff">테스트</text><rect x="24" y="70" width="360" height="26" rx="7" fill="${C.bg}"/><text x="36" y="87">📋 업무신청 접수</text><rect x="300" y="75" width="70" height="16" rx="8" fill="${C.br}"/><text x="335" y="87" text-anchor="middle" font-size="9" fill="#fff">테스트</text><rect x="24" y="100" width="360" height="26" rx="7" fill="${C.bg}"/><text x="36" y="117">🧩 담당 배정</text><rect x="300" y="105" width="70" height="16" rx="8" fill="${C.br}"/><text x="335" y="117" text-anchor="middle" font-size="9" fill="#fff">테스트</text></g><rect x="404" y="40" width="212" height="86" rx="12" fill="#f4ede4" stroke="${C.bd}"/><text x="420" y="64" font-size="11" font-weight="700" fill="${C.tx}">🤖 보난자커피 APP알림</text><text x="420" y="86" font-size="10" fill="${C.tx}">🧩 담당 배정: 신메뉴 과제</text><text x="420" y="104" font-size="9" fill="${C.mut}">개인 DM · 로그인 불필요</text></svg>`;
+  return '';
+}
+function OPS_GUIDE_SECTIONS(){ return [
+{id:'intro', title:'왜 만드는가 — 철학과 팀원에게', icon:'ti-bulb', html:`
+  ${OPS_GUIDE_SVG('intro')}
+  <div class="gcard">
+    <p>매장이 빠르게 늘어나는 지금 가장 큰 리스크는 <b>매장·직원마다 운영 지침 이해가 달라 생기는 편차</b>입니다. 슬랙은 3개월 뒤 블라인드되어 지식이 사라집니다. 그래서 우리는 <b>지속가능한 시스템</b>을 만듭니다.</p>
+    <ul>
+      <li><b>운영 프로젝트</b> = 운영팀이 과제를 짜고·논의하고·매뉴얼로 굳혀가는 <b>작업 공간</b>.</li>
+      <li>여기서 검증된 내용이 → 직원용 <b>웹 매뉴얼</b>로 배포됩니다. (여기 = 만드는 곳, 웹 매뉴얼 = 배포하는 곳)</li>
+    </ul>
+    <p style="margin-top:8px">이 앱은 총괄 혼자만의 프로젝트가 <b>아닙니다.</b> 각 팀원이 본인 포지션에서 <b>더 넓고 미래지향적으로</b> 생각하고 함께 만들어 주세요.</p>
+    <ul>
+      <li>맡은 영역의 반복 업무를 <b>카드/아이디어맵으로 구조화</b>해 보세요.</li>
+      <li>현장에서 편차가 생기는 지점을 발견하면 <b>규칙 후보를 여기서 정리</b> → 검증 후 매뉴얼로.</li>
+      <li>더 나은 방법이 보이면 <b>피드백/기능 오류 접수</b>로 남겨 함께 다듬습니다.</li>
+    </ul>
+    <p style="color:var(--br);font-weight:700;margin-top:6px">좋은 커피·서비스·공간, 그리고 고객을 최우선으로 — 현재에 머무르지 않고 계속 발전합니다.</p>
+  </div>
+  <div class="g-note">이 메뉴는 <b>총괄이 지정한 참여자만</b> 볼 수 있습니다(운영 파트·부총괄·대표라도 자동 노출 안 됨). 늦게 합류해도 이전 내용을 모두 열람·수정할 수 있습니다.</div>` },
+{id:'struct', title:'운영 프로젝트 구조', icon:'ti-layout-grid', html:`
+  ${OPS_GUIDE_SVG('struct')}
+  <div class="gcard">
+    <p>상단 탭에서 <b>＋보드(카드보드)</b> 또는 <b>＋아이디어맵</b>을 만듭니다. 헤더에서 속성/유형·묶음·백업·시트연동·이름·복제·삭제를 관리(일부 총괄 전용).</p>
+    <h3>참여 인원 관리 (총괄 전용)</h3>
+    <p>헤더 상단 <b>참여</b> 줄에 참여자 실명이 뜨고, <b>참여 인원 관리</b>로 열람·작성·수정 권한자를 지정합니다. 담당자 후보도 여기서 정해진 사람으로 채워집니다.</p>
+  </div>` },
+{id:'board', title:'카드 보드 활용', icon:'ti-clipboard-list', html:`
+  ${OPS_GUIDE_SVG('board')}
+  <div class="gcard">
+    <ul>
+      <li><b>카드 유형</b>(과제·회의록·메모·자료): 색상 딱지로 구분, 속성/유형에서 편집.</li>
+      <li><b>속성</b>: 상태·담당자·마감(필수)·우선순위·내용 등. 카드마다 표시 속성·순서 자유 구성.</li>
+      <li><b>담당자</b>: 운영 참여자 + <b>기타(직접 입력)</b>. 새 담당 지정 시 <b>슬랙 DM 자동</b>(카드 링크 포함).</li>
+      <li><b>보기 ↔ 편집</b>: 카드 클릭=최종본 보기(작성자·최종 편집자 표시) → 편집 버튼으로 수정.</li>
+      <li><b>잠금 🔒</b>: 최종본 잠그기 → 비밀번호로 해제(실수 변경 방지).</li>
+      <li><b>피드백(댓글/대댓글)</b>·<b>자동 임시저장</b>·<b>실시간 "○○ 편집 중"</b>·<b>드래그 이동</b>·<b>복제</b>.</li>
+    </ul>
+  </div>
+  <div class="g-tip">현장 가이드: 매장 공통 과제(예: 신메뉴 도입)를 카드로 만들어 담당·마감·자료를 한 곳에 모으면 "누가 언제까지 뭘"이 명확해집니다.</div>` },
+{id:'doc', title:'문서 자유편집 (카드 · 공지)', icon:'ti-edit', html:`
+  ${OPS_GUIDE_SVG('doc')}
+  <div class="gcard">
+    <table class="g-tbl">
+      <tr><th>기능</th><th>사용법</th><th>활용</th></tr>
+      <tr><td>형광펜/글자색</td><td>텍스트 선택 → 배경색</td><td>중요·논의 강조</td></tr>
+      <tr><td>표</td><td>버튼 → 행·열, 행+/열+</td><td>비교·기준표</td></tr>
+      <tr><td>다단(2~5)</td><td>버튼 → 분할 수</td><td>이미지·텍스트 가로배치</td></tr>
+      <tr><td>토글(접기)</td><td>버튼 → 제목·내용</td><td>긴 내용 접기(공지에도)</td></tr>
+      <tr><td>이미지/＠멘션</td><td>툴바 이미지 / 본문 @이름</td><td>가벼운 저장·알림</td></tr>
+    </table>
+  </div>
+  <div class="g-note">첨부·이미지는 저장소에 <b>파일로 보관</b>되고 본문엔 주소만 저장됩니다. 올린 사람 계정을 <b>비활성화(퇴사)</b>해도 파일·내용은 유실되지 않습니다.</div>` },
+{id:'mind', title:'아이디어맵 활용', icon:'ti-bulb', html:`
+  ${OPS_GUIDE_SVG('mind')}
+  <div class="gcard">
+    <ul>
+      <li><b>항목</b> 추가 → 드래그 이동, 클릭 편집(내용·색상·연결 링크).</li>
+      <li><b>연결모드</b>로 두 항목을 화살표 연결(흐름·파생).</li>
+      <li><b>꾸러미</b>(그룹 배경): 관련 항목을 영역으로 감싸 구분. 박스 드래그 시 안의 항목 함께 이동, "내용까지 삭제"로 일괄 정리.</li>
+      <li><b>선택</b> 모드: 다중 선택 → 일괄 삭제. 그룹 안 항목은 <b>클릭=그룹 / 더블클릭=개별</b>.</li>
+      <li><b>템플릿</b>(구조도·프로세스·브레인스토밍·목차)은 꾸러미로 감싸져 추가.</li>
+      <li><b>보드 항목 연결</b>·<b>검색</b>·<b>이미지 저장(PNG)</b>.</li>
+    </ul>
+  </div>
+  <div class="g-tip">활용 예: "지역별 관할 매장", "레시피 맵", "신규 오픈 체크 구조"를 각각 만들어 팀 방향을 누적합니다.</div>` },
+{id:'req', title:'업무 신청 처리 흐름', icon:'ti-send', html:`
+  <div class="g-flow">
+    <div class="g-step"><span class="n">1</span><div class="t">매장 신청</div><div class="d">유형 선택·작성 → '접수됨'.</div></div>
+    <div class="g-arrow">→</div>
+    <div class="g-step"><span class="n">2</span><div class="t">담당팀 알림</div><div class="d">담당 파트에 📋 개인 DM + 앱 알림.</div></div>
+    <div class="g-arrow">→</div>
+    <div class="g-step"><span class="n">3</span><div class="t">접수·배정</div><div class="d">담당자·완료일 지정 → '진행 중'.</div></div>
+    <div class="g-arrow">→</div>
+    <div class="g-step"><span class="n">4</span><div class="t">완료/반려</div><div class="d">처리 또는 반려의견 기록.</div></div>
+  </div>
+  ${OPS_GUIDE_SVG('req')}
+  <div class="gcard">
+    <h3>운영팀이 알아야 할 규칙</h3>
+    <ul>
+      <li><b>접수됨</b>에선 신청자가 직접 수정·삭제 가능(오타 정정). <b>진행 중부터</b>는 임의 변경 불가.</li>
+      <li>요청 매장은 <b>등록된 매장 목록에서만</b> 선택(임의 입력 차단).</li>
+      <li>테스트 모드에선 실제 접수·알림이 나가지 않음(교육용).</li>
+    </ul>
+  </div>` },
+{id:'report', title:'업무 보고 처리 흐름', icon:'ti-message-report', html:`
+  ${OPS_GUIDE_SVG('report')}
+  <div class="gcard">
+    <p>업무 보고(면담·인수인계·보수 등)는 작성 시 <b>운영팀 전원에게 📝 개인 DM</b>으로 공유됩니다. 운영팀은 내용을 확인하고 후속 조치를 카드/아이디어맵으로 연결해 관리합니다. 민감 보고는 <b>2차 비밀번호</b>로 보호됩니다.</p>
+  </div>` },
+{id:'noti', title:'알림 체계 (중요)', icon:'ti-bell', html:`
+  ${OPS_GUIDE_SVG('noti')}
+  <div class="gcard">
+    <ul>
+      <li>모든 알림은 <b>개인 슬랙 DM으로 일원화</b>. 봇 "보난자커피 APP알림"이 발송(채널 알림 아님).</li>
+      <li>종류별 <b>이모지</b> 구분: 📢공지 · 📋업무신청 · 📝업무보고 · 💬댓글/멘션 · ↩️답글 · 🧩담당배정 · 📅스케줄.</li>
+      <li>총괄은 <b>알림 설정 → 알림 문구·이모지 관리</b>에서 이모지·문구·발송여부 편집 + <b>[테스트]</b>로 본인 DM 예시 확인.</li>
+      <li>받는 사람은 <b>로그인 상태가 아니어도</b> DM을 받습니다(행동한 사람만 로그인 상태면 됨).</li>
+    </ul>
+  </div>
+  <div class="g-note">슬랙 멤버 ID(U로 시작) 등록이 필수입니다. 미등록 시 DM 미발송 — 현장에 <b>[내 정보]에서 슬랙 ID 등록</b>을 반드시 안내하세요.</div>` },
+{id:'hidden', title:'준비중(숨김) 기능 — 왜, 어떻게', icon:'ti-eye-off', html:`
+  <div class="g-lead" style="font-size:13px;color:var(--th);margin-bottom:10px">왜 계획하는지·어떻게 활용할지·현장엔 어떻게 가이드할지 함께 이해해야 확산할 수 있습니다.</div>
+  <details class="g-guide-details"><summary>업무 신청/보고 정식 오픈</summary><div class="gd-body">현재 운영팀 검증 단계. 유형·담당 파트·알림 안정화 후 전 매장 오픈. 현장엔 "요청은 슬랙 DM이 아니라 앱으로 — 기록이 남고 진행현황이 보인다"를 강조.</div></details>
+  <details class="g-guide-details"><summary>스케줄/근태</summary><div class="gd-body">매장 스케줄·근태를 앱에서 관리 → 시트 자동 동기화. 오픈 시 매니저 교육 필요(작성·컨펌 흐름).</div></details>
+  <details class="g-guide-details"><summary>기능 오류 접수</summary><div class="gd-body">오류는 슬랙 DM 대신 '기능 오류 접수'에 캡처+현상으로. 원인 파악이 빨라 개선이 빠름. 현장에 이 창구를 안내.</div></details>
+  <div class="g-tip">가이드 원칙: 기능만 알려주지 말고 <b>"왜 이렇게 하는지(편차 감소·기록·확산)"</b>를 함께 전달하세요.</div>` }
+]; }
 async function renderOpsGuide(area){
   if(typeof opsLoadAllowed==='function'){ try{ if(!window.__ops.__allowedLoaded){ await opsLoadAllowed(); window.__ops.__allowedLoaded=true; } }catch(e){} }
   if(typeof opsCanSee==='function' && !opsCanSee()){ area.innerHTML='<div style="padding:40px;text-align:center;color:var(--th)">운영 프로젝트 참여자만 열람할 수 있습니다.</div>'; return; }
-  area.innerHTML = OPS_GUIDE_HTML();
+  await opsGuideLoad();
+  const secs=OPS_GUIDE_SECTIONS();
+  const master=(typeof opsIsMaster==='function')&&opsIsMaster();
+  const toc=secs.map(x=>`<a href="#g-${x.id}">${esc(x.title)}</a>`).join('');
+  const body=secs.map(x=>{ const html=(window.__opsGuide&&window.__opsGuide[x.id])?window.__opsGuide[x.id]:x.html; const eb=master?`<button class="btn-cancel-sm" style="margin-left:auto;font-size:11px;padding:4px 10px" onclick="opsGuideEdit('${x.id}')"><i class="ti ti-edit"></i> 수정</button>`:''; return `<div class="g-sec" id="g-${x.id}"><h2><i class="ti ${x.icon}"></i> ${esc(x.title)}${eb}</h2><div class="g-secbody">${html}</div></div>`; }).join('');
+  area.innerHTML=`<div class="gwrap"><div class="g-h1"><i class="ti ti-book-2"></i> 운영팀 가이드</div><div class="g-sub">직원용 웹 매뉴얼과 별개인 <b>운영팀 내부 가이드</b>입니다. 각 항목은 <b>총괄이 '수정'</b>으로 직접 편집할 수 있습니다.</div><div class="g-toc">${toc}</div>${body}<div style="text-align:center;color:var(--th);font-size:11px;margin-top:20px">보난자커피 운영팀 가이드 · 내부용</div></div>`;
 }
-function OPS_GUIDE_HTML(){ return `
-<div class="gwrap">
-  <div class="g-h1"><i class="ti ti-book-2"></i> 운영팀 가이드 — 운영 프로젝트 활용 매뉴얼</div>
-  <div class="g-sub">이 가이드는 <b>직원용 웹 매뉴얼과 별개</b>로, 운영팀 내부가 앱을 <b>숙지하고 현장으로 확산</b>하기 위한 문서입니다. 각 기능이 <b>왜 만들어졌고(기획 의도)</b>, <b>어떻게 활용하며</b>, <b>현장에 어떻게 가이드할지</b>까지 담았습니다. 우리가 만드는 건 시스템이 아니라 <b>일하는 방식</b>입니다 — 각자 포지션에서 더 넓고 미래지향적으로 생각하고, 함께 다듬어 주세요.</div>
+function opsGuideEdit(id){
+  if(typeof opsIsMaster!=='function'||!opsIsMaster()){ alert('총괄만 수정할 수 있습니다.'); return; }
+  const sec=OPS_GUIDE_SECTIONS().find(x=>x.id===id); if(!sec) return;
+  const cur=(window.__opsGuide&&window.__opsGuide[id])?window.__opsGuide[id]:sec.html;
+  window.__opsGuideEditId=id;
+  const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='opsGuideEditModal'; modal.style.zIndex='340';
+  modal.innerHTML=`<div class="modal-box" style="max-width:760px;width:96vw"><div class="modal-head"><b>가이드 수정 — ${esc(sec.title)}</b><button onclick="document.getElementById('opsGuideEditModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:74vh;overflow-y:auto"><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"><button class="btn-cancel-sm" style="font-size:11px" onclick="opsDocTableInsert()">＋표</button><button class="btn-cancel-sm" style="font-size:11px" onclick="opsDocTable('insertRowBelow')">행+</button><button class="btn-cancel-sm" style="font-size:11px" onclick="opsDocTable('insertColumnRight')">열+</button><button class="btn-cancel-sm" style="font-size:11px" onclick="opsDocColumns()">다단</button><button class="btn-cancel-sm" style="font-size:11px" onclick="opsInsertToggle(window.__opsGuideQuill)">토글</button></div><div id="opsGuideBox"></div><p style="font-size:11px;color:var(--th);margin-top:8px">표·토글·이미지·하이라이트 사용 가능. 초기 예시로 되돌리려면 '기본값으로'.</p></div><div class="modal-foot" style="display:flex;justify-content:space-between;gap:8px"><button class="btn-cancel-sm" onclick="opsGuideReset('${id}')">기본값으로</button><div style="display:flex;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('opsGuideEditModal').remove()">취소</button><button class="btn-submit" onclick="opsGuideSave()">저장</button></div></div></div>`;
+  document.body.appendChild(modal);
+  try{ window.__opsGuideQuill=new Quill('#opsGuideBox',{theme:'snow',modules:{table:true,toolbar:{container:[[{header:[2,3,false]}],['bold','italic','underline'],[{background:['#fff59d','#b2f2bb','#ffc9c9','#a5d8ff','#ffd8a8',false]},{color:[]}],[{list:'ordered'},{list:'bullet'}],['link','image'],['clean']],handlers:{image:opsDocImage}}}}); window.__opsQuill=window.__opsGuideQuill; window.__opsGuideQuill.root.innerHTML=cur; }catch(e){ alert('편집기 로드 실패: '+e.message); }
+}
+async function opsGuideSave(){
+  const id=window.__opsGuideEditId; if(!id||!window.__opsGuideQuill) return;
+  const html=window.__opsGuideQuill.root.innerHTML;
+  window.__opsGuide=window.__opsGuide||{}; window.__opsGuide[id]=html;
+  const {error}=await sb.from('app_settings').upsert({key:'ops_guide_content',value:JSON.stringify(window.__opsGuide)},{onConflict:'key'});
+  if(error){ alert('저장 오류: '+error.message); return; }
+  const m=document.getElementById('opsGuideEditModal'); if(m) m.remove(); window.__opsGuideQuill=null;
+  renderOpsGuide(document.getElementById('contentArea'));
+}
+async function opsGuideReset(id){
+  if(!confirm('이 항목을 기본 예시로 되돌릴까요? (저장된 편집 내용 삭제)')) return;
+  if(window.__opsGuide) delete window.__opsGuide[id];
+  await sb.from('app_settings').upsert({key:'ops_guide_content',value:JSON.stringify(window.__opsGuide||{})},{onConflict:'key'});
+  const m=document.getElementById('opsGuideEditModal'); if(m) m.remove(); window.__opsGuideQuill=null;
+  renderOpsGuide(document.getElementById('contentArea'));
+}
 
-  <div class="g-toc">
-    <a href="#g-philo">0. 철학·목적</a>
-    <a href="#g-struct">1. 운영 프로젝트 구조</a>
-    <a href="#g-board">2. 카드 보드</a>
-    <a href="#g-doc">3. 문서 자유편집</a>
-    <a href="#g-mind">4. 아이디어맵</a>
-    <a href="#g-req">5. 업무 신청 처리</a>
-    <a href="#g-report">6. 업무 보고 처리</a>
-    <a href="#g-noti">7. 알림 체계</a>
-    <a href="#g-safe">8. 데이터 안정성</a>
-    <a href="#g-hidden">9. 준비중 기능·기획 의도</a>
-    <a href="#g-mind2">10. 팀원에게</a>
-  </div>
-
-  <div class="g-sec" id="g-philo">
-    <h2><i class="ti ti-bulb"></i> 0. 이 도구의 철학과 목적</h2>
-    <div class="gcard">
-      <p>매장이 빠르게 늘어나는 지금, 가장 큰 리스크는 <b>매장·직원마다 운영 지침 이해가 달라 생기는 편차</b>입니다. 슬랙은 3개월 뒤 내용이 블라인드되어 지식이 사라집니다. 그래서 우리는 <b>지속가능한 시스템</b>을 만들고 있습니다.</p>
-      <ul>
-        <li><b>운영 프로젝트</b> = 운영팀 내부가 <b>기획 중인 과제를 짜고, 논의하고, 매뉴얼로 굳혀가는 작업 공간</b>입니다.</li>
-        <li>여기서 정리된 내용이 검증되면 → 직원용 웹 매뉴얼로 배포됩니다.</li>
-        <li>즉 <b>여기(운영팀 가이드/보드) = 만드는 곳, 웹 매뉴얼 = 확정본을 배포하는 곳</b>입니다.</li>
-      </ul>
-    </div>
-    <div class="g-note">이 메뉴는 <b>총괄이 지정한 참여자만</b> 볼 수 있습니다(운영 파트·부총괄·대표라도 자동 노출되지 않음). 신규 합류 팀원을 추가하면 그동안 쌓인 모든 내용을 열람·수정할 수 있습니다.</div>
-  </div>
-
-  <div class="g-sec" id="g-struct">
-    <h2><i class="ti ti-layout-grid"></i> 1. 운영 프로젝트 구조</h2>
-    <div class="g-lead">상단 탭에서 항목을 선택합니다. 항목은 두 종류입니다.</div>
-    <div class="g-flow">
-      <div class="g-step"><span class="n">A</span><div class="t">＋ 보드 (카드보드)</div><div class="d">과제를 카드로 등록·관리. 묶음(칸)으로 분류, 표+칸반처럼 사용.</div></div>
-      <div class="g-arrow">·</div>
-      <div class="g-step"><span class="n">B</span><div class="t">＋ 아이디어맵</div><div class="d">자유 캔버스. 항목(노드)을 연결선으로 이어 업무 구조·아이디어를 짜는 곳.</div></div>
-    </div>
-    <div class="gcard">
-      <h3>참여 인원 관리 (총괄 전용)</h3>
-      <p>헤더 상단 <b>참여</b> 줄에서 참여자 실명이 보이고, <b>참여 인원 관리</b>로 열람·작성·수정 권한자를 지정합니다. 담당자 후보도 여기서 정해진 사람들로 채워집니다.</p>
-      <p>헤더 버튼: <b>속성/유형 · 묶음 · 백업 · 시트연동 · 이름 · 복제 · 삭제</b> (일부는 총괄 전용)</p>
-    </div>
-    <div class="g-shot">📷 실제 화면 캡처 자리 — 운영 프로젝트 상단 탭/헤더 버튼</div>
-  </div>
-
-  <div class="g-sec" id="g-board">
-    <h2><i class="ti ti-clipboard-list"></i> 2. 카드 보드 활용</h2>
-    <div class="g-lead">과제를 '카드'로 등록합니다. 업무신청 폼처럼 항목만 채우는 게 아니라, <b>노션처럼 자유롭게</b> 구성합니다.</div>
-    <div class="g-mock">
-      <div class="mh"><i class="ti ti-cards"></i> 카드 예시</div>
-      <div class="mb">
-        <span class="g-chip" style="background:#c98a3a">과제</span> <b>여름 신메뉴 레시피 리뉴얼</b><br>
-        <span class="g-chip" style="background:#eee;color:#555">진행중</span> <span class="g-chip" style="background:#eee;color:#c98a3a">높음</span> 📅 07-31 · 담당: 홍대진, 박건하
-      </div>
-    </div>
-    <div class="gcard">
-      <ul>
-        <li><b>카드 유형</b>(과제·회의록·메모·자료 등): 색상 딱지로 구분. 유형·색상은 <b>속성/유형</b>에서 편집.</li>
-        <li><b>속성</b>: 상태·담당자·마감일(필수)·우선순위·내용 등. 카드마다 <b>표시 속성·순서를 자유롭게</b> 구성.</li>
-        <li><b>담당자</b>: 운영 참여자 목록 + <b>기타(직접 입력)</b>로 외주·타부서도 지정. 새 담당자 지정 시 <b>슬랙 DM 자동 발송</b>(카드 링크 포함).</li>
-        <li><b>보기 ↔ 편집</b>: 카드를 누르면 <b>최종본 보기</b>(작성자·최종 편집자·일시 표시) → <b>편집</b> 버튼으로 수정.</li>
-        <li><b>잠금</b>: 최종본은 🔒 잠그기 → 수정하려면 비밀번호로 해제(실수 변경 방지).</li>
-        <li><b>피드백(댓글/대댓글)</b>: 카드 하단에서 의견을 주고받음. 본문 하이라이트 부분을 언급해 소통.</li>
-        <li><b>자동 임시저장</b>: 작성 중 내용이 기기에 자동 저장 → 로그아웃돼도 복구.</li>
-        <li><b>실시간 동기화</b> + <b>"○○ 편집 중"</b> 표시로 협업.</li>
-        <li><b>드래그</b>로 카드·묶음 이동, <b>복제</b>로 보드/묶음 통째 복사.</li>
-      </ul>
-    </div>
-    <div class="g-tip">현장 가이드 팁: 매장 공통 과제(예: 신메뉴 도입)를 카드로 만들고, 담당·마감·자료를 한 곳에 모으면 "누가 언제까지 뭘"이 명확해집니다.</div>
-    <div class="g-shot">📷 실제 화면 캡처 자리 — 카드 보기/편집 화면</div>
-  </div>
-
-  <div class="g-sec" id="g-doc">
-    <h2><i class="ti ti-edit"></i> 3. 문서 자유편집 (카드 · 공지)</h2>
-    <div class="g-lead">카드의 <b>문서(자유 편집)</b>와 공지 게시글은 리치 편집기입니다.</div>
-    <div class="gcard">
-      <table class="g-tbl">
-        <tr><th>기능</th><th>사용법</th><th>활용</th></tr>
-        <tr><td>형광펜/글자색</td><td>텍스트 선택 → 툴바 배경색</td><td>중요·논의 대상 강조</td></tr>
-        <tr><td>표</td><td>버튼 → 행·열 입력, 행+/열+ 편집</td><td>비교·체크리스트·기준표</td></tr>
-        <tr><td>다단(2~5분할)</td><td>버튼 → 분할 수 입력</td><td>이미지·텍스트 가로 배치</td></tr>
-        <tr><td>토글(접기)</td><td>버튼 → 제목·내용 입력</td><td>긴 내용 접어두기(공지에도 적용)</td></tr>
-        <tr><td>이미지</td><td>툴바 이미지(스토리지 업로드)</td><td>데이터 가볍게 유지</td></tr>
-        <tr><td>@멘션</td><td>본문에 @이름</td><td>해당 참여자에게 알림</td></tr>
-      </table>
-    </div>
-    <div class="g-note">첨부·이미지는 저장소에 <b>파일로 보관</b>되고 본문엔 주소만 저장됩니다. 올린 사람의 계정을 <b>비활성화(퇴사)</b>해도 파일·내용은 사라지지 않습니다.</div>
-    <div class="g-shot">📷 실제 화면 캡처 자리 — 문서 편집기(표·다단·토글·하이라이트)</div>
-  </div>
-
-  <div class="g-sec" id="g-mind">
-    <h2><i class="ti ti-bulb"></i> 4. 아이디어맵 활용</h2>
-    <div class="g-lead">업무 구조·기획을 자유 캔버스에서 짭니다. 정리한 걸 그대로 카드/매뉴얼로 옮겨갑니다.</div>
-    <div class="gcard">
-      <ul>
-        <li><b>항목</b> 추가 → 드래그 이동, 클릭 편집(내용·색상·연결 링크).</li>
-        <li><b>연결모드</b>: 두 항목을 클릭해 화살표로 연결(파생·흐름 표현).</li>
-        <li><b>꾸러미</b>(그룹 배경): 관련 항목을 영역으로 감싸 구분. 박스를 드래그하면 <b>안의 항목이 함께 이동</b>, "내용까지 삭제"로 일괄 정리.</li>
-        <li><b>선택</b> 모드: 여러 항목 선택 → 한 번에 삭제. 꾸러미 안 항목은 <b>클릭=그룹 선택 / 더블클릭=개별 편집</b>.</li>
-        <li><b>템플릿</b>: 업무 구조도·프로세스 흐름·브레인스토밍·매뉴얼 목차 → 꾸러미로 감싸져 추가.</li>
-        <li><b>보드 항목 연결</b>: 항목을 실제 카드/자료와 연결(카드 보기의 "링크 복사" 또는 "보드 항목에서 선택").</li>
-        <li><b>검색</b>으로 항목 위치 이동, <b>이미지 저장(PNG)</b>으로 내보내기.</li>
-      </ul>
-    </div>
-    <div class="g-tip">활용 예: "지역별 관할 매장 분류", "레시피 마인드맵", "신규 매장 오픈 체크 구조"를 각각 아이디어맵으로 만들어 팀 방향을 누적합니다.</div>
-    <div class="g-shot">📷 실제 화면 캡처 자리 — 아이디어맵(꾸러미·연결선·템플릿)</div>
-  </div>
-
-  <div class="g-sec" id="g-req">
-    <h2><i class="ti ti-send"></i> 5. 업무 신청 처리 흐름 (운영팀 관점)</h2>
-    <div class="g-lead">매장이 운영팀에 요청을 보내고, 운영팀이 접수·배정·완료하는 전체 로직입니다.</div>
-    <div class="g-flow">
-      <div class="g-step"><span class="n">1</span><div class="t">매장 신청</div><div class="d">업무 신청 메뉴에서 유형 선택·작성. '접수됨' 상태로 등록.</div></div>
-      <div class="g-arrow">→</div>
-      <div class="g-step"><span class="n">2</span><div class="t">담당팀 알림</div><div class="d">담당 파트에 <b>개인 슬랙 DM</b>(📋)로 알림 + 앱 알림.</div></div>
-      <div class="g-arrow">→</div>
-      <div class="g-step"><span class="n">3</span><div class="t">접수·배정</div><div class="d">운영팀이 담당자·완료 예정일 지정 → '진행 중'.</div></div>
-      <div class="g-arrow">→</div>
-      <div class="g-step"><span class="n">4</span><div class="t">완료/반려</div><div class="d">처리 완료 또는 반려의견 기록. 신청자에게 진행현황 공개.</div></div>
-    </div>
-    <div class="gcard">
-      <h3>운영팀이 알아야 할 규칙</h3>
-      <ul>
-        <li><b>접수됨</b> 단계에선 신청자(매니저)가 <b>직접 수정·삭제</b> 가능(오타 정정). <b>진행 중·완료·반려</b>부턴 임의 변경 불가.</li>
-        <li>요청 매장은 <b>등록된 매장 목록에서만</b> 선택(임의 입력 차단).</li>
-        <li>테스트 모드에서는 실제 접수·알림이 나가지 않음(교육용).</li>
-      </ul>
-    </div>
-    <div class="g-dm">📋 [구매팀] 새로운 업무 요청: 원두 추가 발주<br><span style="color:var(--th);font-size:11px">bnzcoffee.github.io/bonanza-ops/?request=…</span></div>
-    <div class="g-shot">📷 실제 화면 캡처 자리 — 업무 신청 접수/처리 화면</div>
-  </div>
-
-  <div class="g-sec" id="g-report">
-    <h2><i class="ti ti-message-report"></i> 6. 업무 보고 처리 흐름</h2>
-    <div class="gcard">
-      <p>업무 보고(직원 면담·매장 인수인계·보수 등)는 작성 시 <b>운영팀 전원에게 개인 DM(📝)</b>으로 공유됩니다. 운영팀은 내용을 확인하고 필요한 후속 조치를 카드/아이디어맵으로 연결해 관리합니다.</p>
-      <p>민감한 보고(면담 등)는 <b>2차 비밀번호</b>로 보호됩니다.</p>
-    </div>
-    <div class="g-dm">📝 [업무보고] 8월 1주차 매장 점검 - 홍대진</div>
-    <div class="g-shot">📷 실제 화면 캡처 자리 — 업무 보고 화면</div>
-  </div>
-
-  <div class="g-sec" id="g-noti">
-    <h2><i class="ti ti-bell"></i> 7. 알림 체계 (중요)</h2>
-    <div class="gcard">
-      <ul>
-        <li>모든 알림은 <b>개인 슬랙 DM으로 일원화</b>(채널 알림 아님). 봇 "보난자커피 APP알림"이 발송.</li>
-        <li>종류별 <b>이모지</b>로 구분: 📢 공지 · 📋 업무신청 · 📝 업무보고 · 💬 댓글/멘션 · ↩️ 답글 · 🧩 담당배정 · 📅 스케줄.</li>
-        <li>총괄은 <b>알림 설정 → 알림 문구·이모지 관리</b>에서 종류별 <b>이모지·문구·발송여부</b>를 편집하고, <b>[테스트]</b>로 본인 DM에 예시를 받아 확인.</li>
-        <li>받는 사람은 <b>로그인 상태가 아니어도</b> DM을 받습니다(행동한 사람만 로그인 상태면 됨).</li>
-      </ul>
-    </div>
-    <div class="g-note">슬랙 멤버 ID(U로 시작) 등록은 필수입니다. 미등록 시 DM이 가지 않으니, 현장에 <b>[내 정보]에서 슬랙 ID 등록</b>을 반드시 안내하세요.</div>
-    <div class="g-shot">📷 실제 화면 캡처 자리 — 알림 문구·이모지 관리 + 테스트 DM</div>
-  </div>
-
-  <div class="g-sec" id="g-safe">
-    <h2><i class="ti ti-shield-check"></i> 8. 데이터 안정성</h2>
-    <div class="gcard">
-      <ul>
-        <li><b>자동 임시저장</b>: 작성 중 내용은 기기에 자동 저장(서버 부하 없음). 저장·삭제·취소 시 정리, 오래된 건 자동 청소.</li>
-        <li><b>백업</b>(총괄): 보드 데이터를 JSON+CSV로 다운로드.</li>
-        <li><b>스프레드시트 연동</b>: 카드 요약을 운영 현황 시트로 자동 전송(웹훅). 앱 관리 하단에서 설정.</li>
-        <li>비활성(퇴사) 계정이 올린 자료도 유실 없이 열람 가능.</li>
-      </ul>
-    </div>
-  </div>
-
-  <div class="g-sec" id="g-hidden">
-    <h2><i class="ti ti-eye-off"></i> 9. 준비중(숨김) 기능 — 왜, 어떻게</h2>
-    <div class="g-lead">일부 메뉴는 '숨김' 상태입니다. 왜 계획하는지, 어떻게 활용할지, 현장엔 어떻게 가이드할지 함께 이해해야 확산할 수 있습니다.</div>
-    <details class="g-guide-details"><summary>업무 신청/보고 정식 오픈</summary><div class="gd-body">현재는 운영팀 검증 단계. 유형·담당 파트·알림이 안정화되면 전 매장 오픈 예정. 현장엔 "요청은 슬랙 DM이 아니라 앱으로 — 기록이 남고 진행현황이 보인다"를 강조.</div></details>
-    <details class="g-guide-details"><summary>스케줄/근태</summary><div class="gd-body">매장 스케줄·근태를 앱에서 관리 → 시트 자동 동기화. 오픈 시 매니저 교육 필요(작성·컨펌 흐름).</div></details>
-    <details class="g-guide-details"><summary>기능 오류 접수</summary><div class="gd-body">사용 중 오류는 슬랙 DM 대신 '기능 오류 접수'에 <b>캡처+상세 현상</b>으로. 원인 파악이 빨라 빠르게 개선됨. 현장에 이 창구를 반드시 안내.</div></details>
-    <div class="g-tip">가이드 원칙: 기능만 알려주지 말고 <b>"왜 이렇게 하는지(편차 감소·기록·확산)"</b>를 함께 전달하세요. 그래야 현장이 납득하고 지속합니다.</div>
-  </div>
-
-  <div class="g-sec" id="g-mind2">
-    <h2><i class="ti ti-users"></i> 10. 팀원에게</h2>
-    <div class="gcard">
-      <p>이 앱은 총괄 혼자만의 프로젝트가 아닙니다. 지금 우리가 고민·개발하는 과정처럼, <b>각자 포지션에서 더 넓고 미래지향적으로</b> 생각하고 만들어 나가면 좋겠습니다.</p>
-      <ul>
-        <li>맡은 영역의 반복 업무를 <b>카드/아이디어맵으로 구조화</b>해 보세요.</li>
-        <li>현장에서 편차가 생기는 지점을 발견하면 <b>규칙 후보를 여기서 정리</b>하고 → 검증 후 매뉴얼로.</li>
-        <li>더 나은 방법이 보이면 <b>피드백/기능 오류 접수</b>로 남겨 주세요. 함께 다듬습니다.</li>
-      </ul>
-      <p style="color:var(--br);font-weight:700;margin-top:8px">좋은 커피·서비스·공간, 그리고 고객을 최우선으로 — 현재에 머무르지 않고 계속 발전합니다.</p>
-    </div>
-  </div>
-
-  <div style="text-align:center;color:var(--th);font-size:11px;margin-top:20px">보난자커피 운영팀 가이드 · 내부용 · 실제 스크린샷은 총괄이 각 📷 자리에 추가</div>
-</div>`; }
 async function renderOpsBoard(area){
   if(!opsCanSee()){ area.innerHTML='<div style="padding:40px;text-align:center;color:var(--th)">접근 권한이 없습니다.</div>'; return; }
   area.innerHTML='<div style="padding:40px;text-align:center;color:var(--th)"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
