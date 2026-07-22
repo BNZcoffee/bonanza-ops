@@ -16385,22 +16385,33 @@ function collectHvTable(tableId) {
 
 async function saveHandover(store) {
   const [{ data: hv }, { data: cfg }] = await Promise.all([
-    sb.from('store_handover').select('custom_fields').eq('store', store).maybeSingle(),
+    sb.from('store_handover').select('*').eq('store', store).maybeSingle(),
     sb.from('handover_field_config').select('*').eq('active',true).order('sort_order')
   ]);
   const FIELD_MAP = { pos_login:'pos_login', business_hours:'business_hours', holiday_info:'holiday_info', contacts:'contacts', promotion_info:'promotion_info', equipment:'equipment', repair_history:'repair_history', delivery_info:'delivery_info', after_hours_access:'after_hours_access', schedule_notes:'schedule_notes', extra_notes:'extra_notes' };
   const now = new Date().toISOString();
   const payload = { store, attachments: window.__hvAttachments||[], updated_by: currentUser.id, updated_at: now };
   const custom = Object.assign({}, (hv&&hv.custom_fields)||{});
+  let hasCustom = false;
   for(const f of (cfg||[])){
     let v;
     if(f.is_table){ v = collectHvTable('hv-tbl-'+f.field_key); }
     else { const el=document.getElementById('hv-'+f.field_key); v = el?(el.value.trim()||null):null; }
     if(FIELD_MAP[f.field_key]){ payload[FIELD_MAP[f.field_key]] = v; }
-    else { custom[f.field_key] = v; }
+    else { custom[f.field_key] = v; hasCustom = true; }
   }
-  payload.custom_fields = custom;
-  const { error } = await sb.from('store_handover').upsert(payload, {onConflict:'store'});
+  if(hasCustom || (hv && hv.custom_fields!==undefined)) payload.custom_fields = custom;
+  let { error } = await sb.from('store_handover').upsert(payload, {onConflict:'store'});
+  if (error && /custom_fields/.test(error.message||'')) {
+    // custom_fields 컬럼이 아직 없는 DB — 커스텀 항목 제외하고 기본 항목만 저장 (매장 작업 중단 방지)
+    delete payload.custom_fields;
+    const retry = await sb.from('store_handover').upsert(payload, {onConflict:'store'});
+    if (!retry.error) {
+      if (hasCustom) alert('저장되었습니다.\n\n단, 커스텀 항목(예: 운영 소모품)은 아직 저장되지 않았습니다.\n총괄에게 DB 설정(store_handover.custom_fields 컬럼 추가)을 요청하세요.');
+      openHandover(store); return;
+    }
+    error = retry.error;
+  }
   if (error) { alert('저장 오류: ' + error.message); return; }
   openHandover(store);
 }
