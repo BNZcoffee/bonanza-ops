@@ -9232,6 +9232,8 @@ function canSeeReq(r) {
   if (r.assignee_id === currentUser.id) return true;
   // 개별 열람 허용된 직원 (교육 등 목적)
   if (Array.isArray(r.extra_viewers) && r.extra_viewers.includes(currentUser.id)) return true;
+  // 완료된 신청은 매니저·본사담당·부총괄도 열람 가능 (완료 사례·운영팀 피드백·구매물품 참고용)
+  if (r.status === 'done' && (isManagerRole(currentUser.role) || !!currentUser.part || currentUser.is_vice_master)) return true;
   return false;
 }
 // 신청 작성 권한
