@@ -1139,7 +1139,7 @@ const DEFAULT_ACCT_GUIDE =
 '문의는 운영팀으로 연락 주세요.';
 
 // 관리자 그룹: 총괄·부총괄·인사팀·운영팀
-function isAdminGroup(){ const u=currentUser; return !!(u && (u.is_master||u.is_vice_master||u.role==='admin'||u.role==='hr'||u.part==='인사팀'||u.part==='운영팀')); }
+function isAdminGroup(){ const u=currentUser; return !!(u && (u.is_master||u.is_vice_master||u.role==='admin'||u.role==='hr'||u.part==='인사팀'||u.part==='운영'||u.part==='운영팀')); }
 
 async function loadAcctGuideTpl(){
   if (window.__acctGuideTpl) return window.__acctGuideTpl;
@@ -8688,7 +8688,7 @@ function applyMenuPermissions() {
 function isOperationsPart(u) {
   u = u || currentUser;
   if (!u) return false;
-  return u.part === '운영팀' || u.role === 'admin'; // 하위 호환
+  return u.part === '운영' || u.part === '운영팀' || u.role === 'admin'; // 운영파트(코치 포함)
 }
 function isHrPart(u) {
   u = u || currentUser;
@@ -10359,10 +10359,10 @@ function isInterviewAdmin() {
 // ── 면담 열람 권한 (운영프로젝트 기준: 총괄/운영팀 + 예외 지정) ──
 window.__ivAllowed = window.__ivAllowed || [];
 async function ivLoadAllowed(){ try{ const {data}=await sb.from('app_settings').select('value').eq('key','interview_allowed_users').maybeSingle(); const v=data&&data.value; window.__ivAllowed=(v?((typeof v==='string'?JSON.parse(v):v)||[]):[]).map(String); }catch(e){ window.__ivAllowed=[]; } }
-function isInterviewFull(u){ u=u||currentUser; if(!u) return false; return !!u.is_master || u.role==='admin' || (window.__ivAllowed||[]).includes(String(u.id)); }
-function ivAuthorIsFull(r){ if(!r) return false; const a=r.author||{}; return !!a.is_master || a.role==='admin' || (window.__ivAllowed||[]).includes(String(r.author_id)); }
+function isInterviewFull(u){ u=u||currentUser; if(!u) return false; return !!u.is_master || isOperationsPart(u) || (window.__ivAllowed||[]).includes(String(u.id)); }
+function ivAuthorIsFull(r){ if(!r) return false; const a=r.author||{}; return !!a.is_master || a.role==='admin' || a.part==='운영' || a.part==='운영팀' || (window.__ivAllowed||[]).includes(String(r.author_id)); }
 function canSeeInterview(r){ if(!currentUser||!r) return false; if(isInterviewFull()) return true; if(r.author_id&&String(r.author_id)===String(currentUser.id)) return true; const my=(currentUser.store||'').trim(); const rs=(r.store||(r.staff&&r.staff.store)||'').trim(); if(my&&rs===my&&!ivAuthorIsFull(r)) return true; return false; }
-function ivPermMgr(){ if(!currentUser.is_master){ alert('총괄만 설정할 수 있습니다.'); return; } const ppl=(window.__ivPeople||[]); const auto=ppl.filter(u=>u.is_master||u.role==='admin'); const rows=ppl.filter(u=>!(u.is_master||u.role==='admin')).map(u=>`<label style="display:flex;align-items:center;gap:8px;padding:7px 8px;border-bottom:0.5px solid var(--crd);font-size:13px"><input type="checkbox" class="ivperm-ck" value="${u.id}" ${(window.__ivAllowed||[]).includes(String(u.id))?'checked':''}> ${esc(u.name)} <span style="font-size:11px;color:var(--th)">${esc(u.store||u.part||'')}</span></label>`).join(''); const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='ivPermModal'; modal.style.zIndex='340'; modal.innerHTML=`<div class="modal-box" style="max-width:460px;width:94vw"><div class="modal-head"><b>면담 열람 권한 관리</b><button onclick="document.getElementById('ivPermModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:70vh;overflow-y:auto"><p style="font-size:12px;color:var(--th);margin-bottom:6px">기본 열람: <b>${auto.map(u=>esc(u.name)).join(', ')||'총괄/운영팀'}</b> — 항상 전 매장 열람</p><p style="font-size:12px;color:var(--th);margin-bottom:8px">아래에서 <b>추가 열람 권한자</b>를 선택하세요. 선택된 사람은 전 매장 면담을 열람하며, 이들이 작성한 면담은 매장 매니저에게 노출되지 않습니다.</p>${rows||'<div style="color:var(--th);font-size:13px">대상 직원이 없습니다.</div>'}</div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('ivPermModal').remove()">취소</button><button class="btn-submit" onclick="ivPermSave()">저장</button></div></div>`; document.body.appendChild(modal); }
+function ivPermMgr(){ if(!currentUser.is_master){ alert('총괄만 설정할 수 있습니다.'); return; } const ppl=(window.__ivPeople||[]); const auto=ppl.filter(u=>u.is_master||isOperationsPart(u)); const rows=ppl.filter(u=>!(u.is_master||isOperationsPart(u))).map(u=>`<label style="display:flex;align-items:center;gap:8px;padding:7px 8px;border-bottom:0.5px solid var(--crd);font-size:13px"><input type="checkbox" class="ivperm-ck" value="${u.id}" ${(window.__ivAllowed||[]).includes(String(u.id))?'checked':''}> ${esc(u.name)} <span style="font-size:11px;color:var(--th)">${esc(u.store||u.part||'')}</span></label>`).join(''); const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='ivPermModal'; modal.style.zIndex='340'; modal.innerHTML=`<div class="modal-box" style="max-width:460px;width:94vw"><div class="modal-head"><b>면담 열람 권한 관리</b><button onclick="document.getElementById('ivPermModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:70vh;overflow-y:auto"><p style="font-size:12px;color:var(--th);margin-bottom:6px">기본 열람: <b>${auto.map(u=>esc(u.name)).join(', ')||'총괄/운영팀'}</b> — 항상 전 매장 열람</p><p style="font-size:12px;color:var(--th);margin-bottom:8px">아래에서 <b>추가 열람 권한자</b>를 선택하세요. 선택된 사람은 전 매장 면담을 열람하며, 이들이 작성한 면담은 매장 매니저에게 노출되지 않습니다.</p>${rows||'<div style="color:var(--th);font-size:13px">대상 직원이 없습니다.</div>'}</div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('ivPermModal').remove()">취소</button><button class="btn-submit" onclick="ivPermSave()">저장</button></div></div>`; document.body.appendChild(modal); }
 async function ivPermSave(){ const ids=[...document.querySelectorAll('.ivperm-ck:checked')].map(x=>x.value); window.__ivAllowed=ids.map(String); const {error}=await sb.from('app_settings').upsert({key:'interview_allowed_users',value:JSON.stringify(window.__ivAllowed)},{onConflict:'key'}); if(error){ alert('저장 오류: '+error.message); return; } const m=document.getElementById('ivPermModal'); if(m) m.remove(); renderInterviews(document.getElementById('contentArea')); }
 function canWriteInterview() {
   return isInterviewAdmin() || isManagerRole(currentUser.role) || !!currentUser.part;
@@ -10382,7 +10382,7 @@ async function renderInterviews(area) {
     sb.from('interview_options').select('*').eq('active', true).order('sort_order'),
     (async () => {
       let q = sb.from('interviews')
-        .select('*, staff:users!interviews_staff_id_fkey(name,store,role,active), author:users!interviews_author_id_fkey(name,store,role,is_master), feedback_user:users!interviews_feedback_by_fkey(name)')
+        .select('*, staff:users!interviews_staff_id_fkey(name,store,role,active), author:users!interviews_author_id_fkey(name,store,role,is_master,part), feedback_user:users!interviews_feedback_by_fkey(name)')
         .order('interview_date', {ascending: false})
         .order('created_at', {ascending: false});
       if (!isInterviewFull()) q = q.eq('store', currentUser.store);
@@ -10463,7 +10463,7 @@ async function renderInterviews(area) {
       </div>
     </div>` : '';
 
-  const __ivFull=(window.__ivPeople||[]).filter(u=>u.is_master||u.role==='admin'||(window.__ivAllowed||[]).includes(String(u.id)));
+  const __ivFull=(window.__ivPeople||[]).filter(u=>u.is_master||isOperationsPart(u)||(window.__ivAllowed||[]).includes(String(u.id)));
   const viewerStrip=`<div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:var(--tm)"><i class="ti ti-eye"></i> <b>열람 권한</b> <span style="color:var(--ts)">${__ivFull.map(u=>esc(u.name)).join(' · ')||'-'}</span>${currentUser.is_master?` <button class="btn-cancel-sm" style="font-size:11px;padding:3px 9px;margin-left:6px" onclick="ivPermMgr()"><i class="ti ti-settings"></i> 열람 권한 관리</button>`:''}</div>`;
   area.innerHTML = `
     ${optModalHtml}
@@ -10564,9 +10564,10 @@ async function deleteIvOpt(id, label) {
 // ── 상세 ──────────────────────────────────────────────────
 async function openInterviewById(id) {
   const { data } = await sb.from('interviews')
-    .select('*, staff:users!interviews_staff_id_fkey(name,store,role,active), author:users!interviews_author_id_fkey(name,store,role,is_master), feedback_user:users!interviews_feedback_by_fkey(name,store)')
+    .select('*, staff:users!interviews_staff_id_fkey(name,store,role,active), author:users!interviews_author_id_fkey(name,store,role,is_master,part), feedback_user:users!interviews_feedback_by_fkey(name,store)')
     .eq('id', id).single();
   if (!data) return;
+  try{ await ivLoadAllowed(); }catch(e){}
   if (!canSeeInterview(data)) { alert('이 면담을 열람할 권한이 없습니다.'); return; }
   curInterview = data;
   goPage('interviewDetail');
@@ -10575,9 +10576,20 @@ async function openInterviewById(id) {
 async function renderInterviewDetail(area) {
   const r = curInterview;
   if (!r) { goPage('interviews'); return; }
+  try{ await ivLoadAllowed(); }catch(e){}
+  if(!window.__ivPeople || !window.__ivPeople.length){ try{ const {data}=await sb.from('users').select('id,name,is_master,role,part,store,sub_stores,active').eq('active',true).order('name'); window.__ivPeople=data||[]; }catch(e){ window.__ivPeople=window.__ivPeople||[]; } }
   const isAdmin    = isInterviewAdmin();
-  const canFeedback = isAdmin || !!currentUser.part;
-  const canEdit    = isAdmin || r.author_id === currentUser.id;
+  const __authorFull = ivAuthorIsFull(r);
+  const __rStore = (r.store || (r.staff && r.staff.store) || '').trim();
+  const __allowed = window.__ivAllowed||[];
+  const __opsView = (window.__ivPeople||[]).filter(u=>u.is_master||isOperationsPart(u)||__allowed.includes(String(u.id)));
+  let __viewers;
+  if(__authorFull){ __viewers=__opsView.slice(); }
+  else { const __mgrs=(window.__ivPeople||[]).filter(u=>isManagerRole(u.role) && (((u.store||'').trim()===__rStore) || (Array.isArray(u.sub_stores)&&u.sub_stores.map(x=>(x||'').trim()).includes(__rStore)))); const __seen=new Set(); __viewers=[...__mgrs,...__opsView].filter(u=>{ if(__seen.has(u.id)) return false; __seen.add(u.id); return true; }); }
+  const __vtag=function(u){ if(u.is_master) return '총괄'; if(isOperationsPart(u)) return '운영파트'; if(__allowed.includes(String(u.id))) return '예외'; if(isManagerRole(u.role)) return '매니저'; return ''; };
+  const viewerStrip = `<div style="background:#fff8ee;border:1px solid #f0d9b5;border-left:4px solid #c98a3a;border-radius:10px;padding:10px 12px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#7a5a2a;margin-bottom:5px"><i class="ti ti-lock"></i> 열람 권한 (민감 정보) · ${__authorFull?'운영파트 작성본':'매장 매니저 작성본'}</div><div style="line-height:1.9">${__viewers.map(u=>`<span style="display:inline-block;background:#fff;border:0.5px solid #e4d9c6;border-radius:10px;padding:2px 9px;margin:2px;font-size:12px;color:#5a4a36">${esc(u.name)}<span style="font-size:10px;color:#a98a5a;margin-left:4px">${__vtag(u)}</span></span>`).join('')||'<span style="font-size:12px;color:#9a7a4a">-</span>'}</div><div style="font-size:11px;margin-top:5px;color:#9a7a4a">${__authorFull?'운영파트·예외 권한자만 열람·작성·피드백 가능':'해당 매장 매니저·운영파트·예외 권한자가 열람·피드백 가능'}</div></div>`;
+  const canFeedback = isInterviewFull() || (!__authorFull && isManagerRole(currentUser.role) && (((currentUser.store||'').trim()===__rStore) || myManagedStores().map(s=>(s||'').trim()).includes(__rStore)));
+  const canEdit    = isInterviewFull() || r.author_id === currentUser.id;
   // 피드백 수정: 피드백 등록자 본인 또는 관리자
   const canEditFb  = !!r.feedback && (isAdmin || r.feedback_by === currentUser.id);
   const isFbEdit   = window.__ivFbEditMode === r.id;
@@ -10587,6 +10599,7 @@ async function renderInterviewDetail(area) {
     : '';
 
   area.innerHTML = `
+    ${viewerStrip}
     <div style="margin-bottom:10px">
       <button class="btn-cancel-sm" onclick="goPage('interviews')"><i class="ti ti-arrow-left"></i> 목록</button>
       ${(currentUser.is_master || currentUser.is_vice_master) ? '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteInterview('+r.id+')"><i class="ti ti-trash"></i> 삭제</button>' : ''}
@@ -10596,12 +10609,6 @@ async function renderInterviewDetail(area) {
         <div class="detail-title-row">
           <i class="ti ti-message-report" style="color:var(--brm)"></i>
           ${r.staff ? r.staff.store + ' · ' + r.staff.name : '(삭제된 직원)'}
-        </div>
-        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px">
-          <span style="font-size:10px;font-weight:700;color:var(--th);letter-spacing:.5px;padding:3px 0">열람 대상:</span>
-          <span style="font-size:11px;background:var(--crm);color:var(--brm);border-radius:10px;padding:2px 8px;font-weight:600">소속 매장 매니저</span>
-          <span style="font-size:11px;background:var(--pub);color:var(--pu);border-radius:10px;padding:2px 8px;font-weight:600">운영팀</span>
-          <span style="font-size:11px;background:var(--gnb);color:var(--gn);border-radius:10px;padding:2px 8px;font-weight:600">총괄·부총괄</span>
         </div>
         <div class="detail-meta" style="flex-wrap:wrap;gap:10px">
           <span>면담일: <strong>${r.interview_date || fmtDate(r.created_at)}</strong></span>
@@ -15825,14 +15832,16 @@ async function removeCoachStore(coachId, store) {
 // C) 매장 인수인계
 // ══════════════════════════════════════════════════════════
 let curHandoverStore = null;
+function handoverIsFull(){ const u=currentUser; return !!(u&&(u.is_master||u.is_vice_master||u.role==='admin'||isOperationsPart(u))); }
+function handoverCanEdit(store){ const u=currentUser; if(!u) return false; if(handoverIsFull()) return true; if(isManagerRole(u.role)) return myManagedStores().map(s=>(s||'').trim()).includes((store||'').trim()); return false; }
 
 async function renderHandoverList(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  const isAdmin = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
+  const isAdmin = handoverIsFull();
 
   // 매장 목록 (직원 소속 기준)
   let sq = sb.from('users').select('store').eq('active', true).neq('role','admin');
-  if (!isAdmin) sq = sq.eq('store', currentUser.store);
+  if (!isAdmin) sq = sq.in('store', myManagedStores());
   const { data: uStores } = await sq;
   const NON_STORE = new Set(['본사','부서담당','부총괄','총괄','운영팀','인사팀']);
   const stores = [...new Set((uStores||[]).map(u=>u.store).filter(s => s && !NON_STORE.has(s)))].sort();
@@ -15845,7 +15854,7 @@ async function renderHandoverList(area) {
   const cards = stores.map(store => {
     const hv = hvMap[store];
     const hasData = !!hv;
-    const canEdit2 = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master||isManagerRole(currentUser.role);
+    const canEdit2 = handoverCanEdit(store);
     return `<div class="post-card" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
       <div onclick="openHandover('${store}')" style="flex:1;cursor:pointer">
         <div class="post-card-top" style="margin-bottom:5px">
@@ -15911,8 +15920,8 @@ async function renderHandoverDetail(area) {
   const d   = hv || {};
   const attachments = Array.isArray(d.attachments) ? d.attachments : [];
 
-  const isAdmin  = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
-  const canEdit  = isAdmin || isManagerRole(currentUser.role);
+  const isAdmin  = handoverIsFull();
+  const canEdit  = handoverCanEdit(store);
   const canConfig= currentUser.is_master || currentUser.is_vice_master || currentUser.role==='admin';
 
   const editBtn   = canEdit   ? `<button class="btn-submit" onclick="openHandoverEdit('${store}')" style="padding:8px 16px"><i class="ti ti-edit"></i> 수정</button>` : '';
@@ -16923,7 +16932,7 @@ let __attMonth = null;      // 'YYYY-MM'
 let __attStore = '';
 let __attUsers = [];        // 폼/멘션용 캐시
 
-function isAttAdmin(){ const u=currentUser; return !!(u && (u.is_master||u.is_vice_master||u.role==='admin'||u.role==='hr'||u.part==='인사팀'||u.part==='운영팀')); }
+function isAttAdmin(){ const u=currentUser; return !!(u && (u.is_master||u.is_vice_master||u.role==='admin'||u.role==='hr'||u.part==='인사팀'||u.part==='운영'||u.part==='운영팀')); }
 function canSeeAtt(){ const u=currentUser; return !!(u && (isAttAdmin()||isManagerRole(u.role))); }
 function attHm2min(t){ if(!t||t.indexOf(':')<0) return null; const [h,m]=t.split(':').map(Number); if(isNaN(h)||isNaN(m)) return null; return h*60+m; }
 function attDiffLabel(min){ if(min==null||isNaN(min)) return '-'; const sg=min<0?'-':''; const a=Math.abs(min); if(a<=60) return sg+a+'분'; return sg+Math.floor(a/60)+'시간 '+(a%60)+'분'; }
