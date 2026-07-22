@@ -16030,7 +16030,7 @@ async function renderHandoverDetail(area) {
         <div class="section-label" style="margin-bottom:8px;display:flex;align-items:center;gap:6px"><i class="ti ${icon}" style="color:var(--brm)"></i>${f.label}</div>
         <div style="background:var(--cr);border-radius:8px;padding:13px 15px;font-size:14px;color:var(--th)">미등록</div></div>`;
       const thead = colLabels.map(c=>`<th style="padding:6px 10px;background:var(--crm);font-size:12px;font-weight:600;color:var(--ts);text-align:left">${c}</th>`).join('');
-      const tbody = rows.map(r=>`<tr>${colKeys.map(k=>`<td style="padding:6px 10px;border-top:0.5px solid var(--crd);font-size:13px">${r[k]||''}</td>`).join('')}</tr>`).join('');
+      const tbody = rows.map(r=>`<tr>${cols.map(c=>{ const kk=c.key||c; let v=r[kk]; if(v==null||v==='') v=r[c.label]; return `<td style="padding:6px 10px;border-top:0.5px solid var(--crd);font-size:13px">${v==null?'':esc(String(v))}</td>`; }).join('')}</tr>`).join('');
       return `<div style="margin-bottom:22px">
         <div class="section-label" style="margin-bottom:8px;display:flex;align-items:center;gap:6px"><i class="ti ${icon}" style="color:var(--brm)"></i>${f.label}</div>
         <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;border:0.5px solid var(--crd)">
@@ -16264,101 +16264,33 @@ async function saveHandoverFieldConfig() {
 async function openHandoverEdit(store) {
   const area = document.getElementById('contentArea');
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-
-  const { data: hv } = await sb.from('store_handover').select('*').eq('store', store).maybeSingle();
+  const [{ data: hv }, { data: cfg }] = await Promise.all([
+    sb.from('store_handover').select('*').eq('store', store).maybeSingle(),
+    sb.from('handover_field_config').select('*').eq('active',true).order('sort_order')
+  ]);
   const d = hv || {};
-  const contacts  = Array.isArray(d.contacts)      ? d.contacts      : [{}];
-  const equipment = Array.isArray(d.equipment)     ? d.equipment     : [{}];
-  const repairs   = Array.isArray(d.repair_history)? d.repair_history: [{}];
-  const attachments = Array.isArray(d.attachments) ? d.attachments   : [];
-
-  const textField = (label, id, val, placeholder='', rows=2) =>
-    `<div class="form-row">
-      <label class="form-label">${label}</label>
-      <textarea class="form-input" id="hv-${id}" rows="${rows}" placeholder="${placeholder}">${val||''}</textarea>
-    </div>`;
-
-  const dynTable = (id, rows, cols, addLabel) => {
-    const colKeys = cols.map(c=>c.key);
-    const thead = cols.map(c=>`<th style="padding:5px 8px;font-size:11px;color:var(--th);text-align:left;font-weight:600">${c.label}</th>`).join('') + '<th></th>';
-    const tbody = rows.map((r,i)=>
-      `<tr id="${id}-row-${i}">${colKeys.map(k=>`<td style="padding:3px 4px"><input class="form-input" style="padding:6px 8px;font-size:12px" data-table="${id}" data-row="${i}" data-col="${k}" value="${r[k]||''}" /></td>`).join('')}
-      <td style="padding:3px 4px"><button onclick="removeHvRow('${id}',${i})" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:16px">✕</button></td></tr>`
-    ).join('');
-    return `<div class="form-row">
-      <div style="overflow-x:auto;margin-bottom:6px">
-        <table style="width:100%;border-collapse:collapse" id="${id}-table">
-          <thead><tr>${thead}</tr></thead>
-          <tbody id="${id}-tbody">${tbody}</tbody>
-        </table>
-      </div>
-      <button type="button" class="btn-add-tag" onclick="addHvRow('${id}',[${colKeys.map(k=>`'${k}'`).join(',')}])">${addLabel}</button>
-    </div>`;
+  const FIELD_MAP = { pos_login:'pos_login', business_hours:'business_hours', holiday_info:'holiday_info', contacts:'contacts', promotion_info:'promotion_info', equipment:'equipment', repair_history:'repair_history', delivery_info:'delivery_info', after_hours_access:'after_hours_access', schedule_notes:'schedule_notes', extra_notes:'extra_notes' };
+  const getVal = function(f){ const dbKey=FIELD_MAP[f.field_key]||f.field_key; if(FIELD_MAP[f.field_key]) return d[dbKey]; const cf=d.custom_fields||{}; return (cf[f.field_key]!==undefined)?cf[f.field_key]:d[dbKey]; };
+  const cell = function(r,c){ let v=r[c.key]; if(v===undefined||v===null||v==='') v=r[c.label]; return v==null?'':String(v); };
+  const dynTable = function(f, rows, cols){
+    const tid='hv-tbl-'+f.field_key;
+    const thead = cols.map(function(c){return '<th style="padding:5px 8px;font-size:11px;color:var(--th);text-align:left;font-weight:600">'+esc(c.label||c.key||'')+'</th>';}).join('')+'<th></th>';
+    const tbody = rows.map(function(r,i){ return '<tr id="'+tid+'-row-'+i+'">'+cols.map(function(c){return '<td style="padding:3px 4px"><input class="form-input" style="padding:6px 8px;font-size:12px" data-table="'+tid+'" data-row="'+i+'" data-col="'+esc(c.key)+'" value="'+esc(cell(r,c)).replace(/"/g,'&quot;')+'" /></td>';}).join('')+'<td style="padding:3px 4px"><button onclick="removeHvRow(\''+tid+'\','+i+')" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:16px">✕</button></td></tr>'; }).join('');
+    const colKeysJs = cols.map(function(c){return "'"+String(c.key).replace(/'/g,"\\'")+"'";}).join(',');
+    return '<div style="overflow-x:auto;margin-bottom:6px"><table style="width:100%;border-collapse:collapse" id="'+tid+'-table"><thead><tr>'+thead+'</tr></thead><tbody id="'+tid+'-tbody">'+tbody+'</tbody></table></div><button type="button" class="btn-add-tag" onclick="addHvRow(\''+tid+'\',['+colKeysJs+'])">+ '+esc(f.label)+' 추가</button>';
   };
-
-  area.innerHTML = `
-    <div style="margin-bottom:10px">
-      <button class="btn-cancel-sm" onclick="openHandover('${store}')"><i class="ti ti-arrow-left"></i> 취소</button>
-    </div>
-    <div class="form-section">
-      <div class="page-title" style="margin-bottom:6px">${store} 인수인계 수정</div>
-      <div style="font-size:12px;color:var(--th);margin-bottom:20px">모든 항목은 최신 상태로 유지해 주세요. 저장 시 수정 일시와 작성자가 자동 기록됩니다.</div>
-
-      ${textField('POS 로그인 정보', 'pos_login', d.pos_login, '아이디 / 비밀번호 / 관리자 코드 등')}
-      ${textField('영업시간', 'business_hours', d.business_hours, '예) 평일 09:00~22:00 / 주말 10:00~21:00')}
-      ${textField('휴무 정보', 'holiday_info', d.holiday_info, '정기 휴무일, 단축운영 조건 등')}
-
-      <div class="form-row">
-        <label class="form-label">담당 연락처</label>
-        ${dynTable('hv-contacts', contacts,
-          [{key:'구분',label:'구분'},{key:'이름',label:'이름'},{key:'연락처',label:'연락처'},{key:'비고',label:'비고'}],
-          '+ 연락처 추가')}
-      </div>
-
-      ${textField('프로모션 정보', 'promotion_info', d.promotion_info, '진행 중인 프로모션, 조건 등', 3)}
-
-      <div class="form-row">
-        <label class="form-label">장비 정보</label>
-        ${dynTable('hv-equipment', equipment,
-          [{key:'장비명',label:'장비명'},{key:'모델명',label:'모델명'},{key:'수량',label:'수량'},{key:'설치위치',label:'설치위치'},{key:'비고',label:'비고'}],
-          '+ 장비 추가')}
-      </div>
-
-      <div class="form-row">
-        <label class="form-label">매장 보수 내역 <span style="font-size:11px;color:var(--th);font-weight:400">(최신순)</span></label>
-        ${dynTable('hv-repairs', repairs,
-          [{key:'일자',label:'일자'},{key:'내용',label:'내용'},{key:'업체',label:'업체'},{key:'비용',label:'비용'},{key:'비고',label:'비고'}],
-          '+ 보수 내역 추가')}
-      </div>
-
-      ${textField('하역장 위치', 'delivery_info', d.delivery_info, '위치 설명, 주의사항 등')}
-      ${textField('영업시간 외 출입방법', 'after_hours_access', d.after_hours_access, '출입 방법, 비밀번호, 주의사항 등')}
-      ${textField('스케줄 편성 고려사항', 'schedule_notes', d.schedule_notes, '최소 인원, 피크타임, 특이사항 등', 3)}
-      ${textField('기타 특이사항', 'extra_notes', d.extra_notes, '인수인계 시 꼭 알아야 할 사항', 4)}
-
-      <div class="form-row">
-        <label class="form-label">첨부파일 추가</label>
-        <div style="display:flex;gap:8px;margin-bottom:6px">
-          <input class="form-input" id="hv-attach-name" placeholder="파일 표시명" style="flex:1" />
-          <input class="form-input" id="hv-attach-url" placeholder="파일 URL (Drive, Dropbox 등)" style="flex:2" />
-          <button class="btn-submit" style="padding:8px 12px;font-size:12px;white-space:nowrap" onclick="addHvAttach()">추가</button>
-        </div>
-        <div id="hv-attach-list">
-          ${attachments.map((a,i)=>`<div id="hv-attach-${i}" style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-            <i class="ti ti-paperclip" style="color:var(--th)"></i>
-            <span style="font-size:13px;flex:1">${a.name}</span>
-            <button onclick="removeHvAttach(${i})" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:13px">✕</button>
-          </div>`).join('')}
-        </div>
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
-        <button class="btn-cancel-sm" onclick="openHandover('${store}')">취소</button>
-        <button class="btn-submit" onclick="saveHandover('${store}')"><i class="ti ti-device-floppy"></i> 저장</button>
-      </div>
-    </div>`;
-
-  // 현재 첨부파일 목록 메모리
+  const fieldsHtml = (cfg||[]).map(function(f){
+    const val=getVal(f);
+    if(f.is_table){ const cols=Array.isArray(f.table_cols)?f.table_cols:(typeof f.table_cols==='string'?JSON.parse(f.table_cols||'[]'):[]); const rows=(Array.isArray(val)&&val.length)?val:[{}]; return '<div class="form-row"><label class="form-label">'+esc(f.label)+(f.description?' <span style="font-size:11px;color:var(--th);font-weight:400">'+esc(f.description)+'</span>':'')+'</label>'+dynTable(f,rows,cols)+'</div>'; }
+    return '<div class="form-row"><label class="form-label">'+esc(f.label)+'</label><textarea class="form-input" id="hv-'+f.field_key+'" rows="3" placeholder="'+esc(f.description||'')+'">'+(val?esc(val):'')+'</textarea></div>';
+  }).join('');
+  const attachments = Array.isArray(d.attachments)?d.attachments:[];
+  area.innerHTML = '<div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="openHandover(\''+store+'\')"><i class="ti ti-arrow-left"></i> 취소</button></div>'+
+    '<div class="form-section"><div class="page-title" style="margin-bottom:6px">'+esc(store)+' 인수인계 수정</div>'+
+    '<div style="font-size:12px;color:var(--th);margin-bottom:20px">모든 항목은 최신 상태로 유지해 주세요. 저장 시 수정 일시와 작성자가 자동 기록됩니다.</div>'+
+    fieldsHtml+
+    '<div class="form-row"><label class="form-label">첨부파일 추가</label><div style="display:flex;gap:8px;margin-bottom:6px"><input class="form-input" id="hv-attach-name" placeholder="파일 표시명" style="flex:1" /><input class="form-input" id="hv-attach-url" placeholder="파일 URL (Drive, Dropbox 등)" style="flex:2" /><button class="btn-submit" style="padding:8px 12px;font-size:12px;white-space:nowrap" onclick="addHvAttach()">추가</button></div><div id="hv-attach-list">'+attachments.map(function(a,i){return '<div id="hv-attach-'+i+'" style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><i class="ti ti-paperclip" style="color:var(--th)"></i><span style="font-size:13px;flex:1">'+esc(a.name)+'</span><button onclick="removeHvAttach('+i+')" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:13px">✕</button></div>';}).join('')+'</div></div>'+
+    '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px"><button class="btn-cancel-sm" onclick="openHandover(\''+store+'\')">취소</button><button class="btn-submit" onclick="saveHandover(\''+store+'\')"><i class="ti ti-device-floppy"></i> 저장</button></div></div>';
   window.__hvAttachments = [...attachments];
 }
 
@@ -16414,26 +16346,22 @@ function collectHvTable(tableId) {
 }
 
 async function saveHandover(store) {
+  const [{ data: hv }, { data: cfg }] = await Promise.all([
+    sb.from('store_handover').select('custom_fields').eq('store', store).maybeSingle(),
+    sb.from('handover_field_config').select('*').eq('active',true).order('sort_order')
+  ]);
+  const FIELD_MAP = { pos_login:'pos_login', business_hours:'business_hours', holiday_info:'holiday_info', contacts:'contacts', promotion_info:'promotion_info', equipment:'equipment', repair_history:'repair_history', delivery_info:'delivery_info', after_hours_access:'after_hours_access', schedule_notes:'schedule_notes', extra_notes:'extra_notes' };
   const now = new Date().toISOString();
-  const payload = {
-    store,
-    pos_login:          document.getElementById('hv-pos_login')?.value.trim()||null,
-    business_hours:     document.getElementById('hv-business_hours')?.value.trim()||null,
-    holiday_info:       document.getElementById('hv-holiday_info')?.value.trim()||null,
-    contacts:           collectHvTable('hv-contacts'),
-    promotion_info:     document.getElementById('hv-promotion_info')?.value.trim()||null,
-    equipment:          collectHvTable('hv-equipment'),
-    repair_history:     collectHvTable('hv-repairs'),
-    delivery_info:      document.getElementById('hv-delivery_info')?.value.trim()||null,
-    after_hours_access: document.getElementById('hv-after_hours_access')?.value.trim()||null,
-    schedule_notes:     document.getElementById('hv-schedule_notes')?.value.trim()||null,
-    extra_notes:        document.getElementById('hv-extra_notes')?.value.trim()||null,
-    attachments:        window.__hvAttachments || [],
-    updated_by:         currentUser.id,
-    updated_at:         now
-  };
-
-  // upsert (store 기준)
+  const payload = { store, attachments: window.__hvAttachments||[], updated_by: currentUser.id, updated_at: now };
+  const custom = Object.assign({}, (hv&&hv.custom_fields)||{});
+  for(const f of (cfg||[])){
+    let v;
+    if(f.is_table){ v = collectHvTable('hv-tbl-'+f.field_key); }
+    else { const el=document.getElementById('hv-'+f.field_key); v = el?(el.value.trim()||null):null; }
+    if(FIELD_MAP[f.field_key]){ payload[FIELD_MAP[f.field_key]] = v; }
+    else { custom[f.field_key] = v; }
+  }
+  payload.custom_fields = custom;
   const { error } = await sb.from('store_handover').upsert(payload, {onConflict:'store'});
   if (error) { alert('저장 오류: ' + error.message); return; }
   openHandover(store);
