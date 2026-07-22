@@ -4214,12 +4214,35 @@ async function renderStats(area) {
 }
 
 // ── NOTIF SETTINGS ────────────────────────────────
+function notifSummaryHtml(ns){
+  const E=function(k){ return (typeof notifEnabled==='function')?notifEnabled(k):true; };
+  const remindOn=!!(ns&&ns.remind_unread);
+  const chip=function(on,label){ return '<span style="display:inline-block;font-size:11px;font-weight:700;border-radius:10px;padding:2px 9px;background:'+(on?'#e6f4ea':'#f1eee9')+';color:'+(on?'#2d7a46':'#9a8f80')+'">'+(on?'발송':'중지')+(label?(' · '+label):'')+'</span>'; };
+  const rows=[
+    ['📢 새 공지 등록','전 직원','신규 등록 시에만 (수정 시 재발송 안 함)', E('new_post'), ''],
+    ['🔔 공지 미확인 리마인드','현장 직원 (본사 제외)','3일 미확인 → 오전 9시 1회 · 확인체크 사용 공지만', remindOn, remindOn?'자동':'OFF'],
+    ['💬 댓글 태그(@)','태그된 본인','공지·업무신청 공통', E('comment_tag'), ''],
+    ['↩️ 댓글 답글','원댓글 작성자','', E('comment_reply'), ''],
+    ['📋 업무신청 접수','담당 파트 전원','유형별 담당 파트', E('request'), ''],
+    ['🔄 업무신청 진행/완료/반려','신청자 · 해당 매장 매니저','', E('request'), ''],
+    ['🧭 업무신청 참조','관할 코치','', E('request'), ''],
+    ['📝 업무보고 등록','운영 파트 전원 (part 운영·admin)','', E('report'), ''],
+    ['🧩 운영 프로젝트 담당 배정','배정된 본인','', E('ops_assign'), ''],
+    ['💬 운영 프로젝트 멘션','멘션된 본인','문서·항목', E('ops_mention'), ''],
+    ['📅 스케줄 컨펌/정정','승인자 · 작성자','', E('schedule'), ''],
+    ['📅 지원근무 편성','해당 매장 매니저','', E('schedule'), ''],
+    ['📅 근태이슈 등록/처리/멘션','해당 매장 매니저 · 작성자 · 멘션자','', E('schedule'), '']
+  ];
+  const trs=rows.map(function(r){ return '<tr><td style="padding:8px 10px;border-top:0.5px solid var(--crd);font-size:12.5px;color:var(--tm);font-weight:600">'+r[0]+'</td><td style="padding:8px 10px;border-top:0.5px solid var(--crd);font-size:12px;color:var(--ts)">'+esc(r[1])+'</td><td style="padding:8px 10px;border-top:0.5px solid var(--crd);font-size:11px;color:var(--th)">'+esc(r[2]||'-')+'</td><td style="padding:8px 10px;border-top:0.5px solid var(--crd);white-space:nowrap">'+chip(r[3], r[4])+'</td></tr>'; }).join('');
+  return '<div class="notif-card"><div class="section-label" style="margin-bottom:6px"><i class="ti ti-list-check"></i> 발송 항목 전수 목록 <span style="font-size:10px;background:var(--br);color:#fff;border-radius:4px;padding:1px 7px">저장된 설정 반영</span></div><p style="font-size:11px;color:var(--th);margin-bottom:8px">아래 <b>알림 문구·이모지 관리</b>에서 발송 여부를 바꾸고 <b>저장</b>하면 이 표가 자동으로 갱신됩니다. (모든 알림은 개인 슬랙 DM + 앱 알림)</p><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:#fff"><thead><tr style="background:var(--crm)"><th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--ts)">알림 종류</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--ts)">받는 사람</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--ts)">비고</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--ts)">상태</th></tr></thead><tbody>'+trs+'</tbody></table></div></div>';
+}
 async function renderNotifSettings(area) {
   await loadNotifConfig();
   const { data: ns } = await sb.from('notification_settings').select('*').single();
   window.__remindTarget = ns?.remind_target || 'unread';
   area.innerHTML = `
-    <div class="page-header"><div class="page-title">알림 설정</div><div class="page-sub">새 공지 등록 시 알림 발송 방식 설정</div></div>
+    <div class="page-header"><div class="page-title">알림 설정</div><div class="page-sub">발송 항목·대상·상태를 한눈에 확인하고 종류별로 제어합니다</div></div>
+    ${notifSummaryHtml(ns)}
     <div class="notif-card">
       <div class="section-label" style="margin-bottom:10px">알림 채널</div>
       <div class="setting-row">
@@ -4297,6 +4320,7 @@ async function saveNotifSettings() {
   }).eq('id', ns.id);
 
   alert('설정이 저장되었습니다.');
+  try{ renderNotifSettings(document.getElementById('contentArea')); }catch(e){}
 }
 
 // ── CAT MODAL ─────────────────────────────────────
@@ -17239,12 +17263,12 @@ async function sendSlackDM(slackMemberId, msg) {
 const NOTIF_DEFS=[{key:'new_post',name:'새 공지',emoji:'📢',template:'[새 공지] {title} — 확인해주세요.'},{key:'request',name:'업무 신청',emoji:'📋',template:'[{part}] 새로운 업무 요청: {title}'},{key:'report',name:'업무 보고',emoji:'📝',template:'[업무보고] {title} - {author}'},{key:'comment_tag',name:'댓글 태그',emoji:'💬',template:'[댓글 태그] "{title}" 댓글에 회원님이 태그되었습니다.'},{key:'comment_reply',name:'답글',emoji:'↩️',template:'[답글] "{title}" 내 댓글에 답글이 달렸습니다.'},{key:'ops_assign',name:'담당 배정(운영)',emoji:'🧩',template:'[운영 프로젝트] "{title}" 업무에 담당자로 지정되었습니다.{board}'},{key:'ops_mention',name:'문서/항목 멘션(운영)',emoji:'💬',template:'[운영 프로젝트] "{title}" {where} 회원님이 멘션되었습니다.{board}'},{key:'schedule',name:'스케줄/근태',emoji:'📅',template:'스케줄/근태 관련 안내: {title}'}];
 function notifTemplate(key){ const c=(window.__notifCfg||{})[key]; if(c&&typeof c.template==='string') return c.template; const d=NOTIF_DEFS.find(x=>x.key===key); return d?(d.template||''):''; }
 function notifRender(key, vars){ vars=vars||{}; return notifTemplate(key).replace(/\{title\}/g,vars.title||'').replace(/\{part\}/g,vars.part||'').replace(/\{author\}/g,vars.author||'').replace(/\{where\}/g,vars.where||'').replace(/\{board\}/g,vars.board?(' ('+vars.board+')'):''); }
-function notifKey(t){ t=String(t||''); if(t.indexOf('reply')>=0) return 'comment_reply'; if(t.indexOf('mention')>=0) return 'ops_mention'; if(t.indexOf('assign')>=0) return 'ops_assign'; if(t.indexOf('comment')>=0||t.indexOf('tag')>=0) return 'comment_tag'; if(t.indexOf('보고')>=0||t.indexOf('report')>=0) return 'report'; if(t==='new_post'||t.indexOf('post')>=0) return 'new_post'; if(t.indexOf('request')>=0||t.indexOf('신청')>=0) return 'request'; if(t.indexOf('schedule')>=0||t.indexOf('근태')>=0) return 'schedule'; return 'etc'; }
+function notifKey(t){ t=String(t||''); if(t.indexOf('att')>=0) return 'schedule'; if(t.indexOf('reply')>=0) return 'comment_reply'; if(t.indexOf('mention')>=0) return 'ops_mention'; if(t.indexOf('assign')>=0) return 'ops_assign'; if(t.indexOf('comment')>=0||t.indexOf('tag')>=0) return 'comment_tag'; if(t.indexOf('보고')>=0||t.indexOf('report')>=0) return 'report'; if(t==='new_post'||t.indexOf('post')>=0) return 'new_post'; if(t.indexOf('request')>=0||t.indexOf('신청')>=0) return 'request'; if(t.indexOf('schedule')>=0||t.indexOf('근태')>=0) return 'schedule'; return 'etc'; }
 function notifEmoji(t){ const k=notifKey(t); const c=(window.__notifCfg||{})[k]; if(c&&c.emoji) return c.emoji; const d=NOTIF_DEFS.find(x=>x.key===k); return d?d.emoji:'🔔'; }
 function notifEnabled(t){ const k=notifKey(t); const c=(window.__notifCfg||{})[k]; return !c||c.enabled!==false; }
 async function loadNotifConfig(){ const base={}; NOTIF_DEFS.forEach(d=>base[d.key]={emoji:d.emoji,enabled:true,template:d.template}); try{ const {data}=await sb.from('app_settings').select('value').eq('key','notif_config').maybeSingle(); if(data&&data.value){ const saved=JSON.parse(data.value); Object.keys(saved).forEach(k=>{ base[k]=Object.assign(base[k]||{},saved[k]); }); } }catch(e){} window.__notifCfg=base; }
 function opsNotifConfigCardHtml(){ if(!currentUser.is_master) return ''; const cfg=window.__notifCfg||{}; const rows=NOTIF_DEFS.map(d=>{ const c=cfg[d.key]||{}; const emoji=c.emoji||d.emoji; const tmpl=(typeof c.template==='string')?c.template:d.template; const en=c.enabled!==false; return `<div style="padding:9px 0;border-bottom:0.5px solid var(--crd)"><div style="display:flex;align-items:center;gap:8px"><input class="form-input nc-emoji" data-key="${d.key}" value="${esc(emoji)}" style="width:46px;text-align:center;padding:6px"><span style="flex:1;font-size:13px;font-weight:600">${d.name}</span><label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="nc-en" data-key="${d.key}" ${en?'checked':''}> 발송</label><button class="btn-cancel-sm" style="font-size:11px;padding:5px 8px" onclick="opsNotifTest('${d.key}')"><i class="ti ti-send"></i> 테스트</button></div><textarea class="form-input nc-tmpl" data-key="${d.key}" style="margin-top:6px;min-height:44px;font-size:12px">${esc(tmpl)}</textarea></div>`; }).join(''); return `<div class="notif-card"><div class="section-label" style="margin-bottom:8px"><i class="ti ti-message-cog"></i> 알림 문구·이모지 관리 <span style="font-size:10px;background:var(--br);color:#fff;border-radius:4px;padding:1px 7px">총괄 전용</span></div><p style="font-size:11px;color:var(--th);margin-bottom:8px">종류별 <b>이모지·문구</b>를 편집하고 발송 여부를 설정합니다. 자리표시자: <b>{title}</b> 제목 · <b>{part}</b> 담당파트 · <b>{author}</b> 작성자 · <b>{board}</b> 보드명 · <b>{where}</b> 문서/항목. [테스트]로 내 슬랙에 예시가 발송됩니다.</p>${rows}<div style="text-align:right;margin-top:8px"><button class="btn-submit" onclick="saveNotifConfig()">알림 설정 저장</button></div></div>`; }
-async function saveNotifConfig(){ const cfg={}; document.querySelectorAll('.nc-emoji').forEach(el=>{ const k=el.getAttribute('data-key'); cfg[k]={emoji:(el.value.trim()||'🔔')}; }); document.querySelectorAll('.nc-en').forEach(el=>{ const k=el.getAttribute('data-key'); if(!cfg[k]) cfg[k]={}; cfg[k].enabled=el.checked; }); document.querySelectorAll('.nc-tmpl').forEach(el=>{ const k=el.getAttribute('data-key'); if(!cfg[k]) cfg[k]={}; cfg[k].template=el.value; }); const {error}=await sb.from('app_settings').upsert({key:'notif_config',value:JSON.stringify(cfg)},{onConflict:'key'}); if(error){ alert('오류: '+error.message); return; } window.__notifCfg=Object.assign(window.__notifCfg||{},cfg); alert('알림 설정이 저장되었습니다.'); }
+async function saveNotifConfig(){ const cfg={}; document.querySelectorAll('.nc-emoji').forEach(el=>{ const k=el.getAttribute('data-key'); cfg[k]={emoji:(el.value.trim()||'🔔')}; }); document.querySelectorAll('.nc-en').forEach(el=>{ const k=el.getAttribute('data-key'); if(!cfg[k]) cfg[k]={}; cfg[k].enabled=el.checked; }); document.querySelectorAll('.nc-tmpl').forEach(el=>{ const k=el.getAttribute('data-key'); if(!cfg[k]) cfg[k]={}; cfg[k].template=el.value; }); const {error}=await sb.from('app_settings').upsert({key:'notif_config',value:JSON.stringify(cfg)},{onConflict:'key'}); if(error){ alert('오류: '+error.message); return; } window.__notifCfg=Object.assign(window.__notifCfg||{},cfg); alert('알림 설정이 저장되었습니다.'); try{ if(document.getElementById('nav-ns')){ renderNotifSettings(document.getElementById('contentArea')); } }catch(e){} }
 async function opsNotifTest(key){
   if(!currentUser.slack_member_id){ alert('내 정보에 슬랙 멤버 ID가 등록돼 있어야 테스트 DM을 받을 수 있습니다.'); return; }
   const emojiEl=document.querySelector('.nc-emoji[data-key="'+key+'"]'); const tmplEl=document.querySelector('.nc-tmpl[data-key="'+key+'"]');
