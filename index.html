@@ -237,6 +237,10 @@ textarea.form-input{min-height:120px;resize:vertical}
 .ops-tabs{display:flex;gap:4px;flex-wrap:wrap}
 .ops-tab{background:#fff;border:0.5px solid var(--crd);border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;color:var(--ts);cursor:pointer}
 .ops-tab.active{background:var(--br);color:#fff;border-color:var(--br)}
+.ops-tab.add{background:#faf7f2;border-style:dashed;color:var(--th)}
+.ops-tab.add:hover{color:var(--br);border-color:var(--br)}
+.ops-tab.tabcfg{background:#fff;color:var(--th);padding:7px 10px}
+.ops-tab.tabcfg:hover{color:var(--br);border-color:var(--br)}
 .ops-actions{display:flex;gap:6px;flex-wrap:wrap}
 .ops-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
 .ops-search{border:0.5px solid var(--crd);border-radius:8px;padding:8px 12px;font-size:13px;min-width:160px;outline:none}
@@ -6637,6 +6641,7 @@ async function renderOpsBoard(area){
     } else { area.innerHTML='<div style="padding:40px;text-align:center;color:var(--th)">아직 생성된 프로젝트가 없습니다.</div>'; return; }
   }
   window.__ops.boards = boards;
+  await opsLoadBoardColors();
   if(!window.__ops.boardId || !boards.find(b=>b.id===window.__ops.boardId)) window.__ops.boardId = boards[0].id;
   await opsLoadBoardData();
   opsSubscribe();
@@ -6666,8 +6671,8 @@ function opsPersonName(v){ if(v&&typeof v==='string'&&v.indexOf('m:')===0) retur
 function opsRender(area){
   const O=window.__ops;
   const board=O.boards.find(b=>b.id===O.boardId);
-  const tabs = O.boards.map(b=>`<button class="ops-tab${b.id===O.boardId?' active':''}" onclick="opsSwitchBoard(${b.id})"><i class="ti ${b.type==='mind'?'ti-bulb':'ti-layout-kanban'}" style="font-size:12px"></i> ${esc(b.name)}</button>`).join('');
-  const addBoardBtn = opsCanManage()?`<button class="ops-tab" onclick="opsAddBoard('board')" title="카드 보드 추가"><i class="ti ti-plus"></i> 보드</button><button class="ops-tab" onclick="opsAddBoard('mind')" title="아이디어맵 추가"><i class="ti ti-plus"></i> 아이디어맵</button>`:'';
+  const tabs = O.boards.map(b=>{ const col=(O.boardColors&&O.boardColors[b.id])||''; const active=b.id===O.boardId; let st=''; if(col){ st='background:'+col+';border-color:'+col+';color:#3a2f22;'; if(active) st+='box-shadow:inset 0 0 0 2px var(--br);font-weight:800;'; } return '<button class="ops-tab'+(active?' active':'')+'"'+(st?' style="'+st+'"':'')+' onclick="opsSwitchBoard('+b.id+')"><i class="ti '+(b.type==='mind'?'ti-bulb':'ti-layout-kanban')+'" style="font-size:12px"></i> '+esc(b.name)+'</button>'; }).join('');
+  const addBoardBtn = opsCanManage()?`<button class="ops-tab add" onclick="opsAddBoard('board')" title="카드 보드 추가"><i class="ti ti-plus"></i> 보드</button><button class="ops-tab add" onclick="opsAddBoard('mind')" title="아이디어맵 추가"><i class="ti ti-plus"></i> 아이디어맵</button>${opsIsMaster()?`<button class="ops-tab tabcfg" onclick="opsTabManager()" title="탭 순서·색상 설정"><i class="ti ti-adjustments-horizontal"></i></button>`:''}`:'';
   const manageBtns = opsCanManage()?`
     <button class="btn-cancel-sm" onclick="opsOpenFields()"><i class="ti ti-adjustments"></i> 속성/유형</button>
     <button class="btn-cancel-sm" onclick="opsAddGroup()"><i class="ti ti-plus"></i> 묶음</button>`:'';
@@ -6769,6 +6774,38 @@ function opsSetFilter(k,v){ window.__ops.filter[k]=v; const b=document.getElemen
 function opsClearFilter(){ window.__ops.filter={}; renderOpsBoard(document.getElementById('contentArea')); }
 
 // ── 보드 전환/추가 ──
+async function opsLoadBoardColors(){ try{ const {data}=await sb.from('app_settings').select('value').eq('key','ops_board_colors').maybeSingle(); window.__ops.boardColors=(data&&data.value)?(typeof data.value==='string'?JSON.parse(data.value):data.value):{}; }catch(e){ window.__ops.boardColors={}; } }
+var OPS_TAB_COLORS=['#ffe3e3','#ffe8cc','#fff3bf','#d3f9d8','#c5f6fa','#d0ebff','#e5dbff','#f3d9fa'];
+function opsTabManager(){
+  if(typeof opsIsMaster!=='function'||!opsIsMaster()){ alert('총괄만 설정할 수 있습니다.'); return; }
+  const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='opsTabMgr'; modal.style.zIndex='340';
+  modal.innerHTML=`<div class="modal-box" style="max-width:540px;width:94vw"><div class="modal-head"><b>탭 순서·색상 설정</b><button onclick="document.getElementById('opsTabMgr').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:70vh;overflow-y:auto"><div id="opsTabMgrList"></div><p style="font-size:11px;color:var(--th);margin-top:8px">▲▼로 순서 변경, 색을 눌러 배경 지정(✕=색 없음). 저장을 눌러야 반영됩니다.</p></div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('opsTabMgr').remove()">취소</button><button class="btn-submit" onclick="opsTabMgrSave()">저장</button></div></div>`;
+  document.body.appendChild(modal);
+  window.__opsTabWork=(window.__ops.boards||[]).map(b=>b.id);
+  window.__opsTabCol=Object.assign({},window.__ops.boardColors||{});
+  opsTabMgrRender();
+}
+function opsTabMgrRender(){
+  const box=document.getElementById('opsTabMgrList'); if(!box) return;
+  const byId=id=>(window.__ops.boards||[]).find(b=>b.id===id);
+  box.innerHTML=window.__opsTabWork.map((id,i)=>{ const b=byId(id); if(!b) return ''; const cur=window.__opsTabCol[id]||'';
+    const sw=OPS_TAB_COLORS.map(c=>'<span onclick="opsTabSetColor('+id+',\''+c+'\')" style="display:inline-block;width:20px;height:20px;border-radius:5px;background:'+c+';margin:0 3px 0 0;cursor:pointer;border:2px solid '+(cur===c?'#333':'transparent')+'"></span>').join('')
+      +'<span onclick="opsTabSetColor('+id+',\'\')" title="색 없음" style="display:inline-block;width:20px;height:20px;border-radius:5px;background:#fff;border:1px solid #ccc;margin:0 3px;cursor:pointer;text-align:center;font-size:12px;line-height:18px;color:#999;'+(!cur?'outline:2px solid #333':'')+'">✕</span>';
+    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 10px;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:6px;background:'+(cur||'#fff')+'"><div style="display:flex;flex-direction:column;gap:3px"><button class="btn-cancel-sm" style="padding:1px 7px;font-size:11px"'+(i===0?' disabled':'')+' onclick="opsTabMove('+i+',-1)">▲</button><button class="btn-cancel-sm" style="padding:1px 7px;font-size:11px"'+(i===window.__opsTabWork.length-1?' disabled':'')+' onclick="opsTabMove('+i+',1)">▼</button></div><div style="flex:1;min-width:0"><b style="font-size:13px">'+esc(b.name)+'</b> <span style="font-size:11px;color:var(--th)">'+(b.type==='mind'?'아이디어맵':'보드')+'</span><div style="margin-top:6px">'+sw+'</div></div></div>';
+  }).join('');
+}
+function opsTabMove(i,d){ const a=window.__opsTabWork; const j=i+d; if(j<0||j>=a.length) return; const t=a[i]; a[i]=a[j]; a[j]=t; opsTabMgrRender(); }
+function opsTabSetColor(id,c){ if(c) window.__opsTabCol[id]=c; else delete window.__opsTabCol[id]; opsTabMgrRender(); }
+async function opsTabMgrSave(){
+  window.__ops.boardColors=Object.assign({},window.__opsTabCol||{});
+  const {error}=await sb.from('app_settings').upsert({key:'ops_board_colors',value:JSON.stringify(window.__ops.boardColors)},{onConflict:'key'});
+  if(error){ alert('색상 저장 오류: '+error.message); return; }
+  const order=window.__opsTabWork||[];
+  try{ for(let i=0;i<order.length;i++){ await sb.from('ops_boards').update({sort_order:i}).eq('id',order[i]); } }catch(e){ alert('순서 저장 오류: '+(e.message||e)); }
+  (window.__ops.boards||[]).sort((a,b)=>order.indexOf(a.id)-order.indexOf(b.id));
+  const m=document.getElementById('opsTabMgr'); if(m) m.remove();
+  opsRender(document.getElementById('contentArea'));
+}
 async function opsSwitchBoard(id){ window.__ops.boardId=id; window.__ops.filter={}; await opsLoadBoardData(); opsSubscribe(); opsRender(document.getElementById('contentArea')); }
 async function opsAddBoard(type){
   const isMind=(type==='mind');
