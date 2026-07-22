@@ -4229,7 +4229,7 @@ async function renderNotifHistory(){
     const { data, error } = await sb.from('notif_send_log').select('*').gte('created_at',since).order('created_at',{ascending:false}).limit(3000);
     if(error){ box.innerHTML='<span style="color:var(--th)">이력 테이블이 아직 없습니다. (notif_send_log.sql 실행 필요)</span>'; return; }
     if(!data||!data.length){ box.innerHTML='<span style="color:var(--th)">발송 이력이 없습니다.</span>'; return; }
-    const AMAP={reminder_manual:'🔔 리마인드(수동)', reminder_auto:'🔔 리마인드(자동)', post_update:'♻️ 수정 알림', new_post:'📢 새 공지', '업무신청':'📋 업무신청', '업무보고':'📝 업무보고', '진행상황':'🔄 진행상황', coach_ref:'🧭 코치 참조', comment_tag:'💬 댓글 태그', post_comment_tag:'💬 댓글 태그', post_comment_reply:'↩️ 답글', ops_assign:'🧩 담당 배정', ops_mention:'💬 멘션', schedule_confirm_req:'📅 컨펌 요청', schedule_request:'📅 스케줄', schedule_support:'📅 지원근무', interview_feedback:'🗣 면담 피드백', att_new:'⏰ 근태이슈', att_review:'⏰ 근태확인', att_mention:'⏰ 근태멘션'};
+    const AMAP={test:'🧪 테스트 발송', reminder_manual:'🔔 리마인드(수동)', reminder_auto:'🔔 리마인드(자동)', post_update:'♻️ 수정 알림', new_post:'📢 새 공지', '업무신청':'📋 업무신청', '업무보고':'📝 업무보고', '진행상황':'🔄 진행상황', coach_ref:'🧭 코치 참조', comment_tag:'💬 댓글 태그', post_comment_tag:'💬 댓글 태그', post_comment_reply:'↩️ 답글', ops_assign:'🧩 담당 배정', ops_mention:'💬 멘션', schedule_confirm_req:'📅 컨펌 요청', schedule_request:'📅 스케줄', schedule_support:'📅 지원근무', interview_feedback:'🗣 면담 피드백', att_new:'⏰ 근태이슈', att_review:'⏰ 근태확인', att_mention:'⏰ 근태멘션'};
     const label=function(a){ return AMAP[a]||('🔔 '+(a||'')); };
     const groups={};
     data.forEach(function(r){ const day=(r.created_at||'').slice(0,10); (groups[day]=groups[day]||[]).push(r); });
@@ -17286,7 +17286,8 @@ async function opsNotifTest(key){
   body=body.replace(/\{title\}/g,'예시 제목').replace(/\{part\}/g,'구매팀').replace(/\{author\}/g,currentUser.name||'홍길동').replace(/\{where\}/g,'문서에서').replace(/\{board\}/g,' (운영 프로젝트)');
   const link='https://bnzcoffee.github.io/bonanza-ops/';
   const res=await sendSlackDM(currentUser.slack_member_id, emoji+' '+body+'\n'+link);
-  alert('테스트 DM을 본인 슬랙으로 보냈습니다. (미저장 편집값 기준) 확인해보세요.');
+  try{ const nm=(NOTIF_DEFS.find(function(d){return d.key===key;})||{}).name||key; await logNotifSend('test','post',null,'[테스트] '+nm+' 문구 발송', 1); }catch(e){}
+  alert('테스트 DM을 본인 슬랙으로 보냈습니다. (미저장 편집값 기준) 발송 이력에도 [테스트]로 기록됩니다.');
 }
 async function createNotificationWithSlack(userId, type, refId, refType, msg) {
   await createNotification(userId, type, refId, refType, msg);
