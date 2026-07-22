@@ -2145,6 +2145,7 @@ let readListHtml = '';
   const editBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openEditPost(${p.id})"><i class="ti ti-edit"></i> 수정</button>` : '';
   const deletePostBtn = canDeletePost(p) ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px;color:var(--rd);border-color:var(--rd)" onclick="deletePost(${p.id})"><i class="ti ti-trash"></i> 삭제</button>` : '';
   const remindBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px;color:var(--or,#B85C00);border-color:var(--or,#B85C00)" onclick="openRemindModal(${p.id})"><i class="ti ti-bell-ringing"></i> 리마인드</button>` : '';
+  const updateNotifyBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px;color:var(--bl);border-color:var(--bl)" onclick="sendPostUpdateNotify(${p.id})"><i class="ti ti-refresh-alert"></i> 수정 알림</button>` : '';
 
   area.innerHTML = `
     <div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage('board')"><i class="ti ti-arrow-left"></i> 목록</button></div>
@@ -2161,6 +2162,7 @@ let readListHtml = '';
             ${editBtn}
             ${deletePostBtn}
             ${remindBtn}
+            ${updateNotifyBtn}
             <button class="btn-cancel-sm" id="favBtn" style="font-size:12px;padding:5px 10px;${isFav?'color:var(--gd);border-color:var(--gd)':''}" onclick="toggleFav(${p.id})"><i class="ti ti-bookmark${isFav?'-filled':''}"></i> ${isFav?'저장됨':'저장'}</button>
             <button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openShareModal(${p.id})"><i class="ti ti-share"></i> 링크 공유</button>
           </span>
@@ -5191,6 +5193,29 @@ async function setFeatureFlag(key, enabled, checkbox) {
 // 스케줄 변경: 관련자에게 알림
 // ═══════════════════════════════════════════
 
+async function sendPostUpdateNotify(postId){
+  if(typeof notifEnabled==='function' && !notifEnabled('new_post')){ alert("'새 공지' 알림이 꺼져 있어 발송되지 않습니다. 알림설정에서 켜주세요."); return; }
+  if(!confirm("이 게시글의 '수정 알림'을 발송할까요?\n\n'확인했습니다'를 누른 사람을 포함해 전 직원(알림설정 반영)에게 '게시글이 수정되었습니다' 알림이 발송됩니다. (미확인 리마인드와 별개)")) return;
+  const { data: post } = await sb.from('posts').select('title').eq('id',postId).single();
+  if(!post){ alert('게시글을 찾을 수 없습니다.'); return; }
+  const title = post.title||'게시글';
+  const { data: nrs } = await sb.from('notification_role_settings').select('*').eq('event_key','new_post');
+  const roleCheck = {}; (nrs||[]).forEach(r=>{ roleCheck[r.role_key]=!(r.enabled===false||r.enabled==='false'||r.enabled===0||r.enabled===null); });
+  const { data: allUsers } = await sb.from('users').select('id,role,slack_member_id,is_master,is_vice_master,part').eq('active',true).neq('id',currentUser.id);
+  if(!allUsers||!allUsers.length){ alert('발송 대상이 없습니다.'); return; }
+  const msg = '[게시글 수정] '+title+' 내용이 업데이트되었습니다. 다시 확인해주세요.';
+  let sent=0;
+  for(const u of allUsers){
+    let grade='staff'; if(u.is_master)grade='master'; else if(u.is_vice_master)grade='vice'; else if(u.part)grade='dept'; else if(isManagerRole(u.role))grade='manager';
+    const shouldSend = roleCheck[grade]!==undefined ? roleCheck[grade] : !!(NOTIF_ROLE_DEFAULTS['new_post']?.[NOTIF_ROLES.findIndex(r=>r.key===grade)]);
+    if(!shouldSend) continue;
+    await createNotification(u.id,'post_update',postId,'post',msg);
+    if(u.slack_member_id && notifEnabled('post_update')){ const link='https://bnzcoffee.github.io/bonanza-ops/?post='+postId; await sendSlackDM(u.slack_member_id, notifEmoji('post_update')+' '+msg+'\n'+link); }
+    sent++;
+  }
+  await sb.from('posts').update({updated_at:new Date().toISOString()}).eq('id',postId);
+  alert('수정 알림을 '+sent+'명에게 발송했습니다.');
+}
 async function sendRoleBasedPostNotify(postId, title) {
   // 권한별 알림 설정 로드
   const { data: nrs } = await sb.from('notification_role_settings').select('*').eq('event_key','new_post');
