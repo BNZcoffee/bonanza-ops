@@ -5651,7 +5651,7 @@ async function editRequest(reqId) {
   const canEdit = (r.author_id === currentUser.id && r.status === 'submitted') || currentUser.is_master;
   if (!canEdit) { alert('접수됨 단계의 본인 신청만 수정할 수 있습니다.\n(진행 중·완료·반려 건은 수정 불가)'); return; }
 
-  const fields = r.request_types ? (r.request_types.form_fields || []) : [];
+  const fields = reqFilterFields(r.request_types ? (r.request_types.form_fields || []) : []);
   const fd = r.form_data || {};
   const { data: stoRows } = await sb.from('store_options').select('name').order('sort_order');
   const storeDL = (stoRows||[]).map(function(x){ return '<option value="'+esc(x.name)+'">'; }).join('');
@@ -5715,7 +5715,7 @@ async function saveRequestEdit(reqId) {
   const validStores = (vs||[]).map(function(x){ return x.name; });
   if (!validStores.includes(store)) { alert('요청 매장 명이 등록된 매장 목록과 일치하지 않습니다.\n목록에서 선택해 주세요.'); return; }
 
-  const fields = r.request_types ? (r.request_types.form_fields || []) : [];
+  const fields = reqFilterFields(r.request_types ? (r.request_types.form_fields || []) : []);
   const formData = {};
   for (let i = 0; i < fields.length; i++) {
     const f = fields[i];
@@ -9327,6 +9327,7 @@ function canEditStaff() {
   return hasPerm('staff_edit');
 }
 
+function reqFilterFields(fields){ return (fields||[]).filter(function(f){ if(!f) return false; if(f.type==='store') return false; const l=(f.label||'').replace(/\s/g,''); if(l==='매장'||l==='매장명'||l==='요청매장'||l==='요청매장명'||l==='매장선택'||l==='점포'||l==='점포명') return false; return true; }); }
 function reqViewerReason(u, r, coPartNames){
   if(!u) return '';
   if(u.is_master) return '총괄';
@@ -9730,7 +9731,7 @@ async function selectReqType(typeId) {
   const sel = document.getElementById('rtc-' + typeId);
   if (sel) { sel.style.borderColor = 'var(--br)'; sel.style.background = 'var(--crm)'; }
 
-  const fields = t.form_fields || [];
+  const fields = reqFilterFields(t.form_fields || []);
   let fieldsHtml = '';
   // '매장 선택' 커스텀 필드용 매장 목록(인원현황 store_options)
   var __storeDL = '';
@@ -9929,7 +9930,7 @@ async function submitRequest() {
     return;
   }
 
-  const fields = reqSelectedType.form_fields || [];
+  const fields = reqFilterFields(reqSelectedType.form_fields || []);
   const formData = {};
   for (let i = 0; i < fields.length; i++) {
     const f = fields[i];
@@ -10018,7 +10019,7 @@ async function renderReqDetail(area) {
   window.__assignable = assignableUsers || [];
   const st = REQ_STATUS[r.status] || REQ_STATUS.submitted;
   const typeName = r.request_types ? r.request_types.name : '신청';
-  const fields = r.request_types ? (r.request_types.form_fields || []) : [];
+  const fields = reqFilterFields(r.request_types ? (r.request_types.form_fields || []) : []);
   const fd = r.form_data || {};
 
   // 담당자/마스터/관리자만 상태 변경 가능
