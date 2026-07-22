@@ -4216,16 +4216,39 @@ async function renderStats(area) {
 }
 
 // ── NOTIF SETTINGS ────────────────────────────────
-async function loadNotifLog(){
-  const box=document.getElementById('notifLogArea'); if(!box) return;
+async function openNotifHistory(){
+  const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='notifHistModal'; modal.style.zIndex='340';
+  modal.innerHTML='<div class="modal-box" style="max-width:660px;width:96vw"><div class="modal-head"><b>알림 발송 이력</b><button onclick="document.getElementById(\'notifHistModal\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:76vh;overflow-y:auto"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px"><span style="font-size:11px;color:var(--th)">앱에서 나간 모든 알림 · 일자별 토글 · 최근 60일 (20명 이상은 빨간색)</span>'+(currentUser.is_master?'<button class="btn-cancel-sm" style="font-size:11px;color:var(--rd);border-color:var(--rd);white-space:nowrap" onclick="purgeNotifLog()">90일 이전 정리</button>':'')+'</div><div id="notifHistArea" style="font-size:12px">불러오는 중...</div></div></div>';
+  document.body.appendChild(modal);
+  renderNotifHistory();
+}
+async function renderNotifHistory(){
+  const box=document.getElementById('notifHistArea'); if(!box) return;
   try{
-    const { data, error } = await sb.from('notif_send_log').select('*').order('created_at',{ascending:false}).limit(40);
+    const since=new Date(Date.now()-60*864e5).toISOString();
+    const { data, error } = await sb.from('notif_send_log').select('*').gte('created_at',since).order('created_at',{ascending:false}).limit(3000);
     if(error){ box.innerHTML='<span style="color:var(--th)">이력 테이블이 아직 없습니다. (notif_send_log.sql 실행 필요)</span>'; return; }
     if(!data||!data.length){ box.innerHTML='<span style="color:var(--th)">발송 이력이 없습니다.</span>'; return; }
-    const AMAP={reminder_manual:'리마인드(수동)', reminder_auto:'리마인드(자동)', post_update:'수정 알림'};
-    const rows=data.map(function(r){ const dt=(r.created_at||'').replace('T',' ').slice(0,16); const act=AMAP[r.action]||r.action||''; const link=r.ref_type==='post'&&r.ref_id?(' <a href="https://bnzcoffee.github.io/bonanza-ops/?post='+r.ref_id+'" style="color:var(--bl)">#'+r.ref_id+'</a>'):''; return '<tr><td style="padding:6px 8px;border-top:0.5px solid var(--crd);white-space:nowrap;color:var(--th)">'+dt+'</td><td style="padding:6px 8px;border-top:0.5px solid var(--crd);font-weight:600;color:var(--tm)">'+esc(r.actor_name||'-')+'</td><td style="padding:6px 8px;border-top:0.5px solid var(--crd)">'+esc(act)+'</td><td style="padding:6px 8px;border-top:0.5px solid var(--crd);color:var(--ts)">'+esc(r.detail||'')+link+'</td><td style="padding:6px 8px;border-top:0.5px solid var(--crd);text-align:right">'+(r.target_count||0)+'</td></tr>'; }).join('');
-    box.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:#fff"><thead><tr style="background:var(--crm)"><th style="padding:6px 8px;text-align:left;font-size:11px;color:var(--ts)">일시</th><th style="padding:6px 8px;text-align:left;font-size:11px;color:var(--ts)">발송자</th><th style="padding:6px 8px;text-align:left;font-size:11px;color:var(--ts)">종류</th><th style="padding:6px 8px;text-align:left;font-size:11px;color:var(--ts)">내용</th><th style="padding:6px 8px;text-align:right;font-size:11px;color:var(--ts)">대상</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    const AMAP={reminder_manual:'🔔 리마인드(수동)', reminder_auto:'🔔 리마인드(자동)', post_update:'♻️ 수정 알림', new_post:'📢 새 공지', '업무신청':'📋 업무신청', '업무보고':'📝 업무보고', '진행상황':'🔄 진행상황', coach_ref:'🧭 코치 참조', comment_tag:'💬 댓글 태그', post_comment_tag:'💬 댓글 태그', post_comment_reply:'↩️ 답글', ops_assign:'🧩 담당 배정', ops_mention:'💬 멘션', schedule_confirm_req:'📅 컨펌 요청', schedule_request:'📅 스케줄', schedule_support:'📅 지원근무', interview_feedback:'🗣 면담 피드백', att_new:'⏰ 근태이슈', att_review:'⏰ 근태확인', att_mention:'⏰ 근태멘션'};
+    const label=function(a){ return AMAP[a]||('🔔 '+(a||'')); };
+    const groups={};
+    data.forEach(function(r){ const day=(r.created_at||'').slice(0,10); (groups[day]=groups[day]||[]).push(r); });
+    const days=Object.keys(groups).sort().reverse();
+    box.innerHTML=days.map(function(day){
+      const items=groups[day];
+      const total=items.reduce(function(a,b){return a+(b.target_count||0);},0);
+      const rows=items.map(function(r){ const tm=(r.created_at||'').slice(11,16); const cnt=(r.target_count||0); const big=cnt>=20?' style="color:var(--rd);font-weight:700;white-space:nowrap"':' style="white-space:nowrap;color:var(--th)"'; return '<div style="display:flex;gap:8px;padding:5px 4px;border-top:0.5px solid var(--crd);align-items:baseline;font-size:12px"><span style="color:var(--th);white-space:nowrap">'+tm+'</span><span style="white-space:nowrap">'+label(r.action)+'</span><span style="flex:1;color:var(--ts);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(r.detail||'')+'</span><span style="color:var(--th);white-space:nowrap;max-width:80px;overflow:hidden;text-overflow:ellipsis">'+esc(r.actor_name||'')+'</span><span'+big+'>'+cnt+'명</span></div>'; }).join('');
+      return '<details style="border:0.5px solid var(--crd);border-radius:8px;margin-bottom:6px"><summary style="cursor:pointer;padding:8px 10px;font-weight:700;font-size:13px;list-style:none;background:var(--crm);border-radius:8px">▸ '+day+' <span style="font-size:11px;color:var(--th);font-weight:400">· '+items.length+'건 · 총 '+total+'명</span></summary><div style="padding:2px 8px 8px">'+rows+'</div></details>';
+    }).join('');
   }catch(e){ box.innerHTML='<span style="color:var(--th)">이력을 불러오지 못했습니다.</span>'; }
+}
+async function purgeNotifLog(){
+  if(!currentUser.is_master){ alert('총괄만 정리할 수 있습니다.'); return; }
+  if(!confirm('90일 이전 발송 이력을 삭제할까요?')) return;
+  const cut=new Date(Date.now()-90*864e5).toISOString();
+  const { error } = await sb.from('notif_send_log').delete().lt('created_at',cut);
+  if(error){ alert('오류: '+error.message); return; }
+  renderNotifHistory();
 }
 function notifSummaryHtml(ns){
   const E=function(k){ return (typeof notifEnabled==='function')?notifEnabled(k):true; };
@@ -4256,7 +4279,7 @@ async function renderNotifSettings(area) {
   area.innerHTML = `
     <div class="page-header"><div class="page-title">알림 설정</div><div class="page-sub">발송 항목·대상·상태를 한눈에 확인하고 종류별로 제어합니다</div></div>
     ${notifSummaryHtml(ns)}
-    ${currentUser.is_master?'<div class="notif-card" id="notifLogCard"><div class="section-label" style="margin-bottom:6px"><i class="ti ti-history"></i> 수동 발송 이력 <span style="font-size:10px;background:var(--br);color:#fff;border-radius:4px;padding:1px 7px">총괄 전용</span></div><p style="font-size:11px;color:var(--th);margin-bottom:8px">누가·언제 리마인드/수정 알림을 발송했는지 기록됩니다.</p><div id="notifLogArea" style="font-size:12px;color:var(--th)">불러오는 중...</div></div>':''}
+    ${currentUser.is_master?'<div class="notif-card"><div class="section-label" style="margin-bottom:6px"><i class="ti ti-history"></i> 알림 발송 이력 <span style="font-size:10px;background:var(--br);color:#fff;border-radius:4px;padding:1px 7px">총괄 전용</span></div><p style="font-size:11px;color:var(--th);margin-bottom:8px">앱에서 나간 <b>모든 알림</b> 기록을 일자별로 확인합니다. (폭탄 발송 감지용)</p><button class="btn-cancel-sm" onclick="openNotifHistory()"><i class="ti ti-external-link"></i> 발송 이력 열기</button></div>':''}
     <div class="notif-card">
       <div class="section-label" style="margin-bottom:10px">알림 채널</div>
       <div class="setting-row">
@@ -4311,7 +4334,7 @@ async function renderNotifSettings(area) {
     <div style="text-align:right">
       <button class="btn-submit" onclick="saveNotifSettings()">설정 저장</button>
     </div>`;
-  if(currentUser.is_master){ loadNotifLog(); }
+
 
 }
 
@@ -4548,6 +4571,7 @@ async function checkAndSend3DayReminders() {
     
     if (!oldNotices || oldNotices.length === 0) return;
     const __notices = oldNotices.filter(n=>n.require_read!==false); // 확인 체크 미사용(박제용) 공지는 리마인드 제외
+    window.__notifBatchLog = true;
 
     // 5. 첫 번째 사진의 완벽한 필터링 로직 적용 (admin, hr, 본사 직원 제외)
     const { data: activeUsers } = await sb.from('users').select('id,role,is_master,is_vice_master,part,slack_member_id').eq('active', true);
@@ -4576,11 +4600,13 @@ async function checkAndSend3DayReminders() {
       }
     }
 
+    window.__notifBatchLog = false;
     // 발송 완료 후 오늘 날짜 도장 찍기 (내일 다시 실행됨)
     localStorage.setItem('last_auto_remind_date', today);
     if (sentCount > 0){ console.log(`자동 리마인드 ${sentCount}건 발송 완료`); try{ await logNotifSend('reminder_auto','post',null,'미확인 자동 리마인드', sentCount, '자동(시스템)'); }catch(e){} }
 
   } catch (error) {
+    window.__notifBatchLog = false;
     console.error('자동 리마인드 실행 중 오류:', error);
   }
 }
@@ -5219,6 +5245,7 @@ async function sendPostUpdateNotify(postId){
   if(!allUsers||!allUsers.length){ alert('발송 대상이 없습니다.'); return; }
   const msg = '[게시글 수정] '+title+' 내용이 업데이트되었습니다. 다시 확인해주세요.';
   let sent=0;
+  window.__notifBatchLog = true;
   for(const u of allUsers){
     let grade='staff'; if(u.is_master)grade='master'; else if(u.is_vice_master)grade='vice'; else if(u.part)grade='dept'; else if(isManagerRole(u.role))grade='manager';
     const shouldSend = roleCheck[grade]!==undefined ? roleCheck[grade] : !!(NOTIF_ROLE_DEFAULTS['new_post']?.[NOTIF_ROLES.findIndex(r=>r.key===grade)]);
@@ -5227,6 +5254,7 @@ async function sendPostUpdateNotify(postId){
     if(u.slack_member_id && notifEnabled('post_update')){ const link='https://bnzcoffee.github.io/bonanza-ops/?post='+postId; await sendSlackDM(u.slack_member_id, notifEmoji('post_update')+' '+msg+'\n'+link); }
     sent++;
   }
+  window.__notifBatchLog = false;
   await sb.from('posts').update({updated_at:new Date().toISOString()}).eq('id',postId);
   await logNotifSend('post_update','post',postId, "'"+title+"' 수정 알림", sent);
   alert('수정 알림을 '+sent+'명에게 발송했습니다.');
@@ -5270,6 +5298,7 @@ async function sendRoleBasedPostNotify(postId, title) {
     sent++;
   }
   console.log('[알림] 공지 ' + sent + '명 발송');
+  try{ await logNotifSend('new_post','post',postId, "'"+(title||'공지')+"' 새 공지 발송", sent); }catch(e){}
 }
 
 // 업무신청 상태 변경 시 관련자 알림
@@ -6024,7 +6053,8 @@ async function createNotification(userId, type, refId, refType, message) {
     user_id: userId, type, ref_id: refId, ref_type: refType, message,
     is_read: false, created_at: new Date().toISOString()
   });
-  if (error) console.warn('알림 생성 오류:', error.message);
+  if (error) { console.warn('알림 생성 오류:', error.message); return; }
+  if (!window.__notifBatchLog) { try{ await logNotifSend(type, refType, refId, message, 1); }catch(e){} }
 }
 
 // 겸직 포함 — 현재 사용자가 관리하는 매장 목록(주 소속 + 추가 관할 sub_stores)
@@ -6043,7 +6073,10 @@ async function notifyStoreManagers(stores, type, refId, refType, msg, excludeIds
     if(set.has(u.store)) return true;
     return Array.isArray(u.sub_stores) && u.sub_stores.some(x=>set.has(x));
   });
+  window.__notifBatchLog = true;
   for(const t of targets){ try{ await createNotificationWithSlack(t.id, type, refId, refType, msg); }catch(e){} }
+  window.__notifBatchLog = false;
+  try{ await logNotifSend(type, refType, refId, msg, targets.length); }catch(e){}
 }
 
 
@@ -15812,10 +15845,15 @@ async function notifyCoaches(store, type, refId, refType, message) {
   const { data: cs } = await sb.from('coach_stores')
     .select('coach_id').eq('store', store);
   if (!cs || cs.length === 0) return;
+  window.__notifBatchLog = true;
+  let __cn=0;
   for (const c of cs) {
     if (c.coach_id === currentUser.id) continue; // 본인 제외
     await createNotification(c.coach_id, type, refId, refType, message);
+    __cn++;
   }
+  window.__notifBatchLog = false;
+  try{ await logNotifSend('coach_ref', refType, refId, message, __cn); }catch(e){}
 }
 
 async function renderCoachStores(area) {
@@ -17287,12 +17325,15 @@ async function broadcastNotificationWithSlack(actionType, refId, refType, msg, s
   const dmMsg = notifEmoji(actionType) + ' ' + msg + '\n' + link;
 
   // 필터링된 모든 대상자에게 앱 내 알림 생성 + 슬랙 DM 동시 발송
+  window.__notifBatchLog = true;
   for (const u of targetUsers) {
     await createNotification(u.id, refType, refId, refType, msg);
     if (u.slack_member_id && notifEnabled(actionType)) {
       await sendSlackDM(u.slack_member_id, dmMsg);
     }
   }
+  window.__notifBatchLog = false;
+  try{ await logNotifSend(actionType, refType, refId, msg, targetUsers.length); }catch(e){}
 }
 
 // 스케줄용 슬랙 알림 — notification_settings.slack_webhook_url 자동 사용
