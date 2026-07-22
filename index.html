@@ -5567,6 +5567,11 @@ async function editRequest(reqId) {
       let list = f.type === 'ox' ? ['O','X'] : (f.type === 'repair_cat' ? ['전기/조명','배관/설비','냉난방','인테리어','장비','기타'] : (f.options || []));
       let opts = '<option value="">선택</option>' + list.map(function(o){ return '<option'+(val===String(o)?' selected':'')+'>'+esc(o)+'</option>'; }).join('');
       input = '<select id="erf-'+i+'" class="form-input">'+opts+'</select>';
+    } else if (f.type === 'multiselect') {
+      const arr = Array.isArray(fd[f.label]) ? fd[f.label] : [];
+      input = '<div id="erf-'+i+'" data-ft="multiselect" style="display:flex;flex-wrap:wrap;gap:8px">' + (f.options||[]).map(function(o){ return '<label style="display:inline-flex;align-items:center;gap:5px;border:0.5px solid var(--crd);border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;background:#fff"><input type="checkbox" value="'+esc(o)+'"'+(arr.indexOf(o)>-1?' checked':'')+' style="width:auto"> '+esc(o)+'</label>'; }).join('') + '</div>';
+    } else if (f.type === 'repeat') {
+      input = '<div id="erf-'+i+'" data-ft="repeat" data-opts="'+encodeURIComponent(JSON.stringify(f.options||[]))+'" data-vlabel="'+esc(f.value_label||'입력')+'"></div><button type="button" class="btn-cancel-sm" style="margin-top:6px;font-size:12px" onclick="reqRepeatAdd(\'erf-\','+i+')"><i class="ti ti-plus"></i> 항목 추가</button>';
     } else if (f.type === 'store') {
       input = '<input id="erf-'+i+'" class="form-input" list="erfStoreDL" value="'+esc(val)+'" autocomplete="off"/>';
     } else {
@@ -5590,6 +5595,7 @@ async function editRequest(reqId) {
       '</div>' +
     '</div>';
   document.body.appendChild(m);
+  try{ fields.forEach(function(f,i){ if(f.type==='repeat'){ const arr=Array.isArray(fd[f.label])?fd[f.label]:[]; if(arr.length){ arr.forEach(function(x){ reqRepeatRow('erf-',i,x.sel||'',x.val||''); }); } else { reqRepeatAdd('erf-',i); } } }); }catch(e){}
 }
 
 async function saveRequestEdit(reqId) {
@@ -5609,10 +5615,13 @@ async function saveRequestEdit(reqId) {
   const fields = r.request_types ? (r.request_types.form_fields || []) : [];
   const formData = {};
   for (let i = 0; i < fields.length; i++) {
+    const f = fields[i];
     const el = document.getElementById('erf-' + i);
-    const v = el ? el.value.trim() : '';
-    if (fields[i].required && !v) { alert('"' + fields[i].label + '" 항목을 입력해주세요.'); return; }
-    formData[fields[i].label] = v;
+    let v;
+    if (f.type === 'multiselect') { v = el ? [...el.querySelectorAll('input[type=checkbox]:checked')].map(function(x){return x.value;}) : []; if (f.required && !v.length) { alert('"' + f.label + '" 항목을 선택해주세요.'); return; } }
+    else if (f.type === 'repeat') { v = el ? [...el.querySelectorAll('.rf-rrow')].map(function(row){ return {sel:row.querySelector('.rf-rsel').value, val:(row.querySelector('.rf-rval').value||'').trim()}; }).filter(function(x){ return x.sel||x.val; }) : []; if (f.required && !v.length) { alert('"' + f.label + '" 항목을 입력해주세요.'); return; } }
+    else { v = el ? el.value.trim() : ''; if (f.required && !v) { alert('"' + f.label + '" 항목을 입력해주세요.'); return; } }
+    formData[f.label] = v;
   }
 
   let q = sb.from('requests').update({ title: title, store: store, form_data: formData }).eq('id', reqId);
@@ -9639,6 +9648,15 @@ async function selectReqType(typeId) {
         fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
           '<input class="form-input" list="rf-store-dl-' + i + '" id="rf-' + i + '" placeholder="매장명 입력 또는 선택"/>' +
           '<datalist id="rf-store-dl-' + i + '">' + __storeDL + '</datalist></div>';
+      } else if (f.type === 'multiselect') {
+        fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
+          '<div id="rf-' + i + '" data-ft="multiselect" style="display:flex;flex-wrap:wrap;gap:8px">' +
+          (f.options||[]).map(function(o){ return '<label style="display:inline-flex;align-items:center;gap:5px;border:0.5px solid var(--crd);border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;background:#fff"><input type="checkbox" value="'+esc(o)+'" style="width:auto"> '+esc(o)+'</label>'; }).join('') +
+          '</div></div>';
+      } else if (f.type === 'repeat') {
+        fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
+          '<div id="rf-' + i + '" data-ft="repeat" data-opts="' + encodeURIComponent(JSON.stringify(f.options||[])) + '" data-vlabel="' + esc(f.value_label||'입력') + '"></div>' +
+          '<button type="button" class="btn-cancel-sm" style="margin-top:6px;font-size:12px" onclick="reqRepeatAdd(\'rf-\','+i+')"><i class="ti ti-plus"></i> 항목 추가</button></div>';
 } else {
         var labelText = f.label || '';
         if (labelText.indexOf('담당자') > -1 || labelText.indexOf('면담') > -1 || labelText.indexOf('직원') > -1) {
@@ -9747,6 +9765,7 @@ document.getElementById('reqFormArea').innerHTML =
       '<button class="btn-cancel-sm" onclick="goPage(\'requests\')">취소</button>' +
       '<button class="btn-submit" onclick="submitRequest()">신청 접수</button>' +
     '</div>';
+  try{ document.querySelectorAll('#reqFormArea [data-ft="repeat"]').forEach(function(c){ const idx=parseInt((c.id||'').split('-')[1]); if(!isNaN(idx)) reqRepeatAdd('rf-',idx); }); }catch(e){}
 }
 
 async function reqAddFiles(files) {
@@ -9768,6 +9787,8 @@ function reqRenderFileList() {
   ).join('');
 }
 
+function reqRepeatRow(prefix, i, preSel, preVal){ const c=document.getElementById(prefix+i); if(!c) return; let opts=[]; try{ opts=JSON.parse(decodeURIComponent(c.getAttribute('data-opts')||'[]')); }catch(e){} const vlabel=c.getAttribute('data-vlabel')||'입력'; const row=document.createElement('div'); row.className='rf-rrow'; row.style.cssText='display:flex;gap:6px;margin-bottom:6px'; row.innerHTML='<select class="form-input rf-rsel" style="flex:1;padding:6px 8px"><option value="">선택</option>'+opts.map(function(o){ return '<option'+(preSel===o?' selected':'')+'>'+esc(o)+'</option>'; }).join('')+'</select><input class="form-input rf-rval" style="flex:1;padding:6px 8px" placeholder="'+esc(vlabel)+'" value="'+esc(preVal||'')+'"><button type="button" class="btn-cancel-sm" style="padding:4px 9px" onclick="this.closest(\'.rf-rrow\').remove()">×</button>'; c.appendChild(row); }
+function reqRepeatAdd(prefix, i){ reqRepeatRow(prefix, i, '', ''); }
 async function submitRequest() {
   if (!reqSelectedType) { alert('신청 유형을 선택해주세요.'); return; }
   const title = document.getElementById('rfTitle').value.trim();
@@ -9788,10 +9809,13 @@ async function submitRequest() {
   const fields = reqSelectedType.form_fields || [];
   const formData = {};
   for (let i = 0; i < fields.length; i++) {
+    const f = fields[i];
     const el = document.getElementById('rf-' + i);
-    const val = el ? el.value.trim() : '';
-    if (fields[i].required && !val) { alert('"' + fields[i].label + '" 항목을 입력해주세요.'); return; }
-    formData[fields[i].label] = val;
+    let val;
+    if (f.type === 'multiselect') { val = el ? [...el.querySelectorAll('input[type=checkbox]:checked')].map(function(x){return x.value;}) : []; if (f.required && !val.length) { alert('"' + f.label + '" 항목을 선택해주세요.'); return; } }
+    else if (f.type === 'repeat') { val = el ? [...el.querySelectorAll('.rf-rrow')].map(function(row){ return {sel:row.querySelector('.rf-rsel').value, val:(row.querySelector('.rf-rval').value||'').trim()}; }).filter(function(x){ return x.sel||x.val; }) : []; if (f.required && !val.length) { alert('"' + f.label + '" 항목을 입력해주세요.'); return; } }
+    else { val = el ? el.value.trim() : ''; if (f.required && !val) { alert('"' + f.label + '" 항목을 입력해주세요.'); return; } }
+    formData[f.label] = val;
   }
 
   // 테스트 모드: 실제 저장·알림 없이 종료 (검증 흐름은 위에서 이미 체험)
@@ -9879,10 +9903,15 @@ async function renderReqDetail(area) {
   // 신청 내용 표시
   let contentHtml = '';
   fields.forEach(f => {
-    const v = fd[f.label] || '-';
+    const raw = fd[f.label];
+    let disp;
+    if (f.type === 'multiselect' && Array.isArray(raw)) disp = raw.length ? esc(raw.join(', ')) : '-';
+    else if (f.type === 'repeat' && Array.isArray(raw)) disp = raw.length ? raw.map(function(x){ return esc((x.sel||'') + (x.val ? (' — ' + x.val) : '')); }).join('<br>') : '-';
+    else if (Array.isArray(raw)) disp = raw.length ? esc(raw.join(', ')) : '-';
+    else disp = esc((raw==null||raw==='') ? '-' : String(raw));
     contentHtml += '<div style="display:flex;padding:7px 0;border-bottom:0.5px solid var(--crd)">' +
       '<div style="width:130px;font-size:12px;color:var(--th);flex-shrink:0">' + f.label + '</div>' +
-      '<div style="font-size:13px;color:var(--tm);white-space:pre-wrap">' + esc(v) + '</div></div>';
+      '<div style="font-size:13px;color:var(--tm);white-space:pre-wrap">' + disp + '</div></div>';
   });
 
   // 첨부파일
@@ -10327,6 +10356,14 @@ let curInterview = null;
 function isInterviewAdmin() {
   return currentUser.role === 'admin' || currentUser.is_master || currentUser.is_vice_master;
 }
+// ── 면담 열람 권한 (운영프로젝트 기준: 총괄/운영팀 + 예외 지정) ──
+window.__ivAllowed = window.__ivAllowed || [];
+async function ivLoadAllowed(){ try{ const {data}=await sb.from('app_settings').select('value').eq('key','interview_allowed_users').maybeSingle(); const v=data&&data.value; window.__ivAllowed=(v?((typeof v==='string'?JSON.parse(v):v)||[]):[]).map(String); }catch(e){ window.__ivAllowed=[]; } }
+function isInterviewFull(u){ u=u||currentUser; if(!u) return false; return !!u.is_master || u.role==='admin' || (window.__ivAllowed||[]).includes(String(u.id)); }
+function ivAuthorIsFull(r){ if(!r) return false; const a=r.author||{}; return !!a.is_master || a.role==='admin' || (window.__ivAllowed||[]).includes(String(r.author_id)); }
+function canSeeInterview(r){ if(!currentUser||!r) return false; if(isInterviewFull()) return true; if(r.author_id&&String(r.author_id)===String(currentUser.id)) return true; const my=(currentUser.store||'').trim(); const rs=(r.store||(r.staff&&r.staff.store)||'').trim(); if(my&&rs===my&&!ivAuthorIsFull(r)) return true; return false; }
+function ivPermMgr(){ if(!currentUser.is_master){ alert('총괄만 설정할 수 있습니다.'); return; } const ppl=(window.__ivPeople||[]); const auto=ppl.filter(u=>u.is_master||u.role==='admin'); const rows=ppl.filter(u=>!(u.is_master||u.role==='admin')).map(u=>`<label style="display:flex;align-items:center;gap:8px;padding:7px 8px;border-bottom:0.5px solid var(--crd);font-size:13px"><input type="checkbox" class="ivperm-ck" value="${u.id}" ${(window.__ivAllowed||[]).includes(String(u.id))?'checked':''}> ${esc(u.name)} <span style="font-size:11px;color:var(--th)">${esc(u.store||u.part||'')}</span></label>`).join(''); const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='ivPermModal'; modal.style.zIndex='340'; modal.innerHTML=`<div class="modal-box" style="max-width:460px;width:94vw"><div class="modal-head"><b>면담 열람 권한 관리</b><button onclick="document.getElementById('ivPermModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:70vh;overflow-y:auto"><p style="font-size:12px;color:var(--th);margin-bottom:6px">기본 열람: <b>${auto.map(u=>esc(u.name)).join(', ')||'총괄/운영팀'}</b> — 항상 전 매장 열람</p><p style="font-size:12px;color:var(--th);margin-bottom:8px">아래에서 <b>추가 열람 권한자</b>를 선택하세요. 선택된 사람은 전 매장 면담을 열람하며, 이들이 작성한 면담은 매장 매니저에게 노출되지 않습니다.</p>${rows||'<div style="color:var(--th);font-size:13px">대상 직원이 없습니다.</div>'}</div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('ivPermModal').remove()">취소</button><button class="btn-submit" onclick="ivPermSave()">저장</button></div></div>`; document.body.appendChild(modal); }
+async function ivPermSave(){ const ids=[...document.querySelectorAll('.ivperm-ck:checked')].map(x=>x.value); window.__ivAllowed=ids.map(String); const {error}=await sb.from('app_settings').upsert({key:'interview_allowed_users',value:JSON.stringify(window.__ivAllowed)},{onConflict:'key'}); if(error){ alert('저장 오류: '+error.message); return; } const m=document.getElementById('ivPermModal'); if(m) m.remove(); renderInterviews(document.getElementById('contentArea')); }
 function canWriteInterview() {
   return isInterviewAdmin() || isManagerRole(currentUser.role) || !!currentUser.part;
 }
@@ -10335,6 +10372,8 @@ function canWriteInterview() {
 async function renderInterviews(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
 
+  await ivLoadAllowed();
+  { const {data:__ivp}=await sb.from('users').select('id,name,is_master,role,store,part,active').eq('active',true).order('name'); window.__ivPeople=__ivp||[]; }
   const isAdmin = isInterviewAdmin();
   const canWrite = canWriteInterview();
   const canManage = currentUser.is_master || currentUser.is_vice_master || currentUser.role === 'admin';
@@ -10343,10 +10382,10 @@ async function renderInterviews(area) {
     sb.from('interview_options').select('*').eq('active', true).order('sort_order'),
     (async () => {
       let q = sb.from('interviews')
-        .select('*, staff:users!interviews_staff_id_fkey(name,store,role,active), author:users!interviews_author_id_fkey(name,store), feedback_user:users!interviews_feedback_by_fkey(name)')
+        .select('*, staff:users!interviews_staff_id_fkey(name,store,role,active), author:users!interviews_author_id_fkey(name,store,role,is_master), feedback_user:users!interviews_feedback_by_fkey(name)')
         .order('interview_date', {ascending: false})
         .order('created_at', {ascending: false});
-      if (!isAdmin) q = q.eq('store', currentUser.store);
+      if (!isInterviewFull()) q = q.eq('store', currentUser.store);
       return q;
     })()
   ]);
@@ -10355,6 +10394,7 @@ async function renderInterviews(area) {
   const typeOpts   = opts.filter(o => o.category === 'type');
   const methodOpts = opts.filter(o => o.category === 'method');
   let rows = (listRes.data || []).filter(r => !r.staff || r.staff.active !== false);
+  if (!isInterviewFull()) rows = rows.filter(r => !ivAuthorIsFull(r));
 
   const prevStore  = window.__ivFilterStore  || '';
   const prevStaff  = window.__ivFilterStaff  || '';
@@ -10423,6 +10463,8 @@ async function renderInterviews(area) {
       </div>
     </div>` : '';
 
+  const __ivFull=(window.__ivPeople||[]).filter(u=>u.is_master||u.role==='admin'||(window.__ivAllowed||[]).includes(String(u.id)));
+  const viewerStrip=`<div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:var(--tm)"><i class="ti ti-eye"></i> <b>열람 권한</b> <span style="color:var(--ts)">${__ivFull.map(u=>esc(u.name)).join(' · ')||'-'}</span>${currentUser.is_master?` <button class="btn-cancel-sm" style="font-size:11px;padding:3px 9px;margin-left:6px" onclick="ivPermMgr()"><i class="ti ti-settings"></i> 열람 권한 관리</button>`:''}</div>`;
   area.innerHTML = `
     ${optModalHtml}
     <div class="page-header">
@@ -10437,6 +10479,7 @@ async function renderInterviews(area) {
         </div>
       </div>
     </div>
+    ${viewerStrip}
     <div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:10px 12px;margin-bottom:14px">
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;align-items:end">
         <div>
@@ -10521,9 +10564,10 @@ async function deleteIvOpt(id, label) {
 // ── 상세 ──────────────────────────────────────────────────
 async function openInterviewById(id) {
   const { data } = await sb.from('interviews')
-    .select('*, staff:users!interviews_staff_id_fkey(name,store,role,active), author:users!interviews_author_id_fkey(name,store), feedback_user:users!interviews_feedback_by_fkey(name,store)')
+    .select('*, staff:users!interviews_staff_id_fkey(name,store,role,active), author:users!interviews_author_id_fkey(name,store,role,is_master), feedback_user:users!interviews_feedback_by_fkey(name,store)')
     .eq('id', id).single();
   if (!data) return;
+  if (!canSeeInterview(data)) { alert('이 면담을 열람할 권한이 없습니다.'); return; }
   curInterview = data;
   goPage('interviewDetail');
 }
@@ -17328,6 +17372,8 @@ function renderFieldEditor() {
               '<option value="number"' + (f.type==='number'?' selected':'') + '>숫자</option>' +
               '<option value="date"' + (f.type==='date'?' selected':'') + '>날짜</option>' +
               '<option value="select"' + (f.type==='select'?' selected':'') + '>드롭다운(선택)</option>' +
+              '<option value="multiselect"' + (f.type==='multiselect'?' selected':'') + '>다중선택(체크박스)</option>' +
+              '<option value="repeat"' + (f.type==='repeat'?' selected':'') + '>항목+입력 세트(추가형)</option>' +
               '<option value="ox"' + (f.type==='ox'?' selected':'') + '>O / X</option>' +
               '<option value="store"' + (f.type==='store'?' selected':'') + '>매장 선택</option>' +
               '<option value="repair_cat"' + (f.type==='repair_cat'?' selected':'') + '>보수 카테고리 연동</option>' +
@@ -17336,8 +17382,8 @@ function renderFieldEditor() {
         '<input type="checkbox"' + (f.required?' checked':'') + ' onchange="editingFields[' + i + '].required=this.checked" style="width:auto"/>필수</label>' +
       '<button onclick="editingFields.splice(' + i + ',1);renderFieldEditor()" style="background:none;border:none;color:var(--rd);cursor:pointer"><i class="ti ti-x"></i></button>' +
     '</div>' +
-    (f.type==='select'
-      ? '<div style="margin:-2px 0 8px 4px"><input class="form-input" style="width:100%;padding:6px 10px;font-size:12px" placeholder="드롭다운 항목 (쉼표로 구분 · 예: 신규,수정,삭제)" value="' + ((f.options||[]).join(', ')) + '" onchange="editingFields[' + i + '].options=this.value.split(\',\').map(function(s){return s.trim();}).filter(Boolean)"/></div>'
+    ((f.type==='select'||f.type==='multiselect'||f.type==='repeat')
+      ? '<div style="margin:-2px 0 8px 4px"><input class="form-input" style="width:100%;padding:6px 10px;font-size:12px" placeholder="선택 항목 (쉼표로 구분 · 예: 원두,우유,컵)" value="' + ((f.options||[]).join(', ')) + '" onchange="editingFields[' + i + '].options=this.value.split(\',\').map(function(s){return s.trim();}).filter(Boolean)"/>' + (f.type==='repeat' ? '<input class="form-input" style="width:100%;padding:6px 10px;font-size:12px;margin-top:4px" placeholder="입력칸 이름 (예: 수량, 비고)" value="' + esc(f.value_label||'') + '" onchange="editingFields[' + i + '].value_label=this.value"/>' : '') + '</div>'
       : '')
   ).join('') || '<div style="font-size:12px;color:var(--th);padding:6px 0">입력 항목을 추가하세요.</div>';
 }
