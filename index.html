@@ -1447,8 +1447,8 @@ async function updateNotifDot() {
     // 나에게 배정된 미완료 신청 개수
     let myReqCount = 0;
     if (currentUser.role === 'admin' || isManagerRole(currentUser.role) || currentUser.is_master || currentUser.part) {
-      const { data: reqs } = await sb.from('requests').select('id').eq('assignee_id', currentUser.id).in('status', ['submitted', 'in_progress']);
-      myReqCount = (reqs || []).length;
+      const mineReqs = await rqList('mine');
+      myReqCount = (mineReqs || []).filter(r => r.status==='submitted' || r.status==='in_progress').length;
     }
 
     // 업무 신청 메뉴 배지 업데이트
@@ -4126,9 +4126,14 @@ async function deleteUser(id, name){
   // FK 참조 해제 — 모든 관련 테이블
   await sb.from('posts').update({author_id:null}).eq('author_id',id);
   await sb.from('comments').update({author_id:null}).eq('author_id',id);
-  try { await sb.from('request_comments').update({author_id:null}).eq('author_id',id); } catch(e){}
-  try { await sb.from('requests').update({author_id:null}).eq('author_id',id); } catch(e){}
-  try { await sb.from('requests').update({assignee_id:null}).eq('assignee_id',id); } catch(e){}
+  if (typeof window.__rqSecure==='undefined') { try{ await rqLoadSecure(); }catch(e){} }
+  if (window.__rqSecure) {
+    try { await sb.rpc('rq_detach_user', { p_token: getSessionToken(), p_user_id: id }); } catch(e){}
+  } else {
+    try { await sb.from('request_comments').update({author_id:null}).eq('author_id',id); } catch(e){}
+    try { await sb.from('requests').update({author_id:null}).eq('author_id',id); } catch(e){}
+    try { await sb.from('requests').update({assignee_id:null}).eq('assignee_id',id); } catch(e){}
+  }
   if (typeof window.__ivSecure==='undefined') { try{ await ivLoadAllowed(); }catch(e){} }
   if (window.__ivSecure) {
     try { await sb.rpc('iv_detach_user', { p_token: getSessionToken(), p_user_id: id }); } catch(e){}
@@ -5343,7 +5348,7 @@ async function sendReqStatusNotify(reqId, newStatus, store) {
     'rejected':'반려', 'received':'접수 완료'
   }[newStatus] || newStatus;
 
-  const { data: req } = await sb.from('requests').select('title,author_id').eq('id',reqId).single();
+  const req = await rqGet(reqId);
   const msg = `[업무신청 ${statusLabel}] "${req?.title||''}" — ${store}`;
 
   // 매니저 + 부서담당 + 총괄/부총괄에게 알림
@@ -5627,7 +5632,7 @@ async function shouldNotifyRole(eventKey, userGradeStr) {
 
 // 업무 신청 삭제
 async function deleteRequest(reqId) {
-  const { data: req } = await sb.from('requests').select('*').eq('id',reqId).single();
+  const req = await rqGet(reqId);
   if (!req) { alert('신청을 찾을 수 없습니다.'); return; }
 
   const isAuthor = req.author_id === currentUser.id;
@@ -5644,9 +5649,7 @@ async function deleteRequest(reqId) {
 
   if (!confirm(`"${req.title}" 업무 신청을 삭제하시겠습니까?\n\n삭제하면 복구할 수 없습니다.`)) return;
 
-  try { await sb.from('request_comments').delete().eq('request_id',reqId); } catch(e){}
-  try { await sb.from('request_attachments').delete().eq('request_id',reqId); } catch(e){}
-  const { error } = await sb.from('requests').delete().eq('id',reqId);
+  const { error } = await rqDelete(reqId);
   if (error) { alert('삭제 오류: '+error.message); return; }
   alert('삭제 완료');
   goPage('requests');
@@ -5735,16 +5738,12 @@ async function saveRequestEdit(reqId) {
     formData[f.label] = v;
   }
 
-  let q = sb.from('requests').update({ title: title, store: store, form_data: formData }).eq('id', reqId);
-  if (!currentUser.is_master) q = q.eq('status', 'submitted');   // 작성자는 접수됨 단계에서만 반영(진행 중이면 무효)
-  const { error } = await q;
+  const { error } = await rqEdit(reqId, title, store, formData);
   if (error) { alert('수정 오류: ' + error.message); return; }
 
   document.getElementById('reqEditModal')?.remove();
-  const { data } = await sb.from('requests')
-    .select('*, request_types(name, form_fields, guide), parts(name), author:users!requests_author_id_fkey(name, store), assignee:users!requests_assignee_id_fkey(name)')
-    .eq('id', reqId).single();
-  if (data) { data.part_name = data.parts ? data.parts.name : null; curReq = data; }
+  const data = await rqGet(reqId);
+  if (data) { curReq = data; }
   renderReqDetail(document.getElementById('contentArea'));
   alert('수정되었습니다.');
 }
@@ -5920,7 +5919,8 @@ async function deleteRepair(id) {
 
   // 업무 신청에서 동기화된 건이면 완료 내역에서도 연결 해제
   if (rec?.request_id) {
-    await sb.from('requests').update({repair_record_id: null}).eq('id', rec.request_id);
+    // 보안모드(RLS Deny)에서는 직접 update 가 거부되므로 best-effort 처리(연결만 잔존, 표시엔 영향 없음)
+    try { await sb.from('requests').update({repair_record_id: null}).eq('id', rec.request_id); } catch(e){}
   }
 
   alert('삭제 완료');
@@ -6324,7 +6324,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-07-21';   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-07-23';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -9427,6 +9427,108 @@ function canWriteReq() {
   return currentUser && hasPerm('req_write');
 }
 
+// ═══════════════════════════════════════════════════════════════
+// requests(업무신청/보고) 보안 RPC(rq_*) 클라이언트 어댑터
+//  · 기본 ON. 서버 RLS Deny 이후에는 반드시 이 경로로만 데이터 접근.
+//  · app_settings.rq_secure_mode = 'off' 로 긴급 폴백(직접쿼리) 가능.
+// ═══════════════════════════════════════════════════════════════
+if (window.__rqSecure === undefined) {
+  try { var __rqv=(localStorage.getItem('rq_secure_mode')||'').toLowerCase(); window.__rqSecure=(__rqv!=='off'&&__rqv!=='false'&&__rqv!=='0'); }
+  catch(e){ window.__rqSecure=true; }
+}
+async function rqLoadSecure(){
+  try{
+    const { data } = await sb.from('app_settings').select('value').eq('key','rq_secure_mode').maybeSingle();
+    const sv = data && data.value;
+    const raw = (sv==null)?'':String(sv).toLowerCase().replace(/"/g,'').trim();
+    window.__rqSecure = (raw!=='off' && raw!=='false' && raw!=='0');
+  }catch(e){ /* 설정 없으면 기존값(기본 ON) 유지 */ }
+  return window.__rqSecure;
+}
+function rqNorm(r){ if(r && r.parts && !r.part_name) r.part_name=r.parts.name; return r; }
+// 목록: mode 'active'(가시 전체) | 'done'(완료만) | 'mine'(내 담당)
+async function rqList(mode){
+  if(window.__rqSecure){
+    const { data, error } = await sb.rpc('rq_list', { p_token:getSessionToken(), p_mode:mode||'active' });
+    if(error){ console.warn('[rq_list]', error.message); return []; }
+    return (data||[]).map(rqNorm);
+  }
+  let q = sb.from('requests').select('*, request_types(name, icon, form_fields, guide, co_parts, part_id), parts(name)');
+  if(mode==='done') q=q.eq('status','done');
+  const { data } = await q.order('created_at',{ascending:false});
+  let rows=(data||[]).map(rqNorm);
+  if(mode==='mine') rows=rows.filter(r=>r.assignee_id===currentUser.id);
+  return rows.filter(canSeeReq);
+}
+// 단건
+async function rqGet(id){
+  if(window.__rqSecure){
+    const { data, error } = await sb.rpc('rq_get', { p_token:getSessionToken(), p_id:id });
+    if(error){ console.warn('[rq_get]', error.message); return null; }
+    return data?rqNorm(data):null;
+  }
+  const { data } = await sb.from('requests').select('*, request_types(name, form_fields, guide, co_parts, part_id), parts(name), author:users!requests_author_id_fkey(name, store), assignee:users!requests_assignee_id_fkey(name)').eq('id',id).single();
+  return data?rqNorm(data):null;
+}
+// 신규 접수 (author_id·part_id·assignee 는 서버에서 강제)
+async function rqSubmit(typeId, store, title, formData){
+  if(window.__rqSecure){
+    const { data, error } = await sb.rpc('rq_submit', { p_token:getSessionToken(), p_type_id:typeId, p_store:store, p_title:title, p_form:formData||{} });
+    return { data:(data?rqNorm(data):null), error };
+  }
+  return await sb.from('requests').insert({ type_id:typeId, store:store, part_id:(reqSelectedType?reqSelectedType.part_id:null), title:title, author_id:currentUser.id, assignee_id:((reqSelectedType&&reqSelectedType.default_assignee_id)||null), status:'submitted', form_data:formData }).select().single();
+}
+// 접수됨 단계 수정 (작성자 본인/총괄)
+async function rqEdit(id, title, store, formData){
+  if(window.__rqSecure){
+    return await sb.rpc('rq_edit', { p_token:getSessionToken(), p_id:id, p_title:title, p_store:store, p_form:formData });
+  }
+  let q=sb.from('requests').update({title:title, store:store, form_data:formData}).eq('id',id);
+  if(!currentUser.is_master) q=q.eq('status','submitted');
+  return await q;
+}
+// 담당자/예정일/진행/완료/반려 통합 업데이트 (처리 권한자)
+async function rqProgress(id, o){
+  o=o||{};
+  if(window.__rqSecure){
+    return await sb.rpc('rq_set_progress', { p_token:getSessionToken(), p_id:id,
+      p_assignee:(o.assignee_id!==undefined?o.assignee_id:null),
+      p_due:(o.due_date!==undefined?o.due_date:null),
+      p_status:(o.status!==undefined?o.status:null),
+      p_done:(o.done_date!==undefined?o.done_date:null),
+      p_reason:(o.reject_reason!==undefined?o.reject_reason:null) });
+  }
+  const upd=Object.assign({}, o, {updated_at:new Date().toISOString()});
+  if(o.status==='done') upd.completed_at=new Date().toISOString();
+  return await sb.from('requests').update(upd).eq('id',id);
+}
+// 개별 열람자 지정 (총괄/운영팀)
+async function rqSetViewers(id, ids){
+  if(window.__rqSecure) return await sb.rpc('rq_set_viewers', { p_token:getSessionToken(), p_id:id, p_ids:(ids||[]) });
+  return await sb.from('requests').update({extra_viewers:(ids||[])}).eq('id',id);
+}
+// 삭제 (작성자 접수됨단계/총괄) — 서버가 댓글·첨부까지 정리
+async function rqDelete(id){
+  if(window.__rqSecure) return await sb.rpc('rq_delete', { p_token:getSessionToken(), p_id:id });
+  try{ await sb.from('request_comments').delete().eq('request_id',id); }catch(e){}
+  try{ await sb.from('request_attachments').delete().eq('request_id',id); }catch(e){}
+  return await sb.from('requests').delete().eq('id',id);
+}
+// 댓글 조회/작성
+async function rqCommentsLoad(id){
+  if(window.__rqSecure){
+    const { data, error } = await sb.rpc('rq_comments', { p_token:getSessionToken(), p_id:id });
+    if(error){ console.warn('[rq_comments]', error.message); return []; }
+    return data||[];
+  }
+  const { data } = await sb.from('request_comments').select('*, author:users!request_comments_author_id_fkey(name,store,role)').eq('request_id',id).order('created_at',{ascending:true});
+  return data||[];
+}
+async function rqCommentAdd(id, content, tagged){
+  if(window.__rqSecure) return await sb.rpc('rq_comment_add', { p_token:getSessionToken(), p_id:id, p_content:content, p_tagged:((tagged&&tagged.length)?tagged:null) });
+  return await sb.from('request_comments').insert({request_id:id, author_id:currentUser.id, content:content, tagged_users:((tagged&&tagged.length)?tagged:null), created_at:new Date().toISOString()});
+}
+
 // ── 신청 목록 ────────────────────────────────────────────────────
 let arcType = '';   // 완료내역 유형 필터
 let arcStore = '';  // 완료내역 매장 필터
@@ -9451,8 +9553,8 @@ async function renderReqStats(area) {
   const mEnd = new Date(y, mo+1, 1).toISOString();
   const inMonth = (iso) => iso && iso >= mStart && iso < mEnd;
 
-  const [{ data: reqs }, { data: users }] = await Promise.all([
-    sb.from('requests').select('*'),
+  const [reqs, { data: users }] = await Promise.all([
+    rqList('active'),
     sb.from('users').select('id,name,store,part,role,active')
   ]);
   const all = reqs || [];
@@ -9550,16 +9652,16 @@ async function renderReqArchive(area, opts) {
   const __page  = window.__arcPage || 0;
   const __limit = (__page + 1) * ARC_PAGE;
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  let __aq = sb.from('requests').select('*, request_types(name, icon), parts(name)').eq('status','done');
-  if (arcType)  __aq = __aq.eq('type_id', arcType);   // 유형·매장 필터는 서버측 적용
-  if (arcStore) __aq = __aq.eq('store', arcStore);
-  const [{ data: reqs }, { data: types }, { data: stores }] = await Promise.all([
-    __aq.order('completed_at', {ascending:false}).order('created_at', {ascending:false}).range(0, __limit - 1),
+  let __allDone = await rqList('done');   // 서버(rq_list)에서 권한별로 이미 필터된 완료 목록
+  if (arcType)  __allDone = __allDone.filter(r => String(r.type_id) === String(arcType));
+  if (arcStore) __allDone = __allDone.filter(r => r.store === arcStore);
+  __allDone.sort((a,b)=>{ const av=(a.completed_at||a.created_at||''), bv=(b.completed_at||b.created_at||''); return bv<av?-1:(bv>av?1:0); });
+  const [{ data: types }, { data: stores }] = await Promise.all([
     sb.from('request_types').select('*').order('sort_order'),
     sb.from('store_options').select('*').order('sort_order')
   ]);
-  const __fetchedFull = (reqs || []).length >= __limit;
-  let list = reqs || [];
+  const __fetchedFull = __allDone.length > __limit;
+  let list = __allDone.slice(0, __limit);
 
   // 검색어(제목·양식값)는 로드된 항목 내에서 필터
   if (arcQ) {
@@ -9606,8 +9708,9 @@ async function renderReqArchive(area, opts) {
 
 async function renderRequests(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  const [{ data: reqs }, { data: _allTypes }, { data: _allParts }] = await Promise.all([
-    sb.from('requests').select('*, request_types(name, icon), parts(name)').order('created_at', {ascending:false}),
+  try{ await rqLoadSecure(); }catch(e){}
+  const [reqs, { data: _allTypes }, { data: _allParts }] = await Promise.all([
+    rqList('active'),
     sb.from('request_types').select('*'),
     sb.from('parts').select('id,name')
   ]);
@@ -9717,11 +9820,8 @@ async function renderRequests(area) {
 }
 
 async function openReqById(id) {
-  const { data } = await sb.from('requests')
-    .select('*, request_types(name, form_fields, guide), parts(name), author:users!requests_author_id_fkey(name, store), assignee:users!requests_assignee_id_fkey(name)')
-    .eq('id', id).single();
-  if (!data) return;
-  data.part_name = data.parts ? data.parts.name : null;
+  const data = await rqGet(id);
+  if (!data) { alert('이 신청을 열람할 권한이 없습니다.'); return; }
   if (!canSeeReq(data)) { alert('이 신청을 열람할 권한이 없습니다.'); return; }
   curReq = data;
   goPage('reqdetail');
@@ -9996,16 +10096,7 @@ async function submitRequest() {
   // 중복 접수 방지 (연타/재시도로 같은 신청 여러 건 생성되는 문제 차단)
   if (window.__reqSubmitting) return;
   window.__reqSubmitting = true;
-  const { data: req, error } = await sb.from('requests').insert({
-    type_id: reqSelectedType.id,
-    store: reqStore,
-    part_id: reqSelectedType.part_id,
-    title: title,
-    author_id: currentUser.id,
-    assignee_id: reqSelectedType.default_assignee_id || null,
-    status: 'submitted',
-    form_data: formData
-  }).select().single();
+  const { data: req, error } = await rqSubmit(reqSelectedType.id, reqStore, title, formData);
   window.__reqSubmitting = false;
 
   if (error) { alert('접수 오류: ' + error.message); return; }
@@ -10198,11 +10289,8 @@ async function renderReqComments(reqId) {
   const sec = document.getElementById('reqCommentSection');
   if (!sec) return;
 
-  // 댓글 로드 (request_comments 테이블)
-  const { data: comments } = await sb.from('request_comments')
-    .select('*, author:users!request_comments_author_id_fkey(name,store,role)')
-    .eq('request_id', reqId)
-    .order('created_at', {ascending: true});
+  // 댓글 로드 (보안 RPC rq_comments — 열람 권한자만)
+  const comments = await rqCommentsLoad(reqId);
 
   const cmtHtml = (comments||[]).map(c => {
     const isMine = c.author_id === currentUser.id;
@@ -10345,18 +10433,12 @@ async function submitReqComment(reqId) {
 
   const tags = window.__reqCmtTags?.[reqId] || [];
 
-  const { error } = await sb.from('request_comments').insert({
-    request_id:   reqId,
-    author_id:    currentUser.id,
-    content:      text,
-    tagged_users: tags.length ? tags : null,
-    created_at:   new Date().toISOString()
-  });
+  const { error } = await rqCommentAdd(reqId, text, tags);
   if (error) { alert('등록 오류: ' + error.message); return; }
 
   // 태그된 인원에게 알림 발송
   if (tags.length) {
-    const { data: req } = await sb.from('requests').select('title').eq('id', reqId).single();
+    const req = await rqGet(reqId);
     const msg = `[업무신청 태그] "${req?.title||'업무신청'}" 댓글에 회원님이 태그되었습니다. 확인해주세요.`;
     for (const t of tags) {
       await createNotification(t.id, 'req_comment_tag', reqId, 'request', msg);
@@ -10375,11 +10457,12 @@ async function submitReqComment(reqId) {
 
 // 열람 권한 부여 (교육 등 목적)
 async function openViewerPicker(reqId){
-  const [{data:req},{data:users},pl] = await Promise.all([
-    sb.from('requests').select('extra_viewers,author_id,assignee_id,store,type_id, parts(name)').eq('id',reqId).single(),
+  const [req,{data:users},pl] = await Promise.all([
+    rqGet(reqId),
     sb.from('users').select('id,name,store,part,role,is_master,sub_stores').eq('active',true).order('name'),
     (window.__parts&&window.__parts.length)?Promise.resolve({data:window.__parts}):sb.from('parts').select('id,name')
   ]);
+  if(!req){ alert('열람 권한이 없습니다.'); return; }
   window.__parts=(pl&&pl.data)||window.__parts||[];
   const { data:typeRow } = await sb.from('request_types').select('co_parts').eq('id',req.type_id).maybeSingle();
   const coPartNames=(((typeRow&&typeRow.co_parts)||[]).map(function(pid){ const p=(window.__parts||[]).find(x=>Number(x.id)===Number(pid)); return p?p.name:null; }).filter(Boolean));
@@ -10391,12 +10474,12 @@ async function openViewerPicker(reqId){
   document.body.appendChild(modal);
 }
 function reqViewerFilter(q){ q=(q||'').trim().toLowerCase(); document.querySelectorAll('#rqvModal .rqv-row').forEach(function(r){ r.style.display=(!q||(r.getAttribute('data-k')||'').indexOf(q)>=0)?'':'none'; }); }
-async function reqViewerSave(){ const reqId=window.__reqViewerId; const ids=[...document.querySelectorAll('#rqvModal .rqv-ck')].filter(x=>x.checked&&!x.disabled).map(x=>x.getAttribute('data-id')); const {error}=await sb.from('requests').update({extra_viewers:ids}).eq('id',reqId); if(error){ alert('저장 오류: '+error.message); return; } const m=document.getElementById('rqvModal'); if(m) m.remove(); openReqById(reqId); }
+async function reqViewerSave(){ const reqId=window.__reqViewerId; const ids=[...document.querySelectorAll('#rqvModal .rqv-ck')].filter(x=>x.checked&&!x.disabled).map(x=>x.getAttribute('data-id')); const {error}=await rqSetViewers(reqId, ids); if(error){ alert('저장 오류: '+error.message); return; } const m=document.getElementById('rqvModal'); if(m) m.remove(); openReqById(reqId); }
 
 async function removeReqViewer(reqId, userId) {
-  const { data: req } = await sb.from('requests').select('extra_viewers').eq('id',reqId).single();
-  const list = (req.extra_viewers||[]).filter(x => x !== userId);
-  await sb.from('requests').update({extra_viewers:list}).eq('id',reqId);
+  const req = await rqGet(reqId);
+  const list = ((req&&req.extra_viewers)||[]).filter(x => x !== userId);
+  await rqSetViewers(reqId, list);
   openReqById(reqId);
 }
 
@@ -10405,7 +10488,7 @@ async function saveReqProgress(id) {
   const assignee = document.getElementById('rqAssignee').value;
   const due = document.getElementById('rqDue').value || null;
   if (!assignee) { alert('담당자를 지정해주세요.'); return; }
-  await sb.from('requests').update({assignee_id: assignee, due_date: due, updated_at: new Date().toISOString()}).eq('id', id);
+  await rqProgress(id, {assignee_id: assignee, due_date: due});
   alert('담당자와 처리 예정일이 저장되었습니다.');
   openReqById(id);
 }
@@ -10414,10 +10497,10 @@ async function markInProgress(id) {
   const assignee = document.getElementById('rqAssignee').value;
   const due = document.getElementById('rqDue').value || null;
   if (!assignee) { alert('담당자를 먼저 지정해주세요.'); return; }
-  await sb.from('requests').update({assignee_id: assignee, due_date: due, status: 'in_progress', updated_at: new Date().toISOString()}).eq('id', id);
+  await rqProgress(id, {assignee_id: assignee, due_date: due, status: 'in_progress'});
   // 💡 신청자에게 알림: store(매장명) 정보를 추가로 가져옵니다.
-    const { data: req } = await sb.from('requests').select('author_id, title, store').eq('id', id).single();
-    
+    const req = await rqGet(id);
+
     if (req?.author_id && req.author_id !== currentUser.id) {
       await createNotification(req.author_id, 'request_inprogress', id, 'request',
         `[업무 처리중] '${req.title}' 신청이 처리 중으로 변경되었습니다.`);
@@ -10437,12 +10520,9 @@ async function completeReq(id) {
   const done = document.getElementById('rqDone').value || null;
   if (!assignee) { alert('처리 완료 전에 담당자를 지정해주세요.'); return; }
   if (!done) { alert('처리 완료일을 선택해주세요.'); return; }
-  await sb.from('requests').update({
-    assignee_id: assignee, due_date: due, done_date: done,
-    status: 'done', updated_at: new Date().toISOString()
-  }).eq('id', id);
+  await rqProgress(id, {assignee_id: assignee, due_date: due, done_date: done, status: 'done'});
   // 💡 신청자에게 완료 알림: store(매장명) 정보를 추가로 가져옵니다.
-    const { data: req } = await sb.from('requests').select('author_id, title, store').eq('id', id).single();
+    const req = await rqGet(id);
     
     if (req?.author_id && req.author_id !== currentUser.id) {
       await createNotification(req.author_id, 'request_done', id, 'request',
@@ -10460,9 +10540,9 @@ async function completeReq(id) {
 async function rejectReq(id) {
   const reason = prompt('반려 사유를 입력하세요. (신청자가 확인합니다)');
   if (reason === null) return;
-  await sb.from('requests').update({status: 'rejected', reject_reason: reason, updated_at: new Date().toISOString()}).eq('id', id);
+  await rqProgress(id, {status: 'rejected', reject_reason: reason});
   //  💡 신청자에게 반려 알림: store(매장명) 정보를 추가로 가져옵니다.
-    const { data: req } = await sb.from('requests').select('author_id, title, store').eq('id', id).single();
+    const req = await rqGet(id);
     
     if (req?.author_id && req.author_id !== currentUser.id) {
       await createNotification(req.author_id, 'request_rejected', id, 'request',
@@ -10483,7 +10563,7 @@ async function changeAssignee(id) {
   if (!pick) return;
   const idx = parseInt(pick) - 1;
   if (isNaN(idx) || idx < 0 || idx >= users.length) { alert('올바른 번호를 입력해주세요.'); return; }
-  await sb.from('requests').update({assignee_id: users[idx].id, updated_at: new Date().toISOString()}).eq('id', id);
+  await rqProgress(id, {assignee_id: users[idx].id});
   alert(users[idx].name + ' 님을 담당자로 지정했습니다.');
   openReqById(id);
 }
@@ -11104,15 +11184,13 @@ async function renderRepairs(area) {
       if (!isAdmin) q = q.eq('store', currentUser.store);
       return q;
     })(),
-    // 업무 신청 완료된 보수 요청
+    // 업무 신청 완료된 보수 요청 (보안 RPC — rq_list 'done')
     (async()=>{
-      let q = sb.from('requests')
-        .select('id,store,title,form_data,completed_at,created_at')
-        .eq('type_id', REPAIR_TYPE_ID)
-        .eq('status','done')
-        .order('completed_at',{ascending:false});
-      if (!isAdmin) q = q.eq('store', currentUser.store);
-      return q;
+      let rows = await rqList('done');
+      rows = rows.filter(r => Number(r.type_id) === REPAIR_TYPE_ID);
+      if (!isAdmin) rows = rows.filter(r => r.store === currentUser.store);
+      rows.sort((a,b)=>{ const av=(a.completed_at||''), bv=(b.completed_at||''); return bv<av?-1:(bv>av?1:0); });
+      return { data: rows };
     })(),
     sb.from('users').select('store').eq('active',true).neq('role','admin')
   ]);
