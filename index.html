@@ -4119,9 +4119,14 @@ async function deleteUser(id, name){
   try { await sb.from('request_comments').update({author_id:null}).eq('author_id',id); } catch(e){}
   try { await sb.from('requests').update({author_id:null}).eq('author_id',id); } catch(e){}
   try { await sb.from('requests').update({assignee_id:null}).eq('assignee_id',id); } catch(e){}
-  try { await sb.from('interviews').update({author_id:null}).eq('author_id',id); } catch(e){}
-  try { await sb.from('interviews').update({staff_id:null}).eq('staff_id',id); } catch(e){}
-  try { await sb.from('interviews').update({feedback_by:null}).eq('feedback_by',id); } catch(e){}
+  if (typeof window.__ivSecure==='undefined') { try{ await ivLoadAllowed(); }catch(e){} }
+  if (window.__ivSecure) {
+    try { await sb.rpc('iv_detach_user', { p_token: getSessionToken(), p_user_id: id }); } catch(e){}
+  } else {
+    try { await sb.from('interviews').update({author_id:null}).eq('author_id',id); } catch(e){}
+    try { await sb.from('interviews').update({staff_id:null}).eq('staff_id',id); } catch(e){}
+    try { await sb.from('interviews').update({feedback_by:null}).eq('feedback_by',id); } catch(e){}
+  }
   try { await sb.from('repair_records').update({author_id:null}).eq('author_id',id); } catch(e){}
   try { await sb.from('store_handovers').update({author_id:null}).eq('author_id',id); } catch(e){}
   try { await sb.from('schedule_entries').update({user_id:null}).eq('user_id',id); } catch(e){}
@@ -5851,7 +5856,14 @@ async function deleteInterview(id) {
   }
 
   // 수정됨: select()를 추가하여 실제로 DB에서 지워졌는지 결과를 받아옵니다.
-  const { data, error } = await sb.from('interviews').delete().eq('id', id).select();
+  let data, error;
+  if (window.__ivSecure) {
+    const r = await sb.rpc('iv_delete', { p_token: getSessionToken(), p_id: id });
+    error = r.error; data = r.error ? null : [{ id: id }];
+  } else {
+    const r = await sb.from('interviews').delete().eq('id', id).select();
+    data = r.data; error = r.error;
+  }
   
   if (error) {
     alert('삭제 오류:\n' + error.message);
@@ -10442,7 +10454,7 @@ function isInterviewAdmin() {
 }
 // ── 면담 열람 권한 (운영프로젝트 기준: 총괄/운영팀 + 예외 지정) ──
 window.__ivAllowed = window.__ivAllowed || [];
-async function ivLoadAllowed(){ try{ const [a,e]=await Promise.all([sb.from('app_settings').select('value').eq('key','interview_allowed_users').maybeSingle(), sb.from('app_settings').select('value').eq('key','interview_excluded_users').maybeSingle()]); const pa=a.data&&a.data.value; const pe=e.data&&e.data.value; window.__ivAllowed=(pa?((typeof pa==='string'?JSON.parse(pa):pa)||[]):[]).map(String); window.__ivExcluded=(pe?((typeof pe==='string'?JSON.parse(pe):pe)||[]):[]).map(String); }catch(err){ window.__ivAllowed=window.__ivAllowed||[]; window.__ivExcluded=window.__ivExcluded||[]; } }
+async function ivLoadAllowed(){ try{ const [a,e,sm]=await Promise.all([sb.from('app_settings').select('value').eq('key','interview_allowed_users').maybeSingle(), sb.from('app_settings').select('value').eq('key','interview_excluded_users').maybeSingle(), sb.from('app_settings').select('value').eq('key','iv_secure_mode').maybeSingle()]); const pa=a.data&&a.data.value; const pe=e.data&&e.data.value; window.__ivAllowed=(pa?((typeof pa==='string'?JSON.parse(pa):pa)||[]):[]).map(String); window.__ivExcluded=(pe?((typeof pe==='string'?JSON.parse(pe):pe)||[]):[]).map(String); const sv=sm&&sm.data&&sm.data.value; const __sraw=(sv==null)?'':String(sv).toLowerCase().replace(/"/g,'').trim(); window.__ivSecure=(sv===true||__sraw==='on'||__sraw==='true'||__sraw==='1'); }catch(err){ window.__ivAllowed=window.__ivAllowed||[]; window.__ivExcluded=window.__ivExcluded||[]; } }
 function ivDefaultFull(u){ return !!(u && (u.is_master || isOperationsPart(u))); }
 function isInterviewFull(u){ u=u||currentUser; if(!u) return false; const id=String(u.id); if((window.__ivExcluded||[]).includes(id)) return false; return ivDefaultFull(u) || (window.__ivAllowed||[]).includes(id); }
 function ivAuthorIsFull(r){ if(!r) return false; const a=r.author||{}; return !!a.is_master || a.role==='admin' || a.part==='운영' || a.part==='운영팀' || (window.__ivAllowed||[]).includes(String(r.author_id)); }
@@ -10465,23 +10477,26 @@ async function renderInterviews(area) {
   const canWrite = canWriteInterview();
   const canManage = currentUser.is_master || currentUser.is_vice_master || currentUser.role === 'admin';
 
-  const [optsRes, listRes] = await Promise.all([
-    sb.from('interview_options').select('*').eq('active', true).order('sort_order'),
-    (async () => {
-      let q = sb.from('interviews')
-        .select('*, staff:users!interviews_staff_id_fkey(name,store,role,active), author:users!interviews_author_id_fkey(name,store,role,is_master,part), feedback_user:users!interviews_feedback_by_fkey(name)')
-        .order('interview_date', {ascending: false})
-        .order('created_at', {ascending: false});
-      if (!isInterviewFull()) q = q.eq('store', currentUser.store);
-      return q;
-    })()
-  ]);
+  const optsRes = await sb.from('interview_options').select('*').eq('active', true).order('sort_order');
+  let __ivRows;
+  if (window.__ivSecure) {
+    const { data:__j, error:__je } = await sb.rpc('iv_list', { p_token: getSessionToken() });
+    if (__je) { area.innerHTML = '<div style="padding:40px;text-align:center;color:var(--rd)">면담 목록을 불러오지 못했습니다: '+esc(__je.message||'')+'</div>'; return; }
+    __ivRows = Array.isArray(__j) ? __j : (typeof __j==='string' ? JSON.parse(__j||'[]') : (__j||[]));
+  } else {
+    let q = sb.from('interviews')
+      .select('*, staff:users!interviews_staff_id_fkey(name,store,role,active), author:users!interviews_author_id_fkey(name,store,role,is_master,part), feedback_user:users!interviews_feedback_by_fkey(name)')
+      .order('interview_date', {ascending: false})
+      .order('created_at', {ascending: false});
+    if (!isInterviewFull()) q = q.eq('store', currentUser.store);
+    const { data:__d } = await q; __ivRows = __d || [];
+  }
 
   const opts       = optsRes.data || [];
   const typeOpts   = opts.filter(o => o.category === 'type');
   const methodOpts = opts.filter(o => o.category === 'method');
-  let rows = (listRes.data || []).filter(r => !r.staff || r.staff.active !== false);
-  if (!isInterviewFull()) rows = rows.filter(r => (r.author_id && String(r.author_id)===String(currentUser.id)) || (r.author && !ivAuthorIsFull(r))); // 운영파트 작성분·작성자불명 면담은 매니저 리스트에서 제외
+  let rows = (__ivRows).filter(r => !r.staff || r.staff.active !== false);
+  if (!window.__ivSecure && !isInterviewFull()) rows = rows.filter(r => (r.author_id && String(r.author_id)===String(currentUser.id)) || (r.author && !ivAuthorIsFull(r))); // (비보안모드 전용) 서버RPC 사용 시엔 서버가 이미 격리
 
   const prevStore  = window.__ivFilterStore  || '';
   const prevStaff  = window.__ivFilterStaff  || '';
@@ -10650,12 +10665,20 @@ async function deleteIvOpt(id, label) {
 }
 // ── 상세 ──────────────────────────────────────────────────
 async function openInterviewById(id) {
-  const { data } = await sb.from('interviews')
-    .select('*, staff:users!interviews_staff_id_fkey(name,store,role,active), author:users!interviews_author_id_fkey(name,store,role,is_master,part), feedback_user:users!interviews_feedback_by_fkey(name,store)')
-    .eq('id', id).single();
-  if (!data) return;
   try{ await ivLoadAllowed(); }catch(e){}
-  if (!canSeeInterview(data)) { alert('이 면담을 열람할 권한이 없습니다.'); return; }
+  let data;
+  if (window.__ivSecure) {
+    const { data:__d } = await sb.rpc('iv_get', { p_token: getSessionToken(), p_id: id });
+    data = (typeof __d==='string') ? JSON.parse(__d) : __d;
+    if (!data) { alert('이 면담을 열람할 권한이 없거나 존재하지 않습니다.'); return; }
+  } else {
+    const r = await sb.from('interviews')
+      .select('*, staff:users!interviews_staff_id_fkey(name,store,role,active), author:users!interviews_author_id_fkey(name,store,role,is_master,part), feedback_user:users!interviews_feedback_by_fkey(name,store)')
+      .eq('id', id).single();
+    data = r.data;
+    if (!data) return;
+    if (!canSeeInterview(data)) { alert('이 면담을 열람할 권한이 없습니다.'); return; }
+  }
   curInterview = data;
   goPage('interviewDetail');
 }
@@ -10741,16 +10764,21 @@ async function submitFeedback(id) {
   const fb = document.getElementById('feedbackInput')?.value.trim();
   if (!fb) { alert('피드백 내용을 입력해주세요.'); return; }
   const now = new Date().toISOString();
-  const { error } = await sb.from('interviews').update({
-    feedback: fb,
-    feedback_by: currentUser.id,
-    feedback_at: now,
-    updated_at: now
-  }).eq('id', id);
-  if (error) { alert('오류: ' + error.message); return; }
+  let iv;
+  if (window.__ivSecure) {
+    const { data:__d, error:__e } = await sb.rpc('iv_feedback', { p_token: getSessionToken(), p_id: id, p_feedback: fb });
+    if (__e) { alert('오류: ' + __e.message); return; }
+    iv = (typeof __d==='string') ? JSON.parse(__d) : __d;
+  } else {
+    const { error } = await sb.from('interviews').update({
+      feedback: fb, feedback_by: currentUser.id, feedback_at: now, updated_at: now
+    }).eq('id', id);
+    if (error) { alert('오류: ' + error.message); return; }
+    const r = await sb.from('interviews').select('author_id,staff_id,store').eq('id', id).single();
+    iv = r.data;
+  }
   window.__ivFbEditMode = null;
   // 면담 작성자에게 알림 발송 (본인이 작성한 경우 제외)
-  const { data: iv } = await sb.from('interviews').select('author_id,staff_id,store').eq('id', id).single();
   if (iv && iv.author_id && iv.author_id !== currentUser.id) {
     const staffInfo = curInterview?.staff;
     const msg = `[면담 피드백] ${iv.store || ''} 면담 기록에 ${currentUser.name}님의 피드백이 등록되었습니다.`;
@@ -10851,8 +10879,15 @@ async function ivLoadStaff(store) {
 }
 
 async function openInterviewEdit(id) {
-  const { data } = await sb.from('interviews').select('*').eq('id', id).single();
-  if (!data) return;
+  let data;
+  if (window.__ivSecure) {
+    try{ await ivLoadAllowed(); }catch(e){}
+    const { data:__d } = await sb.rpc('iv_get', { p_token: getSessionToken(), p_id: id });
+    data = (typeof __d==='string') ? JSON.parse(__d) : __d;
+  } else {
+    const r = await sb.from('interviews').select('*').eq('id', id).single(); data = r.data;
+  }
+  if (!data) { alert('면담을 불러올 수 없습니다.'); return; }
   editingInterviewId = id;
   renderInterviewNew(document.getElementById('contentArea'), data);
 }
@@ -10872,7 +10907,16 @@ async function submitInterview() {
   const finalStore = staffUser?.store || storeVal || currentUser.store;
   const now = new Date().toISOString();
 
-  if (editingInterviewId) {
+  if (window.__ivSecure) {
+    const payload = { store: finalStore, staff_id: staffId, interview_date: date, interview_type: type, interview_method: method, content };
+    const { data:__d, error } = await sb.rpc('iv_save', { p_token: getSessionToken(), p_id: (editingInterviewId||null), p_payload: payload });
+    if (error) { alert((editingInterviewId?'수정':'등록')+' 오류: ' + error.message); return; }
+    const saved = (typeof __d==='string') ? JSON.parse(__d) : __d;
+    if (!editingInterviewId && saved && saved.id) {
+      await notifyCoaches(finalStore, 'interview_new', saved.id, 'interview',
+        `[면담 등록] ${finalStore} · ${(await sb.from('users').select('name').eq('id',staffId).single()).data?.name||''} 면담 기록이 등록되었습니다.`);
+    }
+  } else if (editingInterviewId) {
     const { error } = await sb.from('interviews').update({
       staff_id: staffId, store: finalStore,
       interview_date: date, interview_type: type, interview_method: method,
@@ -10886,7 +10930,6 @@ async function submitInterview() {
       content, created_at: now, updated_at: now
     }).select().single();
     if (error) { alert('등록 오류: ' + error.message); return; }
-    // 관할 코치에게 자동 알림
     if (newIv) {
       await notifyCoaches(finalStore, 'interview_new', newIv.id, 'interview',
         `[면담 등록] ${finalStore} · ${(await sb.from('users').select('name').eq('id',staffId).single()).data?.name||''} 면담 기록이 등록되었습니다.`);
