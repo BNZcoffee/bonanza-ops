@@ -4565,7 +4565,7 @@ async function checkAndSend3DayReminders() {
 
     // 4. 3일이 지난 공지사항 모두 찾기
     const { data: oldNotices } = await sb.from('posts')
-      .select('id, title, require_read')
+      .select('id, title, require_read, access')
       .eq('status', 'published')
       .lte('created_at', threeDaysAgo);
     
@@ -4585,8 +4585,9 @@ async function checkAndSend3DayReminders() {
     for (const notice of __notices) {
       const { data: reads } = await sb.from('post_reads').select('user_id').eq('post_id', notice.id);
       const readUserIds = new Set((reads || []).map(r => r.user_id));
-      
-      const unreadStaffs = fieldStaffs.filter(staff => !readUserIds.has(staff.id));
+      // 열람 권한 반영: '매니저 이상' 공지는 매장직원(staff) 제외 → 매니저 전용 제목 노출 방지
+      const noticeRecips = (notice.access==='manager') ? fieldStaffs.filter(u=>userGrade(u)==='manager') : fieldStaffs;
+      const unreadStaffs = noticeRecips.filter(staff => !readUserIds.has(staff.id));
 
       for (const staff of unreadStaffs) {
         const msg = `[자동 리마인드] '${notice.title}' 공지를 아직 확인하지 않으셨습니다.`;
@@ -5236,9 +5237,10 @@ async function setFeatureFlag(key, enabled, checkbox) {
 async function sendPostUpdateNotify(postId){
   if(typeof notifEnabled==='function' && !notifEnabled('new_post')){ alert("'새 공지' 알림이 꺼져 있어 발송되지 않습니다. 알림설정에서 켜주세요."); return; }
   if(!confirm("이 게시글의 '수정 알림'을 발송할까요?\n\n'확인했습니다'를 누른 사람을 포함해 전 직원(알림설정 반영)에게 '게시글이 수정되었습니다' 알림이 발송됩니다. (미확인 리마인드와 별개)")) return;
-  const { data: post } = await sb.from('posts').select('title').eq('id',postId).single();
+  const { data: post } = await sb.from('posts').select('title,access').eq('id',postId).single();
   if(!post){ alert('게시글을 찾을 수 없습니다.'); return; }
   const title = post.title||'게시글';
+  const __postAccess = post.access||'all';
   const { data: nrs } = await sb.from('notification_role_settings').select('*').eq('event_key','new_post');
   const roleCheck = {}; (nrs||[]).forEach(r=>{ roleCheck[r.role_key]=!(r.enabled===false||r.enabled==='false'||r.enabled===0||r.enabled===null); });
   const { data: allUsers } = await sb.from('users').select('id,role,slack_member_id,is_master,is_vice_master,part').eq('active',true).neq('id',currentUser.id);
@@ -5248,6 +5250,7 @@ async function sendPostUpdateNotify(postId){
   window.__notifBatchLog = true;
   for(const u of allUsers){
     let grade='staff'; if(u.is_master)grade='master'; else if(u.is_vice_master)grade='vice'; else if(u.part)grade='dept'; else if(isManagerRole(u.role))grade='manager';
+    if(__postAccess==='manager' && grade==='staff') continue; // 매니저 전용 공지는 매장직원 제외
     const shouldSend = roleCheck[grade]!==undefined ? roleCheck[grade] : !!(NOTIF_ROLE_DEFAULTS['new_post']?.[NOTIF_ROLES.findIndex(r=>r.key===grade)]);
     if(!shouldSend) continue;
     await createNotification(u.id,'post_update',postId,'post',msg);
@@ -5272,6 +5275,9 @@ async function sendRoleBasedPostNotify(postId, title) {
 
   if (!allUsers?.length) return;
 
+  const { data: __pa } = await sb.from('posts').select('access').eq('id', postId).maybeSingle();
+  const __postAccess = __pa ? __pa.access : 'all';
+
   const msg = notifRender('new_post',{title:(title||'새 공지가 등록되었습니다')});
   let sent = 0;
   for (const u of allUsers) {
@@ -5281,6 +5287,9 @@ async function sendRoleBasedPostNotify(postId, title) {
     else if (u.is_vice_master) grade = 'vice';
     else if (u.part) grade = 'dept';
     else if (isManagerRole(u.role)) grade = 'manager';
+
+    // 열람 권한 반영: '매니저 이상' 공지는 매장직원(staff)에게 알림 금지
+    if (__postAccess === 'manager' && grade === 'staff') continue;
 
     // 권한별 알림 설정 체크
     const shouldSend = roleCheck[grade] !== undefined ? roleCheck[grade]
@@ -5378,14 +5387,15 @@ function startTestMode(role, store, label) {
   window.__realUser = {...currentUser};
 
   // currentUser를 선택한 권한으로 임시 교체
-  currentUser = {
-    ...currentUser,
-    role: role,
-    store: store,
-    is_master: false,
-    is_vice_master: (role === 'vice'),
-    part: (role === 'manager_a') ? '부서담당' : null
+  const __gmap = {
+    member:     {role:'staff',   is_master:false, is_vice_master:false, part:null},
+    manager:    {role:'manager', is_master:false, is_vice_master:false, part:null},
+    dept:       {role:'dept',    is_master:false, is_vice_master:false, part:(store&&store!=='부서담당'?store:'운영')},
+    sub_master: {role:'manager', is_master:false, is_vice_master:true,  part:null},
+    admin:      {role:'admin',   is_master:true,  is_vice_master:false, part:null}
   };
+  const __gm = __gmap[role] || __gmap.member;
+  currentUser = { ...currentUser, role: __gm.role, store: store, is_master: __gm.is_master, is_vice_master: __gm.is_vice_master, part: __gm.part };
 
   // 워터마크 배너
   let banner = document.getElementById('testModeBanner');
@@ -5421,35 +5431,7 @@ function applyTestModeUI() {
   // 3. 카테고리 재렌더
   renderCatNav();
 
-  // 4. 추가 강제 숨김 — 테스트 역할에 따라
-  const role = window.__testMode.role;
-  const show = (id, cond) => { const el = document.getElementById(id); if (el) el.style.display = cond ? '' : 'none'; };
-
-  // 현장 직원 (barista/pastry): 업무 신청, 업무 보고 전체 숨김
-  if (role === 'barista' || role === 'pastry') {
-    show('requestNav', false);      // 업무 신청 섹션
-    show('interviewNav', false);    // 업무 보고 섹션
-    show('adminNav', false);        // 관리 섹션
-    show('nav-scheduleConfirm', false);
-    show('nav-scheduleClose', false);
-    show('nav-scheduleSettings', false);
-  }
-
-  // 매니저: 관리 섹션 숨김
-  if (role === 'manager') {
-    show('adminNav', false);
-    show('nav-scheduleConfirm', false);
-    show('nav-scheduleClose', false);
-    show('nav-reqstats', false);
-    show('nav-reqadmin', false);
-  }
-
-  // 인사팀: 앱 관리 등 숨김
-  if (role === 'hr') {
-    show('nav-app', false);
-    show('nav-manualedit', false);
-    show('nav-perm', false);
-  }
+  // 메뉴 노출은 applyMenuPermissions(설정한 권한)에만 의존 — 하드코딩 강제숨김 제거
 }
 
 function exitTestMode() {
@@ -8885,6 +8867,9 @@ function hasPerm(permKey, u) {
   // 테스트 모드: PERM_DEFAULT 기준으로만 판단
   if (window.__testMode) {
     const idx = GRADES.indexOf(grade);
+    // 실제 설정(PERM_MAP)을 반영: 파트별 → 직위별 → 기본값 (총괄 자동허용/개인예외는 미적용)
+    if (u && u.part && PERM_MAP && PERM_MAP[permKey] && Object.prototype.hasOwnProperty.call(PERM_MAP[permKey], 'part_' + u.part)) return !!PERM_MAP[permKey]['part_' + u.part];
+    if (PERM_MAP && PERM_MAP[permKey] && Object.prototype.hasOwnProperty.call(PERM_MAP[permKey], grade)) return !!PERM_MAP[permKey][grade];
     return PERM_DEFAULT[permKey] ? !!PERM_DEFAULT[permKey][idx] : false;
   }
 
@@ -10461,7 +10446,7 @@ async function ivLoadAllowed(){ try{ const [a,e]=await Promise.all([sb.from('app
 function ivDefaultFull(u){ return !!(u && (u.is_master || isOperationsPart(u))); }
 function isInterviewFull(u){ u=u||currentUser; if(!u) return false; const id=String(u.id); if((window.__ivExcluded||[]).includes(id)) return false; return ivDefaultFull(u) || (window.__ivAllowed||[]).includes(id); }
 function ivAuthorIsFull(r){ if(!r) return false; const a=r.author||{}; return !!a.is_master || a.role==='admin' || a.part==='운영' || a.part==='운영팀' || (window.__ivAllowed||[]).includes(String(r.author_id)); }
-function canSeeInterview(r){ if(!currentUser||!r) return false; if(isInterviewFull()) return true; if(r.author_id&&String(r.author_id)===String(currentUser.id)) return true; const my=(currentUser.store||'').trim(); const rs=(r.store||(r.staff&&r.staff.store)||'').trim(); if(my&&rs===my&&!ivAuthorIsFull(r)) return true; return false; }
+function canSeeInterview(r){ if(!currentUser||!r) return false; if(isInterviewFull()) return true; if(r.author_id&&String(r.author_id)===String(currentUser.id)) return true; const my=(currentUser.store||'').trim(); const rs=(r.store||(r.staff&&r.staff.store)||'').trim(); if(my&&rs===my&&r.author&&!ivAuthorIsFull(r)) return true; return false; }
 function ivPermAuto(u){ return !!(u && (u.is_master || isOperationsPart(u))); }
 function ivPermMgr(){ if(!currentUser.is_master){ alert('총괄만 설정할 수 있습니다.'); return; } const rows=(window.__ivPeople||[]).filter(u=>u.active!==false).slice().sort((a,b)=>(ivDefaultFull(b)?1:0)-(ivDefaultFull(a)?1:0)).map(u=>{ const def=ivDefaultFull(u); const checked=isInterviewFull(u); const tag=u.is_master?'총괄':(isOperationsPart(u)?'운영파트':((window.__ivAllowed||[]).includes(String(u.id))?'예외':'')); const k=(String(u.name)+' '+String(u.store||'')+' '+String(u.part||'')).toLowerCase().replace(/"/g,''); return `<label class="ivperm-row" data-k="${k}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)"><input type="checkbox" class="ivperm-ck" data-id="${u.id}" data-def="${def?1:0}" ${checked?'checked':''}> <span style="flex:1">${esc(u.name)} <span style="font-size:11px;color:var(--th)">${esc(u.store||u.part||'')}</span></span><span style="font-size:10px;color:${def?'var(--gn)':'var(--th)'}">${tag}</span></label>`; }).join(''); const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='ivPermModal'; modal.style.zIndex='340'; modal.innerHTML=`<div class="modal-box" style="max-width:460px;width:94vw"><div class="modal-head"><b>면담 열람 권한 관리 (총괄 전용)</b><button onclick="document.getElementById('ivPermModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:66vh;overflow-y:auto"><input id="ivPermSearch" class="form-input" placeholder="이름·매장·파트 검색" oninput="ivPermFilter(this.value)" style="margin-bottom:10px" autocomplete="off"><p style="font-size:12px;color:var(--th);margin-bottom:10px">운영파트(코치 포함)·총괄은 <b>기본 포함</b>됩니다. 직무상 열람이 불필요한 인원은 <b>체크 해제</b>로 제외할 수 있습니다. 나머지는 체크로 추가합니다. (총괄만 수정)</p><div id="ivPermList">${rows||'<div style="color:var(--th);font-size:13px">대상 직원이 없습니다.</div>'}</div></div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('ivPermModal').remove()">취소</button><button class="btn-submit" onclick="ivPermSave()">저장</button></div></div>`; document.body.appendChild(modal); }
 function ivPermFilter(q){ q=(q||'').trim().toLowerCase(); document.querySelectorAll('#ivPermModal .ivperm-row').forEach(function(r){ r.style.display=(!q||(r.getAttribute('data-k')||'').indexOf(q)>=0)?'':'none'; }); }
@@ -10496,7 +10481,7 @@ async function renderInterviews(area) {
   const typeOpts   = opts.filter(o => o.category === 'type');
   const methodOpts = opts.filter(o => o.category === 'method');
   let rows = (listRes.data || []).filter(r => !r.staff || r.staff.active !== false);
-  if (!isInterviewFull()) rows = rows.filter(r => !ivAuthorIsFull(r));
+  if (!isInterviewFull()) rows = rows.filter(r => (r.author_id && String(r.author_id)===String(currentUser.id)) || (r.author && !ivAuthorIsFull(r))); // 운영파트 작성분·작성자불명 면담은 매니저 리스트에서 제외
 
   const prevStore  = window.__ivFilterStore  || '';
   const prevStaff  = window.__ivFilterStaff  || '';
