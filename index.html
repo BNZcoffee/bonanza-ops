@@ -416,7 +416,10 @@ textarea.form-input{min-height:120px;resize:vertical}
   .watermark { opacity: 0.06 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   body { background: #fff !important; }
   .detail-body { color: #000 !important; }
+  #globalWm{opacity:.13 !important;display:flex !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;color:#000 !important}
 }
+#globalWm{position:fixed;inset:-20%;z-index:9990;pointer-events:none;overflow:hidden;display:flex;flex-wrap:wrap;align-content:center;justify-content:center;gap:54px 42px;transform:rotate(-26deg);opacity:.05}
+#globalWm span{font-size:12px;font-weight:700;color:#5a4a36;white-space:nowrap;letter-spacing:.4px}
 /* 운영팀 가이드 */
 
 .gwrap{max-width:920px;margin:0 auto;padding:18px 18px 80px}
@@ -586,6 +589,7 @@ table.g-tbl th{background:var(--crm);font-weight:700}
       <div class="sidebar-label">운영 프로젝트</div>
       <button class="nav-btn" onclick="goPage('opsboard')" id="nav-opsboard"><i class="ti ti-layout-kanban"></i> 프로젝트 보드</button>
       <button class="nav-btn" onclick="goPage('opsguide')" id="nav-opsguide"><i class="ti ti-book-2"></i> 운영팀 가이드</button>
+      <button class="nav-btn" onclick="goPage('opsinterviews')" id="nav-opsinterviews" style="display:none"><i class="ti ti-lock"></i> 직원 면담(운영)</button>
     </div>
     <div class="sidebar-section" id="adminNav" style="display:none">
       <div class="sidebar-label">관리</div>
@@ -1655,6 +1659,10 @@ function goPage(page) {
     renderReqAdmin(area);
   } else if (page === 'interviews') {
     const nb = document.getElementById('nav-interviews');
+    if (nb) nb.classList.add('active');
+    renderInterviews(area);
+  } else if (page === 'opsinterviews') {
+    const nb = document.getElementById('nav-opsinterviews');
     if (nb) nb.classList.add('active');
     renderInterviews(area);
   } else if (page === 'interviewNew') {
@@ -8736,14 +8744,40 @@ function applyPwaIcon(logoUrl) {
 }
 
 // 메뉴 표시를 권한에 따라 제어
+async function initWatermark(){
+  if(window.__wmInit || !currentUser) return; window.__wmInit=true;
+  let ip='-';
+  try{ const r=await fetch('https://api.ipify.org?format=json',{cache:'no-store'}); const j=await r.json(); ip=(j&&j.ip)||'-'; }catch(e){ ip='-'; }
+  const n=new Date();
+  const t=n.getFullYear()+'-'+('0'+(n.getMonth()+1)).slice(-2)+'-'+('0'+n.getDate()).slice(-2)+' '+('0'+n.getHours()).slice(-2)+':'+('0'+n.getMinutes()).slice(-2);
+  window.__wmInfo={ name: currentUser.name||'', store: currentUser.store||'-', ip: ip, time: t };
+  renderGlobalWatermark();
+}
+function renderGlobalWatermark(){
+  if(!currentUser || !window.__wmInfo){ const e=document.getElementById('globalWm'); if(e) e.remove(); return; }
+  let el=document.getElementById('globalWm');
+  if(!el){ el=document.createElement('div'); el.id='globalWm'; document.body.appendChild(el); }
+  const i=window.__wmInfo;
+  const txt=(i.name+' · '+(i.store||'-')+' · '+i.ip+' · '+i.time+' · 무단 복사·외부 유출 금지');
+  el.innerHTML=new Array(160).fill('<span>'+esc(txt)+'</span>').join('');
+}
 function applyMenuPermissions() {
   const u = currentUser; if (!u) return;
   const show = (id, cond) => { const el = document.getElementById(id); if (el) el.style.display = cond ? '' : 'none'; };
   // 관리 섹션: 관리 관련 권한이 하나라도 있으면 표시
   const anyAdmin = hasPerm('staff_view') || hasPerm('notice_stats') || hasPerm('notif_setting') || hasPerm('app_manage') || hasPerm('manual_edit') || hasPerm('perm_setting');
   show('adminNav', anyAdmin);
-  show('opsNav', opsCanSee());
-  if(window.__ops && !window.__ops.__allowedLoaded && typeof opsLoadAllowed==='function'){ opsLoadAllowed().then(function(){ window.__ops.__allowedLoaded=true; const el=document.getElementById('opsNav'); if(el) el.style.display=opsCanSee()?'':'none'; }); }
+  const __applyOpsIv = function(){
+    const __full = (typeof isInterviewFull==='function') && isInterviewFull();
+    const __canOps = (typeof opsCanSee==='function') && opsCanSee();
+    show('opsNav', __canOps || __full);
+    show('nav-opsboard', __canOps);
+    show('nav-opsguide', __canOps);
+    show('nav-opsinterviews', __full);                 // 총괄 지정(full viewer)만 노출 = 블라인드
+  };
+  __applyOpsIv();
+  if(window.__ops && !window.__ops.__allowedLoaded && typeof opsLoadAllowed==='function'){ opsLoadAllowed().then(function(){ window.__ops.__allowedLoaded=true; __applyOpsIv(); }); }
+  if(typeof ivLoadAllowed==='function'){ ivLoadAllowed().then(function(){ __applyOpsIv(); const el=document.getElementById('nav-interviews'); if(el){ const __f=(typeof isInterviewFull==='function')&&isInterviewFull(); el.style.display=(hasPerm('interview_read') && !__f)?'':'none'; } }); }
   // 업무 신청 섹션
   show('requestNav', hasPerm('req_write') || hasPerm('req_process'));
   // 완료 내역: 매니저·관리자 전원 열람 (매장 일반 직원 제외)
@@ -8756,7 +8790,7 @@ function applyMenuPermissions() {
   const canSeeReports = hasPerm('report_read') || hasPerm('interview_read') || hasPerm('handover_read') || hasPerm('repair_read');
   show('interviewNav', canSeeReports);
   show('nav-reports',    hasPerm('report_read'));
-  show('nav-interviews', hasPerm('interview_read'));
+  show('nav-interviews', hasPerm('interview_read') && !((typeof isInterviewFull==='function')&&isInterviewFull()));
   show('nav-handover',   hasPerm('handover_read'));
   show('nav-repairs',    hasPerm('repair_read'));
   // 스케줄 관리 섹션: 매니저 이상 + 운영팀(작성·조회 가능 범위는 화면 내에서 추가 분기)
@@ -8782,6 +8816,7 @@ function applyMenuPermissions() {
   // 역할 배지
   const badge = document.getElementById('userBadgeEl');
   if (badge) badge.innerHTML = `<span class="role-tag">${GRADE_LABEL[userGrade(u)]||u.role}</span>${u.store} ${u.name}`;
+  try{ initWatermark(); }catch(e){}
 }
 
 // 사용자 → 등급
@@ -10454,7 +10489,7 @@ function isInterviewAdmin() {
 }
 // ── 면담 열람 권한 (운영프로젝트 기준: 총괄/운영팀 + 예외 지정) ──
 window.__ivAllowed = window.__ivAllowed || [];
-async function ivLoadAllowed(){ try{ const [a,e,sm]=await Promise.all([sb.from('app_settings').select('value').eq('key','interview_allowed_users').maybeSingle(), sb.from('app_settings').select('value').eq('key','interview_excluded_users').maybeSingle(), sb.from('app_settings').select('value').eq('key','iv_secure_mode').maybeSingle()]); const pa=a.data&&a.data.value; const pe=e.data&&e.data.value; window.__ivAllowed=(pa?((typeof pa==='string'?JSON.parse(pa):pa)||[]):[]).map(String); window.__ivExcluded=(pe?((typeof pe==='string'?JSON.parse(pe):pe)||[]):[]).map(String); const sv=sm&&sm.data&&sm.data.value; const __sraw=(sv==null)?'':String(sv).toLowerCase().replace(/"/g,'').trim(); window.__ivSecure=(sv===true||__sraw==='on'||__sraw==='true'||__sraw==='1'); }catch(err){ window.__ivAllowed=window.__ivAllowed||[]; window.__ivExcluded=window.__ivExcluded||[]; } }
+async function ivLoadAllowed(){ try{ const [a,e,sm]=await Promise.all([sb.from('app_settings').select('value').eq('key','interview_allowed_users').maybeSingle(), sb.from('app_settings').select('value').eq('key','interview_excluded_users').maybeSingle(), sb.from('app_settings').select('value').eq('key','iv_secure_mode').maybeSingle()]); const pa=a.data&&a.data.value; const pe=e.data&&e.data.value; window.__ivAllowed=(pa?((typeof pa==='string'?JSON.parse(pa):pa)||[]):[]).map(String); window.__ivExcluded=(pe?((typeof pe==='string'?JSON.parse(pe):pe)||[]):[]).map(String); const sv=sm&&sm.data&&sm.data.value; const __sraw=(sv==null)?'':String(sv).toLowerCase().replace(/"/g,'').trim(); window.__ivSecure=(__sraw!=='off' && __sraw!=='false' && __sraw!=='0'); }catch(err){ window.__ivAllowed=window.__ivAllowed||[]; window.__ivExcluded=window.__ivExcluded||[]; } }
 function ivDefaultFull(u){ return !!(u && (u.is_master || isOperationsPart(u))); }
 function isInterviewFull(u){ u=u||currentUser; if(!u) return false; const id=String(u.id); if((window.__ivExcluded||[]).includes(id)) return false; return ivDefaultFull(u) || (window.__ivAllowed||[]).includes(id); }
 function ivAuthorIsFull(r){ if(!r) return false; const a=r.author||{}; return !!a.is_master || a.role==='admin' || a.part==='운영' || a.part==='운영팀' || (window.__ivAllowed||[]).includes(String(r.author_id)); }
