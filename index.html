@@ -416,9 +416,9 @@ textarea.form-input{min-height:120px;resize:vertical}
   .watermark { opacity: 0.06 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   body { background: #fff !important; }
   .detail-body { color: #000 !important; }
-  #globalWm{opacity:.13 !important;display:flex !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;color:#000 !important}
+  #globalWm{opacity:.10 !important;display:flex !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;color:#000 !important}
 }
-#globalWm{position:fixed;inset:-20%;z-index:9990;pointer-events:none;overflow:hidden;display:flex;flex-wrap:wrap;align-content:center;justify-content:center;gap:54px 42px;transform:rotate(-26deg);opacity:.05}
+#globalWm{position:fixed;inset:-25%;z-index:9990;pointer-events:none;overflow:hidden;display:flex;flex-wrap:wrap;align-content:center;justify-content:center;gap:110px 88px;transform:rotate(-26deg);opacity:.035}
 #globalWm span{font-size:12px;font-weight:700;color:#5a4a36;white-space:nowrap;letter-spacing:.4px}
 /* 운영팀 가이드 */
 
@@ -1660,10 +1660,12 @@ function goPage(page) {
   } else if (page === 'interviews') {
     const nb = document.getElementById('nav-interviews');
     if (nb) nb.classList.add('active');
+    window.__ivScope = 'manager';
     renderInterviews(area);
   } else if (page === 'opsinterviews') {
     const nb = document.getElementById('nav-opsinterviews');
     if (nb) nb.classList.add('active');
+    window.__ivScope = 'ops';
     renderInterviews(area);
   } else if (page === 'interviewNew') {
     const nb = document.getElementById('nav-interviews');
@@ -8777,7 +8779,7 @@ function applyMenuPermissions() {
   };
   __applyOpsIv();
   if(window.__ops && !window.__ops.__allowedLoaded && typeof opsLoadAllowed==='function'){ opsLoadAllowed().then(function(){ window.__ops.__allowedLoaded=true; __applyOpsIv(); }); }
-  if(typeof ivLoadAllowed==='function'){ ivLoadAllowed().then(function(){ __applyOpsIv(); const el=document.getElementById('nav-interviews'); if(el){ const __f=(typeof isInterviewFull==='function')&&isInterviewFull(); el.style.display=(hasPerm('interview_read') && !__f)?'':'none'; } }); }
+  if(typeof ivLoadAllowed==='function'){ ivLoadAllowed().then(function(){ __applyOpsIv(); const el=document.getElementById('nav-interviews'); if(el){ const __f=(typeof isInterviewFull==='function')&&isInterviewFull(); el.style.display=(hasPerm('interview_read') || __f)?'':'none'; } }); }
   // 업무 신청 섹션
   show('requestNav', hasPerm('req_write') || hasPerm('req_process'));
   // 완료 내역: 매니저·관리자 전원 열람 (매장 일반 직원 제외)
@@ -8790,7 +8792,7 @@ function applyMenuPermissions() {
   const canSeeReports = hasPerm('report_read') || hasPerm('interview_read') || hasPerm('handover_read') || hasPerm('repair_read');
   show('interviewNav', canSeeReports);
   show('nav-reports',    hasPerm('report_read'));
-  show('nav-interviews', hasPerm('interview_read') && !((typeof isInterviewFull==='function')&&isInterviewFull()));
+  show('nav-interviews', hasPerm('interview_read') || ((typeof isInterviewFull==='function')&&isInterviewFull()));
   show('nav-handover',   hasPerm('handover_read'));
   show('nav-repairs',    hasPerm('repair_read'));
   // 스케줄 관리 섹션: 매니저 이상 + 운영팀(작성·조회 가능 범위는 화면 내에서 추가 분기)
@@ -10531,7 +10533,9 @@ async function renderInterviews(area) {
   const typeOpts   = opts.filter(o => o.category === 'type');
   const methodOpts = opts.filter(o => o.category === 'method');
   let rows = (__ivRows).filter(r => !r.staff || r.staff.active !== false);
-  if (!window.__ivSecure && !isInterviewFull()) rows = rows.filter(r => (r.author_id && String(r.author_id)===String(currentUser.id)) || (r.author && !ivAuthorIsFull(r))); // (비보안모드 전용) 서버RPC 사용 시엔 서버가 이미 격리
+  const __scope = window.__ivScope || 'manager';
+  if (__scope === 'ops') rows = rows.filter(r => r.author_id && ivAuthorIsFull(r));            // 운영 메뉴: 운영파트 작성분만
+  else rows = rows.filter(r => !(r.author_id && ivAuthorIsFull(r)));                              // 매니저 메뉴: 운영파트 작성분 완전 차단
 
   const prevStore  = window.__ivFilterStore  || '';
   const prevStaff  = window.__ivFilterStaff  || '';
