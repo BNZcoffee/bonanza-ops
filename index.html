@@ -4144,7 +4144,7 @@ async function deleteUser(id, name){
   }
   try { await sb.from('repair_records').update({author_id:null}).eq('author_id',id); } catch(e){}
   try { await sb.from('store_handovers').update({author_id:null}).eq('author_id',id); } catch(e){}
-  try { await sb.from('schedule_entries').update({user_id:null}).eq('user_id',id); } catch(e){}
+  try { await schDetach(id); } catch(e){}
   try { await sb.from('post_reads').delete().eq('user_id',id); } catch(e){}
   try { await sb.from('post_favorites').delete().eq('user_id',id); } catch(e){}
   try { await sb.from('notifications').delete().eq('user_id',id); } catch(e){}
@@ -6274,13 +6274,7 @@ async function sweepExpiredDrafts(){
     }
     // 스케줄 draft 7일 (자식행 먼저 정리)
     const cut7 = new Date(now - 7*864e5).toISOString();
-    const { data: oldSch } = await sb.from('schedules').select('id').eq('status','draft').lt('updated_at', cut7);
-    for (const ss of (oldSch||[])) {
-      await sb.from('schedule_entries').delete().eq('schedule_id', ss.id);
-      try { await sb.from('schedule_leave_balance').delete().eq('schedule_id', ss.id); } catch(e){}
-      try { await sb.from('schedule_admin_notes').delete().eq('schedule_id', ss.id); } catch(e){}
-      await sb.from('schedules').delete().eq('id', ss.id);
-    }
+    try { await schSweep(cut7); } catch(e){}
     // 근태 증빙 이미지 180일 경과 → 스토리지 파일 영구 삭제(기록은 보존, proof_url만 null)
     const cut180 = new Date(now - 180*864e5).toISOString();
     const { data: oldAtt } = await sb.from('attendance_issues').select('id, proof_url').not('proof_url','is',null).lt('created_at', cut180);
@@ -6324,7 +6318,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-07-23';   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-07-24';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -11689,22 +11683,148 @@ function canEditSchedule(sch) {
   return false;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 스케줄 보안 RPC(sch_*) 클라이언트 어댑터
+//  · 기본 ON. 서버 RLS Deny 이후에는 반드시 이 경로로만 접근.
+//  · app_settings.sch_secure_mode='off' 로 긴급 폴백(직접쿼리) 가능.
+//  · 토큰은 text (app_sessions.token=text). getSessionToken() 문자열 그대로 전달.
+// ═══════════════════════════════════════════════════════════════
+if (window.__schSecure === undefined) {
+  try { var __schv=(localStorage.getItem('sch_secure_mode')||'').toLowerCase(); window.__schSecure=(__schv!=='off'&&__schv!=='false'&&__schv!=='0'); }
+  catch(e){ window.__schSecure=true; }
+}
+async function schLoadSecure(){
+  try{
+    const { data } = await sb.from('app_settings').select('value').eq('key','sch_secure_mode').maybeSingle();
+    const sv=data&&data.value; const raw=(sv==null)?'':String(sv).toLowerCase().replace(/"/g,'').trim();
+    window.__schSecure=(raw!=='off'&&raw!=='false'&&raw!=='0');
+  }catch(e){}
+  return window.__schSecure;
+}
+function schTok(){ return getSessionToken(); }
+// 읽기
+async function schListAll(){
+  if(window.__schSecure){ const {data}=await sb.rpc('sch_list',{p_token:schTok()}); return data||[]; }
+  let q=sb.from('schedules').select('*, creator:users!schedules_created_by_fkey(name)').order('year',{ascending:false}).order('month',{ascending:false});
+  if(!isScheduleAdmin()&&!isScheduleHr()) q=q.eq('store',currentUser.store);
+  const {data}=await q; return data||[];
+}
+async function schGet(id){
+  if(window.__schSecure){ const {data}=await sb.rpc('sch_get',{p_token:schTok(),p_id:id}); return data||null; }
+  const {data}=await sb.from('schedules').select('*').eq('id',id).maybeSingle(); return data||null;
+}
+async function schGetBy(store,year,month){
+  if(window.__schSecure){ const {data}=await sb.rpc('sch_get_by',{p_token:schTok(),p_store:store,p_year:year,p_month:month}); return data||null; }
+  const {data}=await sb.from('schedules').select('*').eq('store',store).eq('year',year).eq('month',month).maybeSingle(); return data||null;
+}
+async function schEntries(sid){
+  if(window.__schSecure){ const {data}=await sb.rpc('sch_entries',{p_token:schTok(),p_schedule_id:sid}); return data||[]; }
+  const {data}=await sb.from('schedule_entries').select('*, user:users(name)').eq('schedule_id',sid).limit(10000); return data||[];
+}
+async function schBalance(sid){
+  if(window.__schSecure){ const {data}=await sb.rpc('sch_balance',{p_token:schTok(),p_schedule_id:sid}); return data||[]; }
+  const {data}=await sb.from('schedule_leave_balance').select('*, user:users(name,employment_type,pt_hours_per_day,retire_date)').eq('schedule_id',sid); return data||[];
+}
+async function schNotes(sid){
+  if(window.__schSecure){ const {data}=await sb.rpc('sch_notes',{p_token:schTok(),p_schedule_id:sid}); return data||[]; }
+  const {data}=await sb.from('schedule_admin_notes').select('*, author:users(name)').eq('schedule_id',sid).order('created_at',{ascending:true}); return data||[];
+}
+async function schHistory(sid){
+  if(window.__schSecure){ const {data}=await sb.rpc('sch_history',{p_token:schTok(),p_schedule_id:sid}); return data||[]; }
+  const {data}=await sb.from('schedule_history').select('*, saver:users!schedule_history_saved_by_fkey(name)').eq('schedule_id',sid).order('version',{ascending:false}); return data||[];
+}
+async function schConfirmQueue(){
+  if(window.__schSecure){ const {data}=await sb.rpc('sch_confirm_queue',{p_token:schTok()}); return data||[]; }
+  const {data}=await sb.from('schedules').select('*, creator:users!schedules_created_by_fkey(name)').eq('status','requested').order('requested_at',{ascending:true}); return data||[];
+}
+async function schCloseList(){
+  if(window.__schSecure){ const {data}=await sb.rpc('sch_close_list',{p_token:schTok()}); return data||[]; }
+  const {data}=await sb.from('schedules').select('*, closer:users!schedules_closed_by_fkey(name)').eq('status','confirmed').order('year',{ascending:false}).order('month',{ascending:false}); return data||[];
+}
+async function schUserEntries(userIds, types, dateMax, dateMin){
+  if(window.__schSecure){ const {data}=await sb.rpc('sch_user_entries',{p_token:schTok(),p_user_ids:(userIds?userIds.map(String):null),p_types:(types||null),p_date_max:(dateMax||null),p_date_min:(dateMin||null)}); return data||[]; }
+  let q=sb.from('schedule_entries').select('*, schedule:schedules(store,year,month,status)');
+  if(userIds) q=q.in('user_id',userIds); if(types) q=q.in('entry_type',types);
+  if(dateMax) q=q.lte('date',dateMax); if(dateMin) q=q.gte('date',dateMin);
+  const {data}=await q; return data||[];
+}
+async function schSupportIncoming(date,store){
+  if(window.__schSecure){ const {data}=await sb.rpc('sch_support_incoming',{p_token:schTok(),p_date:date,p_store:store}); return data||[]; }
+  const {data}=await sb.from('schedule_entries').select('user_id').eq('date',date).eq('support_store',store).not('user_id','is',null); return data||[];
+}
+async function schUserDay(uid,date){
+  if(window.__schSecure){ const {data}=await sb.rpc('sch_user_day',{p_token:schTok(),p_uid:uid,p_date:date}); return data||[]; }
+  const {data}=await sb.from('schedule_entries').select('shift_code, support_store, schedule:schedules(store)').eq('user_id',uid).eq('date',date).limit(1); return data||[];
+}
+// 쓰기
+async function schMasterUpsert(id,store,year,month,op,notes){
+  if(window.__schSecure){ return await sb.rpc('sch_master_upsert',{p_token:schTok(),p_id:(id||null),p_store:store,p_year:year,p_month:month,p_op:op,p_notes:notes}); }
+  if(!id){ return await sb.from('schedules').insert({store,year,month,operation_plan:op,special_notes:notes,status:'draft',created_by:currentUser.id,created_at:new Date().toISOString(),updated_at:new Date().toISOString()}).select().single(); }
+  return await sb.from('schedules').update({operation_plan:op,special_notes:notes,updated_at:new Date().toISOString()}).eq('id',id);
+}
+async function schSaveEntries(id,rows){
+  if(window.__schSecure) return await sb.rpc('sch_save_entries',{p_token:schTok(),p_id:id,p_rows:rows});
+  return {data:true,error:null,__legacy:true};
+}
+async function schBalanceUpsert(id,rows){
+  if(window.__schSecure) return await sb.rpc('sch_balance_upsert',{p_token:schTok(),p_id:id,p_rows:rows});
+  return await sb.from('schedule_leave_balance').upsert(rows.map(r=>Object.assign({schedule_id:id},r)),{onConflict:'schedule_id,user_id'});
+}
+async function schStatus(id,action,reason){
+  if(window.__schSecure) return await sb.rpc('sch_status',{p_token:schTok(),p_id:id,p_action:action,p_reason:(reason||null)});
+  const now=new Date().toISOString(); let upd={updated_at:now};
+  if(action==='request'||action==='reconfirm'){ upd.status='requested'; upd.requested_at=now; upd.requested_by=currentUser.id; if(action==='reconfirm'&&reason!=null) upd.reconfirm_memo=reason; }
+  else if(action==='cancel_request'){ upd.status='draft'; upd.requested_at=null; upd.requested_by=null; }
+  else if(action==='confirm'){ upd.status='confirmed'; upd.confirmed_at=now; upd.confirmed_by=currentUser.id; }
+  else if(action==='reject'){ upd.status='rejected'; upd.reject_reason=reason; }
+  else if(action==='temp_close'){ upd.temp_closed_at=now; upd.temp_close_reason=reason; upd.temp_closed_by=currentUser.id; }
+  else if(action==='finalize'){ upd.status='confirmed'; upd.closed_at=now; upd.temp_closed_at=null; }
+  else if(action==='hr_check'){ upd.hr_checked_at=now; upd.hr_checked_by=currentUser.id; }
+  else if(action==='cancel_hr'){ upd.hr_checked_at=null; upd.hr_checked_by=null; }
+  return await sb.from('schedules').update(upd).eq('id',id);
+}
+async function schSetCloseDays(id,days,allClosed){
+  if(window.__schSecure) return await sb.rpc('sch_set_close_days',{p_token:schTok(),p_id:id,p_days:days,p_all:!!allClosed});
+  return await sb.from('schedules').update({close_days:days,closed_at:((allClosed||(days&&days.length))?new Date().toISOString():null),closed_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',id);
+}
+async function schHistoryAdd(id,note){
+  if(window.__schSecure) return await sb.rpc('sch_history_add',{p_token:schTok(),p_id:id,p_note:note});
+  return {data:true,error:null,__legacy:true};
+}
+async function schNoteAdd(id,body){
+  if(window.__schSecure) return await sb.rpc('sch_note_add',{p_token:schTok(),p_id:id,p_body:body});
+  return await sb.from('schedule_admin_notes').insert({schedule_id:id,author_id:currentUser.id,body});
+}
+async function schNoteDelete(nid){
+  if(window.__schSecure) return await sb.rpc('sch_note_delete',{p_token:schTok(),p_note_id:nid});
+  return await sb.from('schedule_admin_notes').delete().eq('id',nid);
+}
+async function schDelete(id){
+  if(window.__schSecure) return await sb.rpc('sch_delete',{p_token:schTok(),p_id:id});
+  return {data:true,error:null,__legacy:true};
+}
+async function schDetach(uid){
+  if(window.__schSecure) return await sb.rpc('sch_detach_user',{p_token:schTok(),p_user_id:uid});
+  return await sb.from('schedule_entries').update({user_id:null}).eq('user_id',uid);
+}
+async function schSweep(cutoffIso){
+  if(window.__schSecure) return await sb.rpc('sch_sweep_drafts',{p_token:schTok(),p_cutoff:cutoffIso});
+  return {data:true,error:null,__legacy:true};
+}
+
 // ── 목록 ──────────────────────────────────────────────────
 async function renderSchedules(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
   const isAdmin = isScheduleAdmin();
 
-  const [storeRes, schRes] = await Promise.all([
+  await schLoadSecure();
+  const [storeRes, schRows] = await Promise.all([
     sb.from('users').select('store').eq('active',true).neq('role','admin'),
-    (async()=>{
-      let q = sb.from('schedules').select('*, creator:users!schedules_created_by_fkey(name)').order('year',{ascending:false}).order('month',{ascending:false});
-      if (!isAdmin && !isScheduleHr()) q = q.eq('store', currentUser.store);
-      return q;
-    })()
+    schListAll()
   ]);
 
   const stores = [...new Set((storeRes.data||[]).map(u=>u.store).filter(Boolean))].sort();
-  const schList = schRes.data || [];
+  const schList = schRows;
 
   const now = new Date();
   const defStore = isAdmin || isScheduleHr() ? '' : currentUser.store;
@@ -11823,32 +11943,17 @@ async function confirmDeleteSchedule(id, store, year, month) {
   // 2단계: 최종 확인
   if (!confirm(`"${label}"을 삭제합니까?\n삭제하면 복구할 수 없습니다.`)) return;
 
-  // 존재 여부 확인
-  const { data: chk } = await sb.from('schedules').select('id').eq('id', id).maybeSingle();
+  // 존재/권한 확인 (서버 RPC)
+  const chk = await schGet(id);
   if (!chk) { alert('이미 삭제된 스케줄이거나 접근 권한이 없습니다.'); goPage('schedules'); return; }
 
-  // 연쇄 삭제 — 각 테이블 개별 처리
-  const del = async (table, col) => {
-    try { await sb.from(table).delete().eq(col, id); } catch(e) {}
-  };
-  await del('schedule_entries',      'schedule_id');
-  await del('schedule_leave_balance','schedule_id');
-  await del('schedule_history',      'schedule_id');
-
-  const { error, count } = await sb.from('schedules').delete().eq('id', id);
+  // 연쇄 삭제 (서버가 자식행까지 정리 · canDelete 규칙 서버 강제)
+  const { error } = await schDelete(id);
   if (error) {
-    // RLS 정책으로 막히면 권한 오류 — Supabase에서 직접 설정 필요
-    const msg = error.message.includes('policy')
-      ? `삭제 권한 오류\nSupabase 대시보드 → Authentication → RLS 정책에서\nschedules 테이블의 DELETE 정책을 확인하세요.\n\n오류: ${error.message}`
+    const msg = (error.message||'').includes('forbidden')
+      ? '삭제 권한이 없습니다. (총괄·인사팀 항상 / 부총괄·운영 인사점검 전 / 매니저·작성자 컨펌 전만 가능)'
       : `삭제 오류: ${error.message}`;
     alert(msg);
-    return;
-  }
-
-  // 삭제 성공 확인
-  const { data: still } = await sb.from('schedules').select('id').eq('id', id).maybeSingle();
-  if (still) {
-    alert('삭제가 적용되지 않았습니다.\nSupabase RLS 정책에서 DELETE 권한을 허용해주세요.');
     return;
   }
 
@@ -11869,8 +11974,8 @@ async function goToScheduleEdit() {
 }
 
 async function openScheduleById(id) {
-  const { data } = await sb.from('schedules').select('*').eq('id', id).single();
-  if (!data) return;
+  const data = await schGet(id);
+  if (!data) { alert('스케줄을 열람할 권한이 없거나 존재하지 않습니다.'); return; }
   // 매장이 바뀌면 퇴사 목록 초기화 (다른 매장 퇴사 목록이 남지 않도록)
   if (data.store !== window.__schStore || data.year !== window.__schYear || data.month !== window.__schMonth) {
     window.__retireList = [];
@@ -11892,8 +11997,8 @@ async function renderScheduleEdit(area) {
 
   // 스케줄 마스터 조회 또는 신규
   if (!curSchedule || curSchedule.store!==store || curSchedule.year!==year || curSchedule.month!==month) {
-    const { data } = await sb.from('schedules').select('*').eq('store',store).eq('year',year).eq('month',month).maybeSingle();
-    curSchedule = data;
+    await schLoadSecure();
+    curSchedule = await schGetBy(store, year, month);
   }
 
   const isNew = !curSchedule;
@@ -11905,8 +12010,8 @@ async function renderScheduleEdit(area) {
     sb.from('users').select('id,name,store,role,employment_type,hire_date,retire_date,active,pt_work_hours,pt_hours_per_day,pt_weekly_days').eq('store',store).order('name'),
     sb.from('store_shift_codes').select('*').eq('store',store).eq('active',true).order('sort_order'),
     sb.from('leave_types').select('*').order('sort_order'),
-    curSchedule ? sb.from('schedule_entries').select('*').eq('schedule_id', curSchedule.id).limit(10000) : Promise.resolve({data:[]}),
-    curSchedule ? sb.from('schedule_leave_balance').select('*, user:users(name)').eq('schedule_id', curSchedule.id) : Promise.resolve({data:[]})
+    curSchedule ? schEntries(curSchedule.id).then(d=>({data:d})) : Promise.resolve({data:[]}),
+    curSchedule ? schBalance(curSchedule.id).then(d=>({data:d})) : Promise.resolve({data:[]})
   ]);
 
   let staffList = (staffRes.data||[]).filter(u=>u.active!==false || (u.retire_date && u.retire_date >= `${year}-${String(month).padStart(2,'0')}-01`));
@@ -13052,12 +13157,7 @@ async function loadCrossStoreEntries(userId, year, month) {
   const monthEnd   = `${year}-${String(month).padStart(2,'0')}-${String(new Date(year,month,0).getDate()).padStart(2,'0')}`;
 
   // 다른 매장 스케줄에서 이 직원이 지원근무로 등록된 entries 조회
-  const { data: crossEntries } = await sb.from('schedule_entries')
-    .select('date, entry_type, shift_code, support_store, support_time, is_extra, schedule:schedules(store,year,month)')
-    .eq('user_id', userId)
-    .eq('is_extra', true)
-    .gte('date', monthStart)
-    .lte('date', monthEnd);
+  const crossEntries = (await schUserEntries([userId], null, monthEnd, monthStart)).filter(e => e.is_extra === true);
 
   const map = {};
   (crossEntries||[]).forEach(e => {
@@ -13218,10 +13318,8 @@ async function saveMemoField(type) {
   // DB 저장
   if (curSchedule?.id) {
     const field = type === 'op' ? 'operation_plan' : 'special_notes';
-    await sb.from('schedules').update({
-      [field]: val, updated_at: new Date().toISOString()
-    }).eq('id', curSchedule.id);
     if (curSchedule) curSchedule[field] = val;
+    await schMasterUpsert(curSchedule.id, curSchedule.store, curSchedule.year, curSchedule.month, curSchedule.operation_plan||null, curSchedule.special_notes||null);
   }
 
   // 뷰 업데이트
@@ -13245,8 +13343,8 @@ function cacheMemo(type, val) {
   __memoSaveTimer[type] = setTimeout(async () => {
     const field = type === 'op' ? 'operation_plan' : 'special_notes';
     try {
-      await sb.from('schedules').update({ [field]: val, updated_at: new Date().toISOString() }).eq('id', curSchedule.id);
       if (curSchedule) curSchedule[field] = val;
+      await schMasterUpsert(curSchedule.id, curSchedule.store, curSchedule.year, curSchedule.month, curSchedule.operation_plan||null, curSchedule.special_notes||null);
     } catch(e) { console.warn('메모 임시저장 실패:', e); }
   }, 800);
 }
@@ -13264,8 +13362,7 @@ async function renderScheduleAdminNotes() {
     box.innerHTML = `<div style="background:var(--cr);border:0.5px dashed var(--crd);border-radius:10px;padding:12px;font-size:12px;color:var(--th)"><i class="ti ti-lock"></i> 관리자 전용 메모 — 스케줄을 한 번 저장하면 사용할 수 있습니다.</div>`;
     return;
   }
-  const { data: notes } = await sb.from('schedule_admin_notes')
-    .select('*, author:users(name)').eq('schedule_id', curSchedule.id).order('created_at', {ascending:true});
+  const notes = await schNotes(curSchedule.id);
   const list = (notes||[]).map(n => `
     <div style="padding:8px 10px;border-bottom:0.5px solid var(--crm)">
       <div style="font-size:11px;color:var(--th);margin-bottom:2px"><b style="color:var(--tm)">${n.author?.name||'?'}</b> · ${fmtDateTime(n.created_at).slice(5,16)}
@@ -13286,14 +13383,14 @@ async function postScheduleAdminNote() {
   const inp = document.getElementById('schAdminNoteInput');
   const body = (inp?.value||'').trim();
   if (!body || !curSchedule?.id) return;
-  const { error } = await sb.from('schedule_admin_notes').insert({ schedule_id: curSchedule.id, author_id: currentUser.id, body });
+  const { error } = await schNoteAdd(curSchedule.id, body);
   if (error) { alert('메모 저장 오류: ' + error.message); return; }
   if (inp) inp.value = '';
   renderScheduleAdminNotes();
 }
 async function deleteScheduleAdminNote(id) {
   if (!confirm('이 메모를 삭제할까요?')) return;
-  await sb.from('schedule_admin_notes').delete().eq('id', id);
+  await schNoteDelete(id);
   renderScheduleAdminNotes();
 }
 
@@ -13407,19 +13504,10 @@ async function saveScheduleDraft() {
   const now = new Date().toISOString();
 
   let scheduleId = curSchedule?.id;
-  if (!scheduleId) {
-    const { data, error } = await sb.from('schedules').insert({
-      store, year, month, operation_plan: opPlan, special_notes: notes,
-      status: 'draft', created_by: currentUser.id, created_at: now, updated_at: now
-    }).select().single();
+  {
+    const { data, error } = await schMasterUpsert(scheduleId||null, store, year, month, opPlan, notes);
     if (error) { alert('저장 오류: ' + error.message); return; }
-    scheduleId = data.id;
-    curSchedule = data;
-  } else {
-    await sb.from('schedules').update({
-      operation_plan: opPlan, special_notes: notes, updated_at: now,
-      status: curSchedule.status==='rejected' ? 'draft' : curSchedule.status
-    }).eq('id', scheduleId);
+    if (data && data.id) { curSchedule = data; scheduleId = data.id; }
   }
 
   // entries 저장: 현재 DOM의 모든 select값 수집
@@ -13490,23 +13578,28 @@ async function persistScheduleEntries(scheduleId) {
   rows.forEach(r => __dedup.set(r.slot_key + '|' + r.date, r));
   const rowsU = [...__dedup.values()];
 
-  // (1) 현재 화면의 셀을 UPSERT (복합키 충돌 시 갱신)
-  if (rowsU.length > 0) {
-    for (let i=0; i<rowsU.length; i+=500) {
-      const { error } = await sb.from('schedule_entries')
-        .upsert(rowsU.slice(i, i+500), { onConflict: 'schedule_id,slot_key,date' });
-      if (error) { alert('스케줄 저장 오류: ' + error.message); throw error; }
+  if (window.__schSecure) {
+    // 서버 RPC가 UPSERT + 화면에서 지워진 셀 삭제까지 한 번에 처리
+    const { error } = await schSaveEntries(scheduleId, rowsU);
+    if (error) { alert('스케줄 저장 오류: ' + error.message); throw error; }
+  } else {
+    // (1) 현재 화면의 셀을 UPSERT (복합키 충돌 시 갱신)
+    if (rowsU.length > 0) {
+      for (let i=0; i<rowsU.length; i+=500) {
+        const { error } = await sb.from('schedule_entries')
+          .upsert(rowsU.slice(i, i+500), { onConflict: 'schedule_id,slot_key,date' });
+        if (error) { alert('스케줄 저장 오류: ' + error.message); throw error; }
+      }
     }
-  }
-
-  // (2) 화면에서 비워진(삭제된) 셀에 해당하는 기존 행만 골라 삭제 — 전체 삭제 아님
-  const { data: existing } = await sb.from('schedule_entries')
-    .select('id, slot_key, date').eq('schedule_id', scheduleId).limit(10000);
-  const staleIds = (existing||[])
-    .filter(e => !presentKeys.has((e.slot_key||'') + '|' + e.date))
-    .map(e => e.id);
-  for (let i=0; i<staleIds.length; i+=200) {
-    await sb.from('schedule_entries').delete().in('id', staleIds.slice(i, i+200));
+    // (2) 화면에서 비워진(삭제된) 셀에 해당하는 기존 행만 골라 삭제 — 전체 삭제 아님
+    const { data: existing } = await sb.from('schedule_entries')
+      .select('id, slot_key, date').eq('schedule_id', scheduleId).limit(10000);
+    const staleIds = (existing||[])
+      .filter(e => !presentKeys.has((e.slot_key||'') + '|' + e.date))
+      .map(e => e.id);
+    for (let i=0; i<staleIds.length; i+=200) {
+      await sb.from('schedule_entries').delete().in('id', staleIds.slice(i, i+200));
+    }
   }
 
   // 집계 계산 후 schedule_leave_balance 갱신
@@ -13522,7 +13615,7 @@ async function recalcLeaveBalance(scheduleId) {
 
   const [{data: holidays}, {data: entries}, {data: staffList}] = await Promise.all([
     sb.from('holidays').select('date').gte('date',monthStart).lte('date',monthEnd),
-    sb.from('schedule_entries').select('*').eq('schedule_id', scheduleId).limit(10000),
+    schEntries(scheduleId).then(d=>({data:d})),
     sb.from('users').select('id,name,store,hire_date,retire_date,employment_type,pt_hours_per_day').eq('store',store)
   ]);
   const holidaySet = new Set((holidays||[]).map(h=>h.date));
@@ -13530,11 +13623,10 @@ async function recalcLeaveBalance(scheduleId) {
   // 이전 달 schedule_id 찾기 (이월 자동 연결용)
   let prevMonth = month-1, prevYear = year;
   if (prevMonth===0) { prevMonth=12; prevYear=year-1; }
-  const { data: prevSch } = await sb.from('schedules').select('id').eq('store',store).eq('year',prevYear).eq('month',prevMonth).maybeSingle();
+  const prevSch = await schGetBy(store, prevYear, prevMonth);
   let prevBalances = [];
   if (prevSch) {
-    const { data } = await sb.from('schedule_leave_balance').select('*').eq('schedule_id', prevSch.id);
-    prevBalances = data || [];
+    prevBalances = await schBalance(prevSch.id);
   }
 
   for (const staff of (staffList||[])) {
@@ -13565,17 +13657,16 @@ async function recalcLeaveBalance(scheduleId) {
     const carryOut = (carryIn - carryUsed) + (baseQuota - baseUsed);
     // 음수 방지하지 않음(잔존휴무 등 실제 값 그대로 기록, 경고는 별도 처리)
 
-    await sb.from('schedule_leave_balance').upsert({
-      schedule_id: scheduleId, user_id: staff.id,
-      carry_in: carryIn, carry_used: carryUsed,
+    await schBalanceUpsert(scheduleId, [{
+      user_id: staff.id, carry_in: carryIn, carry_used: carryUsed,
       base_quota: baseQuota, base_used: baseUsed, carry_out: carryOut
-    }, {onConflict:'schedule_id,user_id'});
+    }]);
   }
 }
 
 // ── 경고 검증 ─────────────────────────────────────────────
 async function checkLeaveWarnings(scheduleId, store, year, month) {
-  const { data: balances } = await sb.from('schedule_leave_balance').select('*, user:users(name,retire_date)').eq('schedule_id', scheduleId);
+  const balances = await schBalance(scheduleId);
   const warnings = [];
   (balances||[]).forEach(b => {
     // 이월 잔여 있는데 퇴사일이 더 빠른 경우 (잔존 휴무 발생)
@@ -13601,10 +13692,7 @@ async function checkLeaveWarnings(scheduleId, store, year, month) {
 async function cancelScheduleConfirm() {
   if (!curSchedule || curSchedule.status !== 'requested') return;
   if (!confirm('컨펌 요청을 취소하고 작성중 상태로 되돌릴까요?')) return;
-  const now = new Date().toISOString();
-  await sb.from('schedules').update({
-    status: 'draft', requested_at: null, requested_by: null, updated_at: now
-  }).eq('id', curSchedule.id);
+  await schStatus(curSchedule.id, 'cancel_request');
   await saveScheduleHistory(curSchedule.id, '컨펌 요청 취소');
   alert('컨펌 요청이 취소되었습니다. 계속 수정할 수 있습니다.');
   openScheduleById(curSchedule.id);
@@ -13628,11 +13716,8 @@ async function requestScheduleReconfirm() {
   await saveScheduleDraft();
   if (!curSchedule) return;
 
-  // 상태를 requested로 변경
-  await sb.from('schedules').update({
-    status: 'requested',
-    requested_at: new Date().toISOString()
-  }).eq('id', curSchedule.id);
+  // 상태를 requested로 변경 (서버 RPC)
+  await schStatus(curSchedule.id, 'request');
 
   // 히스토리 기록
   await saveScheduleHistory(curSchedule.id, label);
@@ -13653,10 +13738,7 @@ async function requestScheduleReconfirm() {
 
 async function requestScheduleConfirm() {
   if (!curSchedule) { await saveScheduleDraft(); if (!curSchedule) return; }
-  const now = new Date().toISOString();
-  await sb.from('schedules').update({
-    status: 'requested', requested_at: now, requested_by: currentUser.id, updated_at: now
-  }).eq('id', curSchedule.id);
+  await schStatus(curSchedule.id, 'request');
 
   // 운영팀 + 인사팀 + 총괄/부총괄에게 앱 알림 발송
   const notifMsg = `[스케줄 컨펌 요청] ${window.__schStore} ${window.__schYear}년 ${window.__schMonth}월 스케줄이 컨펌 요청되었습니다.`;
@@ -14048,13 +14130,10 @@ async function renderBalancePanel() {
   const [albRes, slbRes, entriesRes] = await Promise.all([
     sb.from('annual_leave_balance').select('user_id, adjust, init_used, expire_used').in('user_id', staffIds),
     curSchedule?.id
-      ? sb.from('schedule_leave_balance').select('*').eq('schedule_id', curSchedule.id)
+      ? schBalance(curSchedule.id).then(d=>({data:d}))
       : Promise.resolve({data:[]}),
     // 오늘까지 도래한 연차 사용 (인원별 연차잔여용)
-    sb.from('schedule_entries').select('user_id,entry_type,date')
-      .in('user_id', staffIds)
-      .in('entry_type',['연차','반차','오전반차','오후반차'])
-      .lte('date', today)
+    schUserEntries(staffIds, ['연차','반차','오전반차','오후반차'], today, null).then(d=>({data:d}))
   ]);
 
   const albMap = Object.fromEntries((albRes.data||[]).map(b=>[b.user_id,b]));
@@ -14283,12 +14362,8 @@ async function submitReconfirm() {
   window.__suppressSaveAlert = false;
   if (!curSchedule) return;
 
-  // 상태를 requested로 변경 + 메모 저장
-  await sb.from('schedules').update({
-    status: 'requested',
-    requested_at: new Date().toISOString(),
-    reconfirm_memo: memo || null
-  }).eq('id', curSchedule.id);
+  // 상태를 requested로 변경 + 재컨펌 메모 저장 (서버 RPC)
+  await schStatus(curSchedule.id, 'reconfirm', memo || null);
 
   // 히스토리 기록 (컨펌 요청만 기록)
   await saveScheduleHistory(curSchedule.id, label + (memo ? ': ' + memo : ''));
@@ -14547,20 +14622,17 @@ async function loadOtherStoreSchedule() {
 
   cont.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
 
-  // 해당 매장 스케줄 조회
-  const { data: schList } = await sb.from('schedules')
-    .select('*')
-    .eq('store', store).eq('year', year).eq('month', month)
-    .maybeSingle();
+  // 해당 매장 스케줄 조회 (서버 RPC — 타 매장은 컨펌완료만 반환)
+  const schList = await schGetBy(store, year, month);
 
   if (!schList) {
-    cont.innerHTML = `<div style="padding:20px;color:var(--th)">${store} ${year}년 ${month}월 스케줄이 없습니다.</div>`;
+    cont.innerHTML = `<div style="padding:20px;color:var(--th)">${store} ${year}년 ${month}월 컨펌 완료된 스케줄이 없습니다.</div>`;
     return;
   }
 
   // entries + 근무조 조회
   const [entriesRes, shiftRes, staffRes, holRes] = await Promise.all([
-    sb.from('schedule_entries').select('*, user:users(name)').eq('schedule_id', schList.id),
+    schEntries(schList.id).then(d=>({data:d})),
     sb.from('store_shift_codes').select('*').eq('store', store).eq('active', true).order('sort_order'),
     sb.from('users').select('id,name,role,hire_date').eq('store', store).eq('active', true).order('hire_date'),
     sb.from('holidays').select('date,name')
@@ -14648,14 +14720,8 @@ async function showLeaveBalance(scheduleId) {
     alert('임시저장 후 집계를 확인할 수 있습니다.');
     return;
   }
-  const { data: balances } = await sb.from('schedule_leave_balance')
-    .select('*, user:users(name, employment_type, pt_hours_per_day)')
-    .eq('schedule_id', scheduleId)
-    .order('user(name)');
-
-  const { data: entries } = await sb.from('schedule_entries')
-    .select('user_id, entry_type, shift_code, date')
-    .eq('schedule_id', scheduleId);
+  const balances = await schBalance(scheduleId);
+  const entries = await schEntries(scheduleId);
 
   // 직원별 근무일수 계산
   const workMap = {};
@@ -14960,12 +15026,8 @@ async function applySupportDetail() {
   const curStore = window.__schStore;
 
   if (userId && dateStr && store !== curStore) {
-    // 소속 매장 스케줄에서 해당 날짜 entry 조회
-    const { data: existingEntries } = await sb.from('schedule_entries')
-      .select('id, entry_type, shift_code, schedule:schedules(store)')
-      .eq('user_id', userId)
-      .eq('date', dateStr)
-      .eq('is_extra', false);  // 소속 매장 정규 entry만
+    // 소속 매장 스케줄에서 해당 날짜 entry 조회 (서버 RPC)
+    const existingEntries = (await schUserEntries([userId], null, dateStr, dateStr)).filter(e => e.is_extra === false);
 
     const homeEntry = (existingEntries||[]).find(e =>
       e.schedule?.store && e.schedule.store !== curStore
@@ -14975,22 +15037,11 @@ async function applySupportDetail() {
       // 현재 스케줄 메모리에서도 체크 (임시저장 전)
       const homeKey = userId + '_' + dateStr;
       const memEntry = curScheduleEntries[homeKey];
-      // 현재 편집 중인 매장이 소속 매장이 아닌 경우 → 소속 매장 DB entry 확인
-      const { data: homeSchList } = await sb.from('schedules')
-        .select('id, store')
-        .eq('store', (existingEntries?.[0]?.schedule?.store || store))
-        .eq('year', window.__schYear)
-        .eq('month', window.__schMonth)
-        .maybeSingle();
+      // 현재 편집 중인 매장이 소속 매장이 아닌 경우 → 소속 매장 DB entry 확인 (서버 RPC)
+      const homeSchList = await schGetBy((existingEntries?.[0]?.schedule?.store || store), window.__schYear, window.__schMonth);
       // 소속 매장(파견되는 직원의 매장)에 기존 근무 입력 여부
       if (homeSchList) {
-        const { data: homeEnt } = await sb.from('schedule_entries')
-          .select('id, entry_type, shift_code')
-          .eq('user_id', userId)
-          .eq('date', dateStr)
-          .eq('schedule_id', homeSchList.id)
-          .eq('is_extra', false)
-          .maybeSingle();
+        const homeEnt = (await schEntries(homeSchList.id)).find(e => e.user_id===userId && e.date===dateStr && e.is_extra===false);
         if (homeEnt && homeEnt.entry_type !== '' && homeEnt.shift_code !== null) {
           const existing = homeEnt.shift_code || homeEnt.entry_type || '';
           if (!confirm(`소속 매장 스케줄에 이미 "${existing}" 근무가 입력되어 있습니다.
@@ -15016,9 +15067,7 @@ async function applySupportDetail() {
 // ── 컨펌 대기 목록 (운영팀) ───────────────────────────────
 async function renderScheduleConfirmList(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  const { data: list } = await sb.from('schedules')
-    .select('*, creator:users!schedules_created_by_fkey(name)')
-    .eq('status','requested').order('requested_at',{ascending:true});
+  const list = await schConfirmQueue();
 
   const cards = (list||[]).map(s => `
     <div class="post-card" onclick="openScheduleById(${s.id})">
@@ -15042,9 +15091,7 @@ async function tempCloseSchedule() {
   const reason = prompt('임시 마감 사유를 입력하세요.\n(예: 퇴사 협의중 · 사직서/연차 상신 대기 등)');
   if (reason === null) return;
   const now = new Date().toISOString();
-  const { error } = await sb.from('schedules').update({
-    temp_closed_at: now, temp_close_reason: reason||null, temp_closed_by: currentUser.id, updated_at: now
-  }).eq('id', curSchedule.id);
+  const { error } = await schStatus(curSchedule.id, 'temp_close', reason||null);
   if (error) { alert('임시 마감 오류: ' + error.message); return; }
   curSchedule.temp_closed_at = now;
   alert('임시 마감 처리되었습니다.\n행정 처리 완료 후 [최종 마감 완료]로 확정하세요.');
@@ -15054,9 +15101,7 @@ async function finalizeSchedule() {
   if (!curSchedule?.id) return;
   if (!confirm('이 스케줄을 최종 마감 완료(확정)로 전환할까요?')) return;
   const now = new Date().toISOString();
-  const { error } = await sb.from('schedules').update({
-    status: 'confirmed', closed_at: now, temp_closed_at: null, updated_at: now
-  }).eq('id', curSchedule.id);
+  const { error } = await schStatus(curSchedule.id, 'finalize');
   if (error) { alert('최종 마감 오류: ' + error.message); return; }
   curSchedule.status = 'confirmed'; curSchedule.closed_at = now; curSchedule.temp_closed_at = null;
   alert('최종 마감 완료로 확정되었습니다.');
@@ -15067,9 +15112,7 @@ async function confirmScheduleApprove() {
   if (!curSchedule) return;
   if (!confirm('이 스케줄을 컨펌 완료 처리할까요?')) return;
   const now = new Date().toISOString();
-  await sb.from('schedules').update({
-    status:'confirmed', confirmed_at: now, confirmed_by: currentUser.id, updated_at: now
-  }).eq('id', curSchedule.id);
+  await schStatus(curSchedule.id, 'confirm');
 // 💡 [추가] 운영팀 최종 승인 컨펌 완료 시점에 퇴사일자를 DB에 일괄 저장합니다.
   try {
     const todayStr = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10); // KST 오늘 날짜
@@ -15094,9 +15137,7 @@ async function confirmScheduleApprove() {
 
   // 지원 근무 배치 알림 — 지원받는 매장 매니저(겸직 포함)에게 1회씩
   try {
-    const { data: __sup } = await sb.from('schedule_entries')
-      .select('date, support_store, user:users(name)').eq('schedule_id', curSchedule.id)
-      .not('support_store','is',null).limit(10000);
+    const __sup = (await schEntries(curSchedule.id)).filter(e => e.support_store);
     const __by = {};
     (__sup||[]).forEach(e=>{ if(e.support_store && e.support_store!==curSchedule.store){ (__by[e.support_store]=__by[e.support_store]||[]).push((e.user&&e.user.name||'')+'('+String(e.date).slice(5)+')'); } });
     for(const st of Object.keys(__by)){
@@ -15120,10 +15161,7 @@ async function confirmScheduleReject() {
   if (!curSchedule) return;
   const reason = prompt('반려 사유를 입력하세요.');
   if (reason === null) return;
-  const now = new Date().toISOString();
-  await sb.from('schedules').update({
-    status:'rejected', reject_reason: reason, updated_at: now
-  }).eq('id', curSchedule.id);
+  await schStatus(curSchedule.id, 'reject', reason);
 
   const { data: req } = await sb.from('users').select('id').eq('id', curSchedule.requested_by).maybeSingle();
   if (req) await createNotification(req.id, 'schedule_rejected', curSchedule.id, 'schedule',
@@ -15135,7 +15173,7 @@ async function confirmScheduleReject() {
 
 // 스케줄 entries 기준 퇴사일자 → users.retire_date 자동 반영 (양방향 동기화의 정방향)
 async function syncRetireDatesFromSchedule(scheduleId) {
-  const { data: sch } = await sb.from('schedules').select('*').eq('id', scheduleId).single();
+  const sch = await schGet(scheduleId);
   if (!sch) return;
   // schedule_entries에 별도 퇴사일 필드는 없으므로, users.retire_date 직접 입력 UI는
   // 직원관리 화면에서 그대로 사용. 여기서는 스케줄 확정 시점에 이미 입력된 retire_date를
@@ -15349,16 +15387,8 @@ ${uniqueApprovalDays.join(', ')}
     if (!confirm(needsMsg)) return;
   }
 
-  const now = new Date().toISOString();
-  // 마감 저장 시 스케줄 상태도 업데이트
-  // 매니저가 마감 후 수정했다면 → status를 draft로 내려서 재컨펌 요청 필요
-  const updatePayload = {
-    close_days: closedDays,
-    closed_at:  allClosed ? now : (closedDays.length > 0 ? now : null),
-    closed_by:  currentUser.id,
-    updated_at: now
-  };
-  await sb.from('schedules').update(updatePayload).eq('id', curSchedule.id);
+  // 마감(close_days) 저장 — 서버 RPC
+  await schSetCloseDays(curSchedule.id, closedDays, allClosed);
 
   document.getElementById('closeModal')?.remove();
   alert('마감이 저장되었습니다.');
@@ -15368,9 +15398,7 @@ ${uniqueApprovalDays.join(', ')}
 
 async function renderScheduleCloseList(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  const { data: list } = await sb.from('schedules')
-    .select('*, closer:users!schedules_closed_by_fkey(name)')
-    .eq('status','confirmed').order('year',{ascending:false}).order('month',{ascending:false});
+  const list = await schCloseList();
 
   const cards = (list||[]).map(s => `
     <div class="post-card" onclick="openScheduleById(${s.id})">
@@ -15403,12 +15431,7 @@ async function hrCheckScheduleGuard() {
 async function cancelHrCheck() {
   if (!curSchedule || !isScheduleAdmin()) return;
   if (!confirm('인사팀 점검 완료를 취소할까요?취소 후 수정이 가능해집니다.')) return;
-  const now = new Date().toISOString();
-  await sb.from('schedules').update({
-    hr_checked_at: null,
-    hr_checked_by: null,
-    updated_at: now
-  }).eq('id', curSchedule.id);
+  await schStatus(curSchedule.id, 'cancel_hr');
   await saveScheduleHistory(curSchedule.id, '인사점검 취소');
   alert('인사팀 점검이 취소되었습니다.');
   openScheduleById(curSchedule.id);
@@ -15416,7 +15439,7 @@ async function cancelHrCheck() {
 
 async function hrCheckSchedule() {
   if (!curSchedule) return;
-  await sb.from('schedules').update({ hr_checked_at: new Date().toISOString(), hr_checked_by: currentUser.id }).eq('id', curSchedule.id);
+  await schStatus(curSchedule.id, 'hr_check');
   alert('인사팀 점검 완료로 표시되었습니다.');
   openScheduleById(curSchedule.id);
 }
@@ -15755,6 +15778,7 @@ async function captureScheduleImage() {
 // ── 스케줄 히스토리 저장 ──────────────────────────────────
 async function saveScheduleHistory(scheduleId, note) {
   try {
+    if (window.__schSecure) { await schHistoryAdd(scheduleId, note); return; }
     // 현재 버전 번호 조회
     const { data: lastVer } = await sb.from('schedule_history')
       .select('version').eq('schedule_id', scheduleId)
@@ -15781,10 +15805,7 @@ async function saveScheduleHistory(scheduleId, note) {
 
 // ── 히스토리 열람 UI — 변경 셀 diff 표시 ──────────────────
 async function openScheduleHistoryModal(scheduleId) {
-  const { data: history } = await sb.from('schedule_history')
-    .select('*, saver:users!schedule_history_saved_by_fkey(name)')
-    .eq('schedule_id', scheduleId)
-    .order('version', {ascending: false});
+  const history = await schHistory(scheduleId);
 
   const old = document.getElementById('schHistoryModal');
   if (old) old.remove();
@@ -16588,12 +16609,7 @@ async function loadMyLeaveInfo() {
 
   // 스케줄에서 연차/반차 사용 내역 조회 (오늘 이전 도래한 날짜만 차감)
   const today = todayKST();
-  const { data: entries } = await sb.from('schedule_entries')
-    .select('date, entry_type, schedule:schedules(store, year, month, status)')
-    .eq('user_id', currentUser.id)
-    .in('entry_type', ['연차','반차','오전반차','오후반차'])
-    .lte('date', today)   // ← 오늘까지 도래한 날짜만
-    .order('date', {ascending: false});
+  const entries = await schUserEntries([currentUser.id], ['연차','반차','오전반차','오후반차'], today, null);
 
   // 사용 집계 계산 (연차=1, 반차=0.5)
   let scheduleUsed = 0;
@@ -16621,9 +16637,7 @@ async function loadMyLeaveInfo() {
   const { data: userInfo } = await sb.from('users').select('hire_date').eq('id', currentUser.id).single();
   const hireDate   = userInfo?.data?.hire_date || currentUser.hire_date || '';
   // 무급휴가/결근 누적일수
-  const { data: unpaidEnt } = await sb.from('schedule_entries')
-    .select('date, entry_type, note').eq('user_id', currentUser.id)
-    .in('entry_type', ['무급휴가','결근']).order('date');
+  const unpaidEnt = await schUserEntries([currentUser.id], ['무급휴가','결근'], null, null);
   const unpaidDates2   = (unpaidEnt||[]).map(e=>e.date).filter(Boolean);
   const excludeDays2   = unpaidDates2.length;
   const { data: __hol2 } = await sb.from('holidays').select('date').gte('date', `${new Date().getFullYear()-2}-01-01`);
@@ -16783,11 +16797,7 @@ function calcAnnualLeave(hireDateStr, baseDateStr, absenceDates, holidaySet) {
  */
 async function calcUsedLeave(userId) {
   const today = todayKST();
-  const { data } = await sb.from('schedule_entries')
-    .select('entry_type, date')
-    .eq('user_id', userId)
-    .in('entry_type', ['연차','반차','오전반차','오후반차'])
-    .lte('date', today);
+  const data = await schUserEntries([userId], ['연차','반차','오전반차','오후반차'], today, null);
   let used = 0;
   (data||[]).forEach(e => { used += e.entry_type==='연차' ? 1 : 0.5; });
   return used;
@@ -16818,19 +16828,14 @@ async function loadStaffLeaveBalance(userList) {
   const albMap = Object.fromEntries((albData||[]).map(b=>[b.user_id,b]));
 
   // 오늘까지 도래한 연차/반차 스케줄 사용분
-  const { data: entries } = await sb.from('schedule_entries')
-    .select('user_id, entry_type, date')
-    .in('user_id', ids)
-    .in('entry_type', ['연차','반차','오전반차','오후반차'])
-    .lte('date', today);
+  const entries = await schUserEntries(ids, ['연차','반차','오전반차','오후반차'], today, null);
   const usedMap = {};
   (entries||[]).forEach(e => {
     usedMap[e.user_id] = (usedMap[e.user_id]||0) + (e.entry_type==='연차' ? 1 : 0.5);
   });
 
   // 결근/무급(연차 발생 역산) + 공휴일 배치 로드 (직원별 반복쿼리 대신 1회)
-  const { data: absEnt } = await sb.from('schedule_entries')
-    .select('user_id, date').in('user_id', ids).in('entry_type', ['결근','무급휴가']);
+  const absEnt = await schUserEntries(ids, ['결근','무급휴가'], null, null);
   const absMap = {};
   (absEnt||[]).forEach(e => { (absMap[e.user_id] = absMap[e.user_id] || []).push(e.date); });
   const { data: holS } = await sb.from('holidays').select('date').gte('date', `${new Date().getFullYear()-2}-01-01`);
@@ -17250,7 +17255,7 @@ async function attReloadFormUsers(){
   const { data: base } = await uq;
   let merged = (base||[]).slice();
   if(!isAttAdmin() && date){
-    const { data: sup } = await sb.from('schedule_entries').select('user_id').eq('date',date).eq('support_store',currentUser.store).not('user_id','is',null);
+    const sup = await schSupportIncoming(date, currentUser.store);
     const supIds=[...new Set((sup||[]).map(e=>e.user_id))].filter(id=>!merged.some(u=>u.id===id));
     if(supIds.length){ const {data:su}=await sb.from('users').select('id,name,store').in('id',supIds); (su||[]).forEach(u=>merged.push(Object.assign({},u,{__support:true}))); }
   }
@@ -17263,7 +17268,7 @@ async function attLoadShift(){
   const date=document.getElementById('att_date').value; const uid=document.getElementById('att_user').value;
   window.__attFormShift=null;
   if(!date||!uid){ box.innerHTML='발생일자·직원 선택 시 해당일 근무조가 자동 표시됩니다.'; return; }
-  const { data: ent } = await sb.from('schedule_entries').select('shift_code, support_store, schedule:schedules(store)').eq('user_id',uid).eq('date',date).limit(1);
+  const ent = await schUserDay(uid, date);
   const e=(ent||[])[0];
   if(e && e.shift_code){
     const wstore = e.support_store || e.schedule?.store || '';
