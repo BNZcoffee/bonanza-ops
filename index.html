@@ -4566,61 +4566,72 @@ async function sendRemind(postId){
 // 🚨 [자동 리마인드 엔진] 설정창 스위치 확인 후 3일 미확인 직원에게 자동 발송
 async function checkAndSend3DayReminders() {
   try {
-    // 1. 설정창(두 번째 사진)에서 자동 리마인드 스위치가 켜져 있는지 확인
     const { data: ns } = await sb.from('notification_settings').select('remind_unread').single();
-    if (!ns || !ns.remind_unread) return; // 스위치가 꺼져있으면 조용히 종료
-    { const __h=new Date(Date.now()+9*3600*1000).getUTCHours(); if(__h<9) return; } // 오전 9시(KST) 이후에만 발송
+    if (!ns || !ns.remind_unread) return;
 
-    // 2. 하루에 한 번만 실행되도록 방어막 설정 (중복 발송 방지)
-    const today = new Date().toDateString();
-    if (localStorage.getItem('last_auto_remind_date') === today) return; 
+    // KST 기준 오늘/시각
+    const kstNow = new Date(Date.now() + 9*3600*1000);
+    if (kstNow.getUTCHours() < 9) return;                 // 오전 9시(KST) 이후에만
+    const kstToday = kstNow.toISOString().slice(0,10);    // YYYY-MM-DD(KST)
 
-    // 3. 3일 전 시간 계산
-    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    // ③ 중복 발송 방지 — '서버 공용' 일일 잠금(기기별 localStorage로는 기기 수만큼 폭탄)
+    if (localStorage.getItem('last_auto_remind_date') === kstToday) return;   // 빠른 로컬 가드
+    const { data: lockRow } = await sb.from('app_settings').select('value').eq('key','last_auto_remind_date').maybeSingle();
+    const lockVal = (lockRow && lockRow.value!=null) ? String(lockRow.value).replace(/"/g,'').trim() : '';
+    if (lockVal === kstToday) { localStorage.setItem('last_auto_remind_date', kstToday); return; }
+    // 즉시 선점(동시 접속 기기 폭탄 방지) — 보내기 전에 잠금
+    await sb.from('app_settings').upsert({ key:'last_auto_remind_date', value:kstToday }, { onConflict:'key' });
+    localStorage.setItem('last_auto_remind_date', kstToday);
 
-    // 4. 3일이 지난 공지사항 모두 찾기
+    // 3일 지난 공지
+    const threeDaysAgo = new Date(Date.now() - 3*24*3600*1000).toISOString();
     const { data: oldNotices } = await sb.from('posts')
       .select('id, title, require_read, access')
       .eq('status', 'published')
       .lte('created_at', threeDaysAgo);
-    
     if (!oldNotices || oldNotices.length === 0) return;
-    const __notices = oldNotices.filter(n=>n.require_read!==false); // 확인 체크 미사용(박제용) 공지는 리마인드 제외
-    window.__notifBatchLog = true;
+    const __notices = oldNotices.filter(n => n.require_read !== false);   // 박제용(확인체크 미사용) 제외
+    if (!__notices.length) return;
 
-    // 5. 첫 번째 사진의 완벽한 필터링 로직 적용 (admin, hr, 본사 직원 제외)
-    const { data: activeUsers } = await sb.from('users').select('id,role,is_master,is_vice_master,part,slack_member_id').eq('active', true);
-    const fieldStaffs = (activeUsers||[]).filter(u => { const __g=userGrade(u); return __g==='manager' || __g==='staff'; }); // 임원(ceo/executive_director)·부총괄·부서담당·총괄·admin/hr 전부 제외
-    
+    // ② 대상: 매니저/현장직원만 — 총괄·부총괄·admin/hr·임원·본사/운영 파트 100% 제외
+    const { data: activeUsers } = await sb.from('users').select('id,role,is_master,is_vice_master,part,store,slack_member_id').eq('active', true);
+    const fieldStaffs = (activeUsers||[]).filter(u => {
+      if (u.is_master || u.is_vice_master) return false;
+      if (u.role==='admin' || u.role==='hr' || u.role==='ceo' || u.role==='executive_director') return false;
+      if (u.part) return false;                                  // 부서담당/운영파트 제외
+      const g = userGrade(u);
+      return g==='manager' || g==='staff';
+    });
     if (fieldStaffs.length === 0) return;
+    const byId = {}; fieldStaffs.forEach(u => { byId[u.id]=u; });
 
-    let sentCount = 0;
-
-    // 6. 각 공지별로 안 읽은 현장 직원 찾아내서 슬랙 쏘기
+    // 사용자별 미확인 공지 집계 (공지당 개별발송 X → 사용자당 1건으로 통합)
+    const userUnread = {};
     for (const notice of __notices) {
       const { data: reads } = await sb.from('post_reads').select('user_id').eq('post_id', notice.id);
-      const readUserIds = new Set((reads || []).map(r => r.user_id));
-      // 열람 권한 반영: '매니저 이상' 공지는 매장직원(staff) 제외 → 매니저 전용 제목 노출 방지
-      const noticeRecips = (notice.access==='manager') ? fieldStaffs.filter(u=>userGrade(u)==='manager') : fieldStaffs;
-      const unreadStaffs = noticeRecips.filter(staff => !readUserIds.has(staff.id));
-
-      for (const staff of unreadStaffs) {
-        const msg = `[자동 리마인드] '${notice.title}' 공지를 아직 확인하지 않으셨습니다.`;
-        await createNotification(staff.id, 'notice', notice.id, 'post', msg); // 앱 내 알림
-        
-        if (staff.slack_member_id && typeof sendSlackDM === 'function') {
-           const link = 'https://bnzcoffee.github.io/bonanza-ops/?post=' + notice.id;
-           await sendSlackDM(staff.slack_member_id, '🚨 ' + msg + '\n' + link); // 슬랙 알림
-        }
-        sentCount++;
-      }
+      const readSet = new Set((reads||[]).map(r => r.user_id));
+      // ① 매니저 전용 공지는 매니저에게만 (현장직원 제외)
+      const recips = (notice.access==='manager') ? fieldStaffs.filter(u => userGrade(u)==='manager') : fieldStaffs;
+      recips.forEach(u => { if (!readSet.has(u.id)) { (userUnread[u.id]=userUnread[u.id]||[]).push(notice); } });
     }
 
+    window.__notifBatchLog = true;
+    let sentCount = 0;
+    for (const uid in userUnread) {
+      const u = byId[uid]; if (!u) continue;
+      const list = userUnread[uid]; const cnt = list.length; const first = list[0];
+      const msg = (cnt===1)
+        ? `[미확인 공지] '${first.title}' 공지를 아직 확인하지 않으셨습니다.`
+        : `[미확인 공지] 아직 확인하지 않은 공지가 ${cnt}건 있습니다. (예: '${first.title}' 외 ${cnt-1}건)`;
+      await createNotification(u.id, 'notice', first.id, 'post', msg);
+      if (u.slack_member_id && typeof sendSlackDM === 'function') {
+        const link = 'https://bnzcoffee.github.io/bonanza-ops/?post=' + first.id;
+        await sendSlackDM(u.slack_member_id, '🔔 ' + msg + '\n' + link);
+      }
+      sentCount++;
+    }
     window.__notifBatchLog = false;
-    // 발송 완료 후 오늘 날짜 도장 찍기 (내일 다시 실행됨)
-    localStorage.setItem('last_auto_remind_date', today);
-    if (sentCount > 0){ console.log(`자동 리마인드 ${sentCount}건 발송 완료`); try{ await logNotifSend('reminder_auto','post',null,'미확인 자동 리마인드', sentCount, '자동(시스템)'); }catch(e){} }
-
+    if (sentCount > 0){ console.log('자동 리마인드 '+sentCount+'명 발송'); try{ await logNotifSend('reminder_auto','post',null,'미확인 자동 리마인드(사용자당 1건)', sentCount, '자동(시스템)'); }catch(e){} }
   } catch (error) {
     window.__notifBatchLog = false;
     console.error('자동 리마인드 실행 중 오류:', error);
