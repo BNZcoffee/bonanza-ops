@@ -903,9 +903,9 @@ async function doLogin() {
   if (!hire) { err.textContent = '입사일을 선택해 주세요.'; return; }
   if (!pw)   { err.textContent = '비밀번호를 입력해 주세요.'; return; }
 
-  // 이름 + 입사일로 조회
+  // 이름 + 입사일로 조회 (민감 컬럼 제외 — 로그인 판정에 필요한 안전 컬럼만)
   const { data: rows, error } = await sb.from('users')
-    .select('*')
+    .select('id,name,hire_date,retire_date,active,pw_set,code')
     .eq('name', name)
     .eq('hire_date', hire);
 
@@ -1229,6 +1229,8 @@ async function saveGuideTemplate(){
 
 async function loginAs(user) {
   currentUser = user;
+  // 보안 RPC 배포 여부 조기 감지(포스트 직접쿼리 폴백 대비)
+  try{ if(typeof poLoadSecure==='function') poLoadSecure(); }catch(e){}
   // 최종 로그인 일시 업데이트 (비동기, 오류 무시)
   sb.from('users').update({last_login_at: new Date().toISOString()}).eq('id', user.id).then(() => {});
   // 마지막 로그인 일시 기록 (비동기, 실패해도 로그인 진행)
@@ -1331,13 +1333,12 @@ async function loadCats() {
     // 안내 게시글 자동 생성
     const { data: newCat } = await sb.from('categories').select('id').eq('name','기능 오류 접수').single();
     if (newCat) {
-      await sb.from('posts').insert({
+      await poSave(null, {
         category_id: newCat.id,
         title: '기능 오류 접수 안내',
         body: `이 앱은 보난자커피 운영 관리를 위한 웹 앱입니다.\n\n웹 앱의 특성상 모든 기능을 완벽하게 지원하기 어렵고, 사용 환경(브라우저, 기기)에 따라 일부 기능이 다르게 동작할 수 있습니다.\n\n사용 중 구동되어야 하는 기능에 문제가 있다면, 아래 댓글로 접수해주세요.\n\n📌 접수 시 꼭 적어주세요:\n• 문제가 발생한 메뉴 이름 (예: 스케줄 작성, 공지 열람 등)\n• 어떤 증상인지 (예: 버튼 눌러도 반응 없음, 저장이 안 됨 등)\n• 사용하신 기기/브라우저 (예: 아이폰 사파리, 갤럭시 크롬 등)\n\n가급적 빠르게 확인 후 개선하겠습니다. 감사합니다.`,
         access: 'all',
         comments_on: true,
-        author_id: currentUser.id,
         status: 'published'
       });
     }
@@ -1431,13 +1432,9 @@ async function updateNotifDot() {
   try {
     const week = new Date(Date.now() - 7*864e5).toISOString();
     
-    // 1. 단순하게 posts 가져오기
-    const { data: posts, error: postErr } = await sb.from('posts')
-      .select('id, category_id, require_read')
-      .gte('created_at', week)
-      .eq('status', 'published');
-      
-    if (postErr) throw postErr;
+    // 1. 열람 가능한 공지만 (서버 RPC — 팀원은 매니저전용 공지 미포함)
+    const allVis = await poList(null, null, 300);
+    const posts = (allVis||[]).filter(p => p.status==='published' && p.created_at >= week);
     if (!posts) return;
 
     const { data: myReads } = await sb.from('post_reads').select('post_id').eq('user_id', currentUser.id);
@@ -1500,17 +1497,14 @@ async function updateNotifDot() {
 async function updateDraftBadge(){
   const b = document.getElementById('draftBadge');
   if (!b||!currentUser) return;
-  const {data} = await sb.from('posts').select('id').in('status',['draft','scheduled']).eq('author_id',currentUser.id);
+  const data = await poMyDrafts();
   b.style.display = (data&&data.length) ? '' : 'none';
 }
 async function checkScheduled(){
   if (!currentUser||currentUser.role!=='admin') return;
   const now = new Date().toISOString();
-  const {data} = await sb.from('posts').select('id').eq('status','scheduled').lte('scheduled_at',now);
-  if (data&&data.length) {
-    for (const p of data) await sb.from('posts').update({status:'published',created_at:now}).eq('id',p.id);
-    updateNotifDot();
-  }
+  await poPublishScheduled();
+  updateNotifDot();
 }
 
 function switchCat(id, name) {
@@ -1562,6 +1556,118 @@ function canWrite() {
   if (!currentUser) return false;
   const cat = allCats.find(c => c.id === currentCatId);
   return canWriteCatObj(cat);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// posts(공지/매뉴얼) 보안 RPC(po_*) 클라이언트 어댑터
+//  · 기본 ON. 서버 RLS Deny 이후에는 반드시 이 경로로만 접근.
+//  · app_settings.po_secure_mode='off' 로 긴급 폴백. 토큰 text.
+// ═══════════════════════════════════════════════════════════════
+if (window.__poSecure === undefined) {
+  try { var __pov=(localStorage.getItem('po_secure_mode')||'').toLowerCase(); window.__poSecure=(__pov!=='off'&&__pov!=='false'&&__pov!=='0'); }
+  catch(e){ window.__poSecure=true; }
+}
+async function poLoadSecure(){
+  try{ const {data}=await sb.from('app_settings').select('value').eq('key','po_secure_mode').maybeSingle();
+    const sv=data&&data.value; const raw=(sv==null)?'':String(sv).toLowerCase().replace(/"/g,'').trim();
+    window.__poSecure=(raw!=='off'&&raw!=='false'&&raw!=='0'); }catch(e){}
+  // po_* RPC 미배포(SQL 실행 전)면 자동으로 직접쿼리 폴백 → 배포 시점 무관하게 안전
+  if(window.__poSecure && !window.__poProbed){
+    try{ const {error}=await sb.rpc('po_list',{p_token:poTok(),p_category:-1,p_search:null,p_limit:1});
+      if(error && /Could not find the function|does not exist|schema cache/i.test(error.message||'')) window.__poSecure=false;
+      window.__poProbed=true;
+    }catch(e){}
+  }
+  return window.__poSecure;
+}
+function poTok(){ return getSessionToken(); }
+async function poList(categoryId, search, limit){
+  if(window.__poSecure){ const {data}=await sb.rpc('po_list',{p_token:poTok(),p_category:(categoryId==null?null:categoryId),p_search:(search||null),p_limit:(limit||500)}); return data||[]; }
+  let q=sb.from('posts').select('*, categories(name), users(name, store, part, role)');
+  if(categoryId!=null) q=q.eq('category_id',categoryId);
+  if(search){ const e=search.replace(/[%,()]/g,' '); q=q.or(`title.ilike.%${e}%,body.ilike.%${e}%`); }
+  const {data}=await q.order('created_at',{ascending:false}).range(0,(limit||500)-1);
+  return (data||[]).filter(canSee);
+}
+async function poGet(id){
+  if(window.__poSecure){ const {data}=await sb.rpc('po_get',{p_token:poTok(),p_id:id}); return data||null; }
+  const {data}=await sb.from('posts').select('*, categories(name), users(name, store, part, role)').eq('id',id).single();
+  return (data && canSee(data))?data:null;
+}
+async function poByIds(ids){
+  if(!ids||!ids.length) return [];
+  if(window.__poSecure){ const {data}=await sb.rpc('po_by_ids',{p_token:poTok(),p_ids:ids}); return data||[]; }
+  const {data}=await sb.from('posts').select('id,title,access,categories(name)').in('id',ids);
+  return (data||[]).filter(canSee);
+}
+async function poMyDrafts(){
+  if(window.__poSecure){ const {data}=await sb.rpc('po_my_drafts',{p_token:poTok()}); return data||[]; }
+  const {data}=await sb.from('posts').select('*,categories(name)').in('status',['draft','scheduled']).eq('author_id',currentUser.id).order('updated_at',{ascending:false});
+  return data||[];
+}
+async function poSave(id, payload){
+  if(window.__poSecure){ const {data,error}=await sb.rpc('po_save',{p_token:poTok(),p_id:(id||null),p_payload:payload}); return {data,error}; }
+  if(id){ return await sb.from('posts').update(payload).eq('id',id); }
+  return await sb.from('posts').insert(payload).select().single();
+}
+async function poSetAccess(ids, access){
+  if(window.__poSecure) return await sb.rpc('po_set_access',{p_token:poTok(),p_ids:ids,p_access:access});
+  return await sb.from('posts').update({access}).in('id',ids);
+}
+async function poTouch(id){
+  if(window.__poSecure) return await sb.rpc('po_touch',{p_token:poTok(),p_id:id});
+  return await sb.from('posts').update({updated_at:new Date().toISOString()}).eq('id',id);
+}
+async function poDelete(id){
+  if(window.__poSecure) return await sb.rpc('po_delete',{p_token:poTok(),p_id:id});
+  return await sb.from('posts').delete().eq('id',id);
+}
+async function poDeleteByCategory(catId){
+  if(window.__poSecure) return await sb.rpc('po_delete_by_category',{p_token:poTok(),p_category:catId});
+  return await sb.from('posts').delete().eq('category_id',catId);
+}
+async function poPublishScheduled(){
+  if(window.__poSecure) return await sb.rpc('po_publish_scheduled',{p_token:poTok()});
+  const now=new Date().toISOString();
+  const {data}=await sb.from('posts').select('id').eq('status','scheduled').lte('scheduled_at',now);
+  if(data) for(const p of data) await sb.from('posts').update({status:'published',created_at:now}).eq('id',p.id);
+  return {data:true,error:null};
+}
+async function poSweep(cutoffIso){
+  if(window.__poSecure) return await sb.rpc('po_sweep_drafts',{p_token:poTok(),p_cutoff:cutoffIso});
+  return {data:true,error:null,__legacy:true};
+}
+async function poDetach(uid){
+  if(window.__poSecure) return await sb.rpc('po_detach_user',{p_token:poTok(),p_user_id:uid});
+  return await sb.from('posts').update({author_id:null}).eq('author_id',uid);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// users 민감정보(PII) 어댑터 — 민감 컬럼은 서버에서만 노출
+//  · usr_list_admin: 관리자만 전체(민감 포함). 비관리자는 안전 컬럼 목록으로 폴백.
+//  · usr_full: 본인/관리자만 1건 전체. RPC 미배포(구버전)면 직접쿼리 폴백.
+// ═══════════════════════════════════════════════════════════════
+async function usrListStaff(){
+  try{
+    const { data, error } = await sb.rpc('usr_list_admin', { p_token: getSessionToken() });
+    if(!error && Array.isArray(data)){
+      if(data.length) return data;                       // 관리자: 민감 포함 전체
+      const { data:safe } = await sb.from('users')       // 비관리자: 민감 제외 안전 컬럼만
+        .select('id,name,code,store,role,part,is_master,is_vice_master,hire_date,retire_date,active,employment_type,sub_stores,email,pt_work_hours,pt_hours_per_day,pt_weekly_days')
+        .order('code');
+      return safe||[];
+    }
+  }catch(e){}
+  const { data } = await sb.from('users').select('*').order('code');   // 구버전 폴백
+  return data||[];
+}
+async function usrFull(userId){
+  try{
+    const { data, error } = await sb.rpc('usr_full', { p_token: getSessionToken(), p_user_id: userId });
+    if(!error) return data||null;
+  }catch(e){}
+  const { data } = await sb.from('users').select('*').eq('id',userId).single();
+  return data||null;
 }
 
 // ── PAGES ─────────────────────────────────────────
@@ -1736,13 +1842,10 @@ async function renderBoard(area, opts) {
   const __limit = (__page + 1) * BOARD_PAGE;
   area.innerHTML = `<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>`;
   const q = (document.getElementById('boardSearch')?.value || '').trim().toLowerCase();
-  let __bq = sb.from('posts')
-    .select('*, categories(name), users(name, store, part, role)')
-    .eq('category_id', currentCatId);
-  if (q) { const esc = q.replace(/[%,()]/g,' '); __bq = __bq.or(`title.ilike.%${esc}%,body.ilike.%${esc}%`); }
-  const { data: posts } = await __bq.order('created_at', {ascending: false}).range(0, __limit - 1);
-  const __fetchedFull = (posts || []).length >= __limit;   // 원본 조회가 꽉 찼으면 더 있을 수 있음
-  const filtered = (posts || []).filter(p => canSee(p));
+  await poLoadSecure();
+  const postsRaw = await poList(currentCatId, q||null, __limit);
+  const __fetchedFull = (postsRaw || []).length >= __limit;   // 상한까지 꽉 찼으면 더 있을 수 있음
+  const filtered = postsRaw || [];   // po_list 가 서버단에서 이미 열람권 필터
   const week = new Date(Date.now() - 7*24*60*60*1000).toISOString();
 
   const catTabs = visibleCats().map(c =>
@@ -1807,8 +1910,8 @@ async function renderBoard(area, opts) {
 
 // ── POST DETAIL ───────────────────────────────────
 async function openPostById(id) {
-  const { data } = await sb.from('posts').select('*, categories(name), users(name, store, part, role)').eq('id',id).single();
-  if (!data || !canSee(data)) return;
+  const data = await poGet(id);
+  if (!data) return;
   currentPost = data;
   // 게시글의 카테고리로 currentCatId 동기화 (전체보기·검색 등 어디서 열어도 정확히 판단)
   if (data.category_id) {
@@ -2053,7 +2156,7 @@ let readListHtml = '';
   // 참조문서 표시
   let refHtml = '';
   if (p.ref_post_ids && p.ref_post_ids.length) {
-    const { data: refs } = await sb.from('posts').select('id,title,access').in('id', p.ref_post_ids);
+    const refs = await poByIds(p.ref_post_ids);
     const visibleRefs = (refs||[]).filter(rp => canSee(rp));
     if (visibleRefs.length) {
       refHtml = '<div style="margin-bottom:16px"><div class="attach-label">참조문서</div><div style="margin-top:8px">' +
@@ -2273,7 +2376,7 @@ function openFilePreview(url, fname) {
 
 async function deletePost(postId) {
   // 권한 재확인 (대상 글 로드)
-  const { data: post } = await sb.from('posts').select('*').eq('id', postId).single();
+  const post = await poGet(postId);
   if (!post) { alert('게시글을 찾을 수 없습니다.'); return; }
   if (!canDeletePost(post)) { alert('이 게시글을 삭제할 권한이 없습니다. (작성자·부총괄·총괄만 가능)'); return; }
 
@@ -2292,7 +2395,7 @@ async function deletePost(postId) {
     await sb.from('post_reads').delete().eq('post_id', postId);
     await sb.from('post_favorites').delete().eq('post_id', postId);
     await sb.from('post_reminders').delete().eq('post_id', postId);
-    const { error } = await sb.from('posts').delete().eq('id', postId);
+    const { error } = await poDelete(postId);
     if (error) { alert('삭제 오류: ' + error.message); return; }
     alert('게시글이 삭제되었습니다.');
     updateNotifDot();
@@ -2400,7 +2503,7 @@ async function submitComment(postId) {
 
   // 태그된 인원에게 알림 + 슬랙 DM
   if (tags.length) {
-    const {data:post} = await sb.from('posts').select('title').eq('id',postId).single();
+    const post = await poGet(postId);
     const msg = notifRender('comment_tag',{title:(post?.title||'공지')});
     for (const t of tags) {
       await createNotificationWithSlack(t.id, 'post_comment_tag', postId, 'post', msg);
@@ -2412,7 +2515,7 @@ async function submitComment(postId) {
       const { data: parent } = await sb.from('comments').select('author_id').eq('id', parentId).single();
       const taggedIds = new Set(tags.map(t=>t.id));
       if (parent && parent.author_id && parent.author_id !== currentUser.id && !taggedIds.has(parent.author_id)) {
-        const {data:post} = await sb.from('posts').select('title').eq('id',postId).single();
+        const post = await poGet(postId);
         const rmsg = notifRender('comment_reply',{title:(post?.title||'게시글')});
         await createNotificationWithSlack(parent.author_id, 'post_comment_reply', postId, 'post', rmsg);
       }
@@ -2430,7 +2533,7 @@ async function submitComment(postId) {
 let nQuill = null, nPendingFiles = [], nEditingId = null;
 
 async function openEditPost(id) {
-  const {data} = await sb.from('posts').select('*').eq('id',id).single();
+  const data = await poGet(id);
   if(!data) return;
   nEditingId = id;
   currentCatId = data.category_id;
@@ -2871,8 +2974,8 @@ function renderRefDocs() {
   const box = document.getElementById('refDocList');
   if (!box) return;
   if (!nRefDocs.length) { box.innerHTML = '<div style="font-size:12px;color:var(--th)">첨부된 참조문서가 없습니다.</div>'; return; }
-  Promise.all(nRefDocs.map(id => sb.from('posts').select('id,title,access').eq('id',id).single())).then(results => {
-    box.innerHTML = results.map(({data:p}) => {
+  poByIds(nRefDocs).then(results => {
+    box.innerHTML = results.map((p) => {
       if (!p) return '';
       const accLbl = p.access==='all' ? '전 직원' : '매니저 이상';
       return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:4px">
@@ -2890,7 +2993,7 @@ function removeRefDoc(id) {
 }
 async function openRefPicker() {
   // 현재 카테고리 외 전체 공지에서 선택 (자기 자신/이미 추가된 것 제외)
-  const { data: posts } = await sb.from('posts').select('id,title,access,categories(name)').eq('status','published').order('created_at',{ascending:false}).limit(100);
+  const posts = (await poList(null, null, 100)).filter(p => p.status==='published');
   const selfId = nEditingId;
   const candidates = (posts||[]).filter(p => p.id !== selfId && !nRefDocs.includes(p.id));
   window.__refCandidates = candidates;
@@ -2967,7 +3070,7 @@ async function submitPost(isDraft=false) {
   // 작성 글이 '전 직원'(all)인데 참조문서 중 '매니저 이상'(manager)이 있으면 확인
   let refIds = [...nRefDocs];
   if (!isDraft && selectedAccess === 'all' && refIds.length) {
-    const { data: refPosts } = await sb.from('posts').select('id,title,access').in('id', refIds);
+    const refPosts = await poByIds(refIds);
     const restricted = (refPosts||[]).filter(p => p.access === 'manager');
     if (restricted.length) {
       const names = restricted.map(p => '· ' + p.title).join('\n');
@@ -2981,7 +3084,7 @@ async function submitPost(isDraft=false) {
       );
       if (ok) {
         // 참조문서들의 권한을 all로 상향
-        await sb.from('posts').update({access:'all'}).in('id', restricted.map(p=>p.id));
+        await poSetAccess(restricted.map(p=>p.id), 'all');
       } else {
         // 참조문서만 제외하고 작성 계속
         refIds = [];
@@ -2998,10 +3101,10 @@ async function submitPost(isDraft=false) {
   const __isNewPost = !nEditingId;
   let postId = nEditingId;
   if(nEditingId){
-    const {error} = await sb.from('posts').update(payload).eq('id',nEditingId);
+    const {error} = await poSave(nEditingId, payload);
     if(error){alert('수정 오류: '+error.message);return;}
   } else {
-    const {data:post,error} = await sb.from('posts').insert(payload).select().single();
+    const {data:post,error} = await poSave(null, payload);
     if(error){alert('등록 오류: '+error.message);return;}
     postId = post.id;
   }
@@ -3107,8 +3210,8 @@ async function sendPostSlackNotify(postId, title, catId) {
 // ── STAFF ─────────────────────────────────────────
 async function renderStaff(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  const [{data:users},{data:stores}] = await Promise.all([
-    sb.from('users').select('*').order('code'),
+  const [users,{data:stores}] = await Promise.all([
+    usrListStaff(),
     sb.from('store_options').select('*').order('sort_order')
   ]);
   const today = todayKST();
@@ -3445,7 +3548,7 @@ let editingUserId = null;
 async function openEditUser(userId){
   editingUserId = userId;
   const [{data:u},{data:stores},{data:partList}] = await Promise.all([
-    userId ? sb.from('users').select('*').eq('id',userId).single() : Promise.resolve({data:null}),
+    userId ? usrFull(userId).then(d=>({data:d})) : Promise.resolve({data:null}),
     sb.from('store_options').select('*').order('sort_order'),
     sb.from('parts').select('*').order('sort_order')
   ]);
@@ -4124,7 +4227,7 @@ async function deleteUser(id, name){
   const pw = prompt('확인을 위해 비밀번호를 입력해주세요:');
   if (!(await reauth(pw))) { alert('비밀번호가 일치하지 않습니다.'); return; }
   // FK 참조 해제 — 모든 관련 테이블
-  await sb.from('posts').update({author_id:null}).eq('author_id',id);
+  await poDetach(id);
   await sb.from('comments').update({author_id:null}).eq('author_id',id);
   if (typeof window.__rqSecure==='undefined') { try{ await rqLoadSecure(); }catch(e){} }
   if (window.__rqSecure) {
@@ -4201,7 +4304,7 @@ async function delStore(id, elemId){
 // ── STATS ─────────────────────────────────────────
 async function renderStats(area) {
   area.innerHTML = `<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>`;
-  const { data: posts } = await sb.from('posts').select('id,title,category_id,created_at,categories(name)').order('created_at',{ascending:false});
+  const posts = await poList(null, null, 1000);
   const { data: reads } = await sb.from('post_reads').select('post_id');
   const { data: activeUsers } = await sb.from('users').select('id').eq('active',true).neq('role','admin');
 
@@ -4433,7 +4536,7 @@ function addCatField() {
 async function deleteCat(id) {
   const {data:cat} = await sb.from('categories').select('name').eq('id',id).single();
   const catName = cat?.name||'';
-  const {data:posts} = await sb.from('posts').select('id').eq('category_id',id);
+  const posts = await poList(id, null, 1000);
   const cnt = (posts||[]).length;
 
   // 비밀번호 확인
@@ -4444,7 +4547,7 @@ async function deleteCat(id) {
   if (currentUser.is_master) {
     const fullDel = confirm('총괄 권한으로 처리합니다.\n\n[확인] 완전 삭제 (복구 불가)\n[취소] 비활성화(숨김, 데이터 보존)');
     if (fullDel) {
-      if (cnt>0) await sb.from('posts').delete().eq('category_id',id);
+      if (cnt>0) await poDeleteByCategory(id);
       await sb.from('categories').delete().eq('id',id);
       alert('완전 삭제되었습니다.');
     } else {
@@ -4557,7 +4660,7 @@ async function sendRemind(postId){
     // 단, 리마인드 기록만 남김
   }
   // 게시글 갱신시간 업데이트로 NEW 표시 + 알림 상단 노출
-  await sb.from('posts').update({updated_at:new Date().toISOString()}).eq('id',postId);
+  await poTouch(postId);
   // 리마인드 기록
   await sb.from('post_reminders').insert({post_id:postId, target});
   document.getElementById('catModal').classList.remove('open');
@@ -4590,10 +4693,8 @@ async function checkAndSend3DayReminders() {
 
     // 3일 지난 공지
     const threeDaysAgo = new Date(Date.now() - 3*24*3600*1000).toISOString();
-    const { data: oldNotices } = await sb.from('posts')
-      .select('id, title, require_read, access')
-      .eq('status', 'published')
-      .lte('created_at', threeDaysAgo);
+    const allPub = await poList(null, null, 500);
+    const oldNotices = (allPub||[]).filter(n => n.status==='published' && n.created_at <= threeDaysAgo);
     if (!oldNotices || oldNotices.length === 0) return;
     const __notices = oldNotices.filter(n => n.require_read !== false);   // 박제용(확인체크 미사용) 제외
     if (!__notices.length) return;
@@ -4660,7 +4761,7 @@ async function renderSaved(area){
     return;
   }
   const postIds = favs.map(f=>f.post_id);
-  const {data:posts} = await sb.from('posts').select('*,categories(name)').in('id',postIds);
+  const posts = await poByIds(postIds);
   // 즐겨찾기 순서(최신순) 유지
   const orderMap = {};
   favs.forEach((f,i)=>{orderMap[f.post_id]=i;});
@@ -4892,7 +4993,7 @@ async function sendPostNotify(postId) {
   const targets = window.__notifyTargets[postId] || [];
   if (!targets.length) { alert('알림 받을 인원을 먼저 추가해주세요.'); return; }
 
-  const { data: post } = await sb.from('posts').select('title').eq('id', postId).single();
+  const post = await poGet(postId);
   const title = post?.title || '공지';
   const msg   = `[태그 알림] "${title}" 공지에 회원님이 태그되었습니다. 확인해주세요.`;
 
@@ -5268,7 +5369,7 @@ async function setFeatureFlag(key, enabled, checkbox) {
 async function sendPostUpdateNotify(postId){
   if(typeof notifEnabled==='function' && !notifEnabled('new_post')){ alert("'새 공지' 알림이 꺼져 있어 발송되지 않습니다. 알림설정에서 켜주세요."); return; }
   if(!confirm("이 게시글의 '수정 알림'을 발송할까요?\n\n'확인했습니다'를 누른 사람을 포함해 전 직원(알림설정 반영)에게 '게시글이 수정되었습니다' 알림이 발송됩니다. (미확인 리마인드와 별개)")) return;
-  const { data: post } = await sb.from('posts').select('title,access').eq('id',postId).single();
+  const post = await poGet(postId);
   if(!post){ alert('게시글을 찾을 수 없습니다.'); return; }
   const title = post.title||'게시글';
   const __postAccess = post.access||'all';
@@ -5289,7 +5390,7 @@ async function sendPostUpdateNotify(postId){
     sent++;
   }
   window.__notifBatchLog = false;
-  await sb.from('posts').update({updated_at:new Date().toISOString()}).eq('id',postId);
+  await poTouch(postId);
   await logNotifSend('post_update','post',postId, "'"+title+"' 수정 알림", sent);
   alert('수정 알림을 '+sent+'명에게 발송했습니다.');
 }
@@ -5306,7 +5407,7 @@ async function sendRoleBasedPostNotify(postId, title) {
 
   if (!allUsers?.length) return;
 
-  const { data: __pa } = await sb.from('posts').select('access').eq('id', postId).maybeSingle();
+  const __pa = await poGet(postId);
   const __postAccess = __pa ? __pa.access : 'all';
 
   const msg = notifRender('new_post',{title:(title||'새 공지가 등록되었습니다')});
@@ -6190,10 +6291,9 @@ const CAT_COLORS = [
 ];
 async function renderAll(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  let q = sb.from('posts').select('*, categories(name), users(name, store, part, role)').order('created_at',{ascending:false});
-  if (currentUser.role !== 'admin') q = q.eq('status','published');
-  const {data:posts} = await q;
-  const filtered = (posts||[]).filter(p=>canSee(p));
+  await poLoadSecure();
+  const posts = await poList(null, null, 1000);
+  const filtered = (posts||[]).filter(p => currentUser.role==='admin' || p.status==='published');
   const week = new Date(Date.now()-7*864e5).toISOString();
   const tabs = visibleCats().map(c =>
     `<button class="tab-btn" onclick="switchCat(${c.id},'${c.name}')">${c.name}</button>`
@@ -6230,10 +6330,8 @@ async function renderAll(area) {
 async function doSearchAll(){
   const q = (document.getElementById('allSearch')?.value||'').trim().toLowerCase();
   if (!q) { renderAll(document.getElementById('contentArea')); return; }
-  let query = sb.from('posts').select('*,categories(name)').order('created_at',{ascending:false});
-  if (currentUser.role !== 'admin') query = query.eq('status','published');
-  const {data:posts} = await query;
-  const filtered = (posts||[]).filter(p=>canSee(p)&&(p.title?.toLowerCase().includes(q)||p.body?.toLowerCase().includes(q)));
+  const posts = await poList(null, null, 1000);
+  const filtered = (posts||[]).filter(p=>(currentUser.role==='admin'||p.status==='published')&&(p.title?.toLowerCase().includes(q)||p.body?.toLowerCase().includes(q)));
   const week = new Date(Date.now()-7*864e5).toISOString();
   const pl = document.getElementById('allPostList');
   if (pl) pl.innerHTML = filtered.map(p => {
@@ -6264,14 +6362,17 @@ async function sweepExpiredDrafts(){
     const now = Date.now();
     // 공지(posts) draft 30일
     const cut30 = new Date(now - 30*864e5).toISOString();
-    const { data: oldPosts } = await sb.from('posts').select('id').eq('status','draft').lt('updated_at', cut30);
-    for (const pp of (oldPosts||[])) {
-      const { data: atts } = await sb.from('attachments').select('id, file_url').eq('post_id', pp.id);
-      const paths = (atts||[]).map(a => (a.file_url||'').split('/attachments/')[1]).filter(Boolean);
-      if (paths.length) { try { await sb.storage.from('attachments').remove(paths); } catch(e){} }
-      await sb.from('attachments').delete().eq('post_id', pp.id);
-      await sb.from('posts').delete().eq('id', pp.id);
-    }
+    // 내 오래된 임시저장의 첨부 스토리지 정리(가능 범위) 후, 서버 RPC가 draft 행 삭제(본인/총괄분)
+    try {
+      const myOld = (await poMyDrafts()).filter(p => p.status==='draft' && (p.updated_at||p.created_at) < cut30);
+      for (const pp of myOld) {
+        const { data: atts } = await sb.from('attachments').select('id, file_url').eq('post_id', pp.id);
+        const paths = (atts||[]).map(a => (a.file_url||'').split('/attachments/')[1]).filter(Boolean);
+        if (paths.length) { try { await sb.storage.from('attachments').remove(paths); } catch(e){} }
+        await sb.from('attachments').delete().eq('post_id', pp.id);
+      }
+    } catch(e){}
+    try { await poSweep(cut30); } catch(e){}
     // 스케줄 draft 7일 (자식행 먼저 정리)
     const cut7 = new Date(now - 7*864e5).toISOString();
     try { await schSweep(cut7); } catch(e){}
@@ -6294,7 +6395,7 @@ function draftDaysLeft(updatedAt, ttlDays){
 async function renderDrafts(area){
   await sweepExpiredDrafts();
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  const {data} = await sb.from('posts').select('*,categories(name)').in('status',['draft','scheduled']).eq('author_id',currentUser.id).order('updated_at',{ascending:false});
+  const data = await poMyDrafts();
   const html = (data||[]).length ? (data||[]).map(p => `<div class="post-card">
     <div class="post-card-top">
       <span class="post-title-txt">${p.title||'(제목 없음)'}</span>
@@ -6312,13 +6413,13 @@ async function renderDrafts(area){
 async function deleteDraft(id){
   if(!confirm('삭제할까요?')) return;
   await sb.from('attachments').delete().eq('post_id',id);
-  await sb.from('posts').delete().eq('id',id);
+  await poDelete(id);
   renderDrafts(document.getElementById('contentArea'));
 }
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-07-24';   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-07-25';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -9240,7 +9341,7 @@ async function searchPermUser() {
 }
 
 async function selectPermUser(userId) {
-  const { data: u } = await sb.from('users').select('*').eq('id', userId).single();
+  const u = await usrFull(userId);
   if (!u) return;
   permSelectedUser = u;
   document.getElementById('permUserResults').innerHTML = '';
