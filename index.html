@@ -9,7 +9,12 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="보난자커피">
 <meta name="mobile-web-app-capable" content="yes">
-<link rel="apple-touch-icon" id="appleTouchIcon" href="">
+<!-- PWA 아이콘: 정적 기본값(상대경로=프로젝트 하위경로에서 정확히 해석). 로그인 전에도 '보' 글자 대신 로고 표시 -->
+<link rel="apple-touch-icon" id="appleTouchIcon" sizes="180x180" href="apple-touch-icon.png">
+<link rel="apple-touch-icon" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.snow.css" rel="stylesheet">
@@ -8820,35 +8825,16 @@ let PERM_MAP = null;
 
 // PWA 홈 화면 아이콘/매니페스트 적용 (로고 URL 기반)
 function applyPwaIcon(logoUrl) {
-  const name = (typeof APP !== 'undefined' && APP.app_name) ? APP.app_name : '보난자커피';
+  // 기본 홈화면 아이콘은 <head>의 정적 아이콘(apple-touch-icon.png / manifest.json)이 담당한다.
+  //  → 로그인 전·미방문 상태로 '홈 화면에 추가'해도 '보' 글자 대신 로고가 뜬다.
+  // 여기서는 (1) 테마색, (2) 총괄이 커스텀 로고를 올린 경우에만 iOS 홈아이콘을 그 로고로 덮어쓴다.
   const theme = (typeof APP !== 'undefined' && APP.primary_color) ? APP.primary_color : '#3B2314';
-  // 로고가 없으면 기본 아이콘(갈색 배경 + 흰 B) SVG 생성
-  let iconUrl = logoUrl;
-  if (!iconUrl) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><rect width="512" height="512" rx="96" fill="${theme}"/><text x="256" y="340" font-family="Georgia,serif" font-size="300" font-weight="bold" fill="#E8C07A" text-anchor="middle">B</text></svg>`;
-    iconUrl = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
-  }
-  // apple-touch-icon (iOS 홈 화면)
-  const apple = document.getElementById('appleTouchIcon');
-  if (apple) apple.href = iconUrl;
-  // theme-color
   const tc = document.querySelector('meta[name="theme-color"]');
   if (tc) tc.content = theme;
-  // manifest 동적 생성 (Android 홈 화면)
-  const manifest = {
-    name: name, short_name: name,
-    start_url: location.pathname,
-    display: 'standalone',
-    background_color: theme, theme_color: theme,
-    icons: [
-      { src: iconUrl, sizes: '512x512', type: iconUrl.startsWith('data:image/svg') ? 'image/svg+xml' : 'image/png', purpose: 'any maskable' }
-    ]
-  };
-  const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  let link = document.querySelector('link[rel="manifest"]');
-  if (!link) { link = document.createElement('link'); link.rel = 'manifest'; document.head.appendChild(link); }
-  link.href = url;
+  if (logoUrl) {
+    const apple = document.getElementById('appleTouchIcon');
+    if (apple) apple.href = logoUrl;   // 커스텀 로고가 있을 때만 덮어씀(없으면 정적 기본 유지)
+  }
 }
 
 // 메뉴 표시를 권한에 따라 제어
