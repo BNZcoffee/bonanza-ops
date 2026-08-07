@@ -310,10 +310,10 @@ textarea.form-input{min-height:120px;resize:vertical}
 .ql-editor .tg-edit{display:inline}
 .ql-toggle{margin:6px 0}
 .app-toggle{border:0.5px solid var(--crd);border-radius:8px;margin:8px 0;background:#fff;overflow:hidden}
-.app-toggle>summary{cursor:pointer;padding:8px 12px;font-weight:600;list-style:none;user-select:none;outline:none;display:block}
+.app-toggle>summary{cursor:text;padding:8px 12px;font-weight:600;list-style:none;user-select:none;outline:none;display:block}
 .app-toggle>summary::-webkit-details-marker{display:none}
-.app-toggle>summary::before{content:'▶';display:inline-block;width:14px;margin-right:6px;font-size:10px;color:var(--th);transition:transform .15s;vertical-align:1px}
-.app-toggle[open]>summary::before{transform:rotate(90deg)}
+.app-toggle-arrow{display:inline-block;width:16px;margin-right:4px;font-size:10px;color:var(--th);transition:transform .15s;cursor:pointer;user-select:none;vertical-align:1px;text-align:center}
+.app-toggle[open] .app-toggle-arrow{transform:rotate(90deg)}
 .app-toggle .app-toggle-title{outline:none;cursor:text}
 .app-toggle .app-toggle-title:empty::before{content:'접기 제목';color:var(--th);font-weight:400}
 .app-toggle .toggle-body{padding:8px 14px 12px 28px;border-top:0.5px solid var(--crd);outline:none;font-weight:400}
@@ -2340,6 +2340,8 @@ let readListHtml = '';
     if(bodyEl){
       // Quill HTML을 innerHTML로 삽입 (리스트·서식 정상 렌더링)
       bodyEl.innerHTML = currentPost ? (currentPost.body || '') : '';
+      // 열람 뷰: 모든 토글 기본 접힘 + 편집속성 제거 (화살표 클릭 시에만 펼침)
+      bodyEl.querySelectorAll('details').forEach(d=>{ d.removeAttribute('open'); d.querySelectorAll('[contenteditable]').forEach(el=>el.removeAttribute('contenteditable')); });
       bodyEl.querySelectorAll('img').forEach(im=>{
         im.style.cursor='zoom-in';
         im.addEventListener('click', ()=>openImageZoom(im.getAttribute('src')));
@@ -7394,7 +7396,7 @@ function opsDocColumns(){ const n=parseInt(prompt('분할 수 (2~5): 이미지·
       const b=(v.body!=null&&v.body!=='')?v.body:'<br>';
       const d=document.createElement('details'); d.className='app-toggle'; d.open=true;
       const sm=document.createElement('summary'); sm.className='app-toggle-sum';
-      sm.innerHTML='<span class="app-toggle-title" contenteditable="true">'+t+'</span>';
+      sm.innerHTML='<span class="app-toggle-arrow" contenteditable="false">▶</span><span class="app-toggle-title" contenteditable="true">'+t+'</span>';
       const bd=document.createElement('div'); bd.className='toggle-body'; bd.setAttribute('contenteditable','true'); bd.innerHTML=b;
       d.appendChild(sm); d.appendChild(bd); node.appendChild(d); return node;
     }
@@ -7406,7 +7408,7 @@ function opsInsertToggle(q){ if(!q) return; const sel=q.getSelection(true); cons
   setTimeout(function(){ const ns=q.root.querySelectorAll('.ql-toggle'); const last=ns[ns.length-1]; if(last){ const tt=last.querySelector('.app-toggle-title'); if(tt){ tt.focus(); try{ const r=document.createRange(); r.selectNodeContents(tt); const s=window.getSelection(); s.removeAllRanges(); s.addRange(r); }catch(e){} } } },50);
 }
 // 저장 전 정리: 편집용 contenteditable/구버전 연필 제거 → 깔끔한 시맨틱 HTML만 저장
-function qlCleanToggles(html){ if(!html) return html; return String(html).replace(/\scontenteditable="(?:true|false)"/g,'').replace(/<span class="tg-edit"[^>]*>[\s\S]*?<\/span>/g,''); }
+function qlCleanToggles(html){ if(!html) return html; return String(html).replace(/\scontenteditable="(?:true|false)"/g,'').replace(/<span class="tg-edit"[^>]*>[\s\S]*?<\/span>/g,'').replace(/(<details\b[^>]*?)\sopen(="")?/gi,'$1'); }
 // 구버전(.toggle-block/.toggle-content/✎) 토글을 새 인라인 편집형으로 승격
 function qlUpgradeToggles(q){ if(!q||!q.root) return;
   q.root.querySelectorAll('.ql-toggle').forEach(function(host){
@@ -7414,14 +7416,20 @@ function qlUpgradeToggles(q){ if(!q||!q.root) return;
     let det=host.querySelector('details'); if(!det) return;
     det.classList.add('app-toggle'); det.classList.remove('toggle-block'); if(!det.open) det.open=true;
     let sm=det.querySelector('summary'); if(sm){ const pen=sm.querySelector('.tg-edit'); if(pen) pen.remove();
-      if(!sm.querySelector('.app-toggle-title')){ const txt=(sm.innerHTML||'').trim()||'접기 제목'; sm.innerHTML='<span class="app-toggle-title" contenteditable="true">'+txt+'</span>'; }
-      else { sm.querySelector('.app-toggle-title').setAttribute('contenteditable','true'); }
+      if(!sm.querySelector('.app-toggle-title')){ const txt=(sm.innerHTML||'').trim()||'접기 제목'; sm.innerHTML='<span class="app-toggle-arrow" contenteditable="false">▶</span><span class="app-toggle-title" contenteditable="true">'+txt+'</span>'; }
+      else { if(!sm.querySelector('.app-toggle-arrow')) sm.insertAdjacentHTML('afterbegin','<span class="app-toggle-arrow" contenteditable="false">▶</span>'); sm.querySelector('.app-toggle-title').setAttribute('contenteditable','true'); }
     }
     let bd=det.querySelector('.toggle-body, .toggle-content'); if(bd){ bd.classList.add('toggle-body'); bd.classList.remove('toggle-content'); bd.setAttribute('contenteditable','true'); if((det.getAttribute('data-bb'))&&(!bd.innerHTML||bd.innerHTML==='내용')) bd.innerHTML=det.getAttribute('data-bb'); }
   });
 }
 // 토글 제목(편집 가능) 클릭 시 details 접힘/펼침 방지 → 캐럿 배치·타이핑
-document.addEventListener('click',function(e){ const titleEl=e.target&&e.target.closest&&e.target.closest('.app-toggle-title[contenteditable="true"]'); if(titleEl){ e.preventDefault(); } }, true);
+document.addEventListener('click',function(e){
+  if(!e.target||!e.target.closest) return;
+  const arrow=e.target.closest('.app-toggle-arrow');
+  if(arrow){ const det=arrow.closest('details.app-toggle'); if(det){ e.preventDefault(); e.stopPropagation(); det.open=!det.open; } return; }
+  const titleEl=e.target.closest('.app-toggle-title[contenteditable="true"]');
+  if(titleEl){ e.preventDefault(); } // 편집 제목: 네이티브 접힘 차단 → 캐럿/타이핑 가능
+}, true);
 function opsDocImage(){ const q=window.__opsQuill; if(!q) return; if(isTestMode()){ alert('테스트 모드에서는 첨부할 수 없습니다.'); return; } const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.onchange=async()=>{ const fl=inp.files&&inp.files[0]; if(!fl) return; const url=await nUploadFile(await compressImage(fl),'opsboard'); if(url){ const r=q.getSelection()||{index:q.getLength()}; q.insertEmbed(r.index,'image',url); q.setSelection(r.index+1); } }; inp.click(); }
 function opsChangeType(typeName){
   const O=window.__ops; opsCollectInto(window.__opsEditingCard);
