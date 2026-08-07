@@ -6988,7 +6988,7 @@ function opsRender(area){
   const O=window.__ops;
   const board=O.boards.find(b=>b.id===O.boardId);
   const tabs = O.boards.map(b=>{ const col=(O.boardColors&&O.boardColors[b.id])||''; const active=b.id===O.boardId; let st=''; if(col){ st='background:'+col+';border-color:'+col+';color:#3a2f22;'; if(active) st+='box-shadow:inset 0 0 0 2px var(--br);font-weight:800;'; } return '<button class="ops-tab'+(active?' active':'')+'"'+(st?' style="'+st+'"':'')+' onclick="opsSwitchBoard('+b.id+')"><i class="ti '+(b.type==='mind'?'ti-bulb':(b.type==='doc'?'ti-file-text':'ti-layout-kanban'))+'" style="font-size:12px"></i> '+esc(b.name)+'</button>'; }).join('');
-  const addBoardBtn = opsCanManage()?`<button class="ops-tab add" onclick="opsAddBoard('board')" title="카드 보드 추가"><i class="ti ti-plus"></i> 보드</button><button class="ops-tab add" onclick="opsAddBoard('mind')" title="아이디어맵 추가"><i class="ti ti-plus"></i> 아이디어맵</button><button class="ops-tab add" onclick="opsAddBoard('doc')" title="문서 추가"><i class="ti ti-plus"></i> 문서</button>${opsIsMaster()?`<button class="ops-tab tabcfg" onclick="opsTabManager()" title="탭 순서·색상 설정"><i class="ti ti-adjustments-horizontal"></i></button>`:''}`:'';
+  const addBoardBtn = opsCanManage()?`<button class="ops-tab add" onclick="opsAddCategoryModal()" title="카테고리 추가"><i class="ti ti-plus"></i> 추가</button><button class="ops-tab tabcfg" onclick="opsCategoryManager()" title="카테고리 설정"><i class="ti ti-settings"></i> 설정</button>`:'';
   const manageBtns = opsCanManage()?`
     <button class="btn-cancel-sm" onclick="opsOpenFields()"><i class="ti ti-adjustments"></i> 속성/유형</button>
     <button class="btn-cancel-sm" onclick="opsAddGroup()"><i class="ti ti-plus"></i> 묶음</button>`:'';
@@ -7012,7 +7012,7 @@ function opsRender(area){
     ${partStrip}
     <div class="ops-header">
       <div class="ops-tabs">${tabs}${addBoardBtn}</div>
-      <div class="ops-actions">${(isMind||isDoc)?'':(manageBtns+masterBtns)}${boardBtns}${dupBoardBtn}${delBoardBtn}</div>
+      <div class="ops-actions">${(isMind||isDoc)?'':(manageBtns+masterBtns)}</div>
     </div>
     ${isDoc ? opsDocShell(board) : (isMind ? opsMindShell() : `
     <div class="ops-toolbar">
@@ -7123,6 +7123,71 @@ async function opsTabMgrSave(){
   (window.__ops.boards||[]).sort((a,b)=>order.indexOf(a.id)-order.indexOf(b.id));
   const m=document.getElementById('opsTabMgr'); if(m) m.remove();
   opsRender(document.getElementById('contentArea'));
+}
+// ── 카테고리 추가 (2종 선택 모달) ──
+function opsAddCategoryModal(){
+  if(!opsCanManage()){ alert('권한이 없습니다.'); return; }
+  document.getElementById('opsAddCatModal')?.remove();
+  const m=document.createElement('div'); m.className='modal-overlay'; m.id='opsAddCatModal'; m.style.zIndex='340';
+  m.innerHTML=`<div class="modal-box" style="max-width:520px;width:94vw"><div class="modal-head"><b>새 카테고리 추가</b><button onclick="document.getElementById('opsAddCatModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body"><p style="font-size:12px;color:var(--th);margin:0 0 12px">만들 카테고리 유형을 선택하세요.</p><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <button type="button" onclick="opsAddCatPick('board')" style="display:flex;flex-direction:column;gap:8px;align-items:flex-start;padding:18px;border:1px solid var(--crd);border-radius:12px;background:#fff;cursor:pointer;text-align:left" onmouseover="this.style.background='var(--crm)'" onmouseout="this.style.background='#fff'"><span style="font-size:26px">📄</span><b style="font-size:14px">게시글 / 보드형</b><span style="font-size:11px;color:var(--th);line-height:1.5">회의록·업무참고자료·프로젝트 자료. 게시판·보드 뷰 지원.</span></button>
+    <button type="button" onclick="opsAddCatPick('mind')" style="display:flex;flex-direction:column;gap:8px;align-items:flex-start;padding:18px;border:1px solid var(--crd);border-radius:12px;background:#fff;cursor:pointer;text-align:left" onmouseover="this.style.background='var(--crm)'" onmouseout="this.style.background='#fff'"><span style="font-size:26px">💡</span><b style="font-size:14px">마인드맵형</b><span style="font-size:11px;color:var(--th);line-height:1.5">아이디어·업무 구상용 마인드맵.</span></button>
+  </div></div></div>`;
+  document.body.appendChild(m);
+}
+function opsAddCatPick(type){ document.getElementById('opsAddCatModal')?.remove(); opsAddBoard(type); }
+
+// ── 카테고리 관리 (2열 그리드) ──
+function opsCatTypeTag(t){ return t==='mind'?'마인드맵형':(t==='doc'?'문서형':'게시글·보드형'); }
+function opsCategoryManager(){
+  if(!opsCanManage()){ alert('권한이 없습니다.'); return; }
+  document.getElementById('opsCatMgr')?.remove();
+  const m=document.createElement('div'); m.className='modal-overlay'; m.id='opsCatMgr'; m.style.zIndex='340';
+  m.innerHTML=`<div class="modal-box" style="max-width:760px;width:96vw"><div class="modal-head"><b>카테고리 설정</b><button onclick="opsCatMgrClose()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:74vh;overflow-y:auto"><div id="opsCatMgrList" style="display:grid;grid-template-columns:1fr 1fr;gap:12px"></div><p style="font-size:11px;color:var(--th);margin-top:10px">▲▼ 순서 변경 · 색을 눌러 탭 배경 지정 · 변경은 즉시 저장됩니다.</p></div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-submit" onclick="opsCatMgrClose()">완료</button></div></div>`;
+  document.body.appendChild(m);
+  opsCatMgrRender();
+}
+function opsCatMgrClose(){ document.getElementById('opsCatMgr')?.remove(); opsRender(document.getElementById('contentArea')); }
+function opsCatMgrRender(){
+  const box=document.getElementById('opsCatMgrList'); if(!box) return;
+  const O=window.__ops; const boards=O.boards||[];
+  box.innerHTML=boards.map((b,i)=>{
+    const cur=(O.boardColors&&O.boardColors[b.id])||'';
+    const sw=OPS_TAB_COLORS.map(c=>'<span onclick="opsCatColor('+b.id+',\''+c+'\')" title="'+c+'" style="display:inline-block;width:18px;height:18px;border-radius:5px;background:'+c+';margin:0 4px 4px 0;cursor:pointer;border:2px solid '+(cur===c?'#333':'transparent')+'"></span>').join('')
+      +'<span onclick="opsCatColor('+b.id+',\'\')" title="색 없음" style="display:inline-block;width:18px;height:18px;border-radius:5px;background:#fff;border:1px solid #ccc;cursor:pointer;text-align:center;font-size:11px;line-height:16px;color:#999;'+(!cur?'outline:2px solid #333':'')+'">✕</span>';
+    return `<div style="border:0.5px solid var(--crd);border-radius:12px;padding:12px;background:${cur||'#fff'}">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+        <i class="ti ${b.type==='mind'?'ti-bulb':(b.type==='doc'?'ti-file-text':'ti-layout-kanban')}"></i>
+        <b style="flex:1;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.name)}</b>
+        <span style="font-size:10px;font-weight:700;color:var(--th);background:var(--cr);border:0.5px solid var(--crd);border-radius:8px;padding:2px 6px;white-space:nowrap">${opsCatTypeTag(b.type)}</span>
+      </div>
+      <div style="margin-bottom:10px">${sw}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        <button class="btn-cancel-sm" style="padding:4px 9px;font-size:11px" onclick="opsCatRename(${b.id})">✏️ 이름</button>
+        <button class="btn-cancel-sm" style="padding:4px 9px;font-size:11px" onclick="opsCatDuplicate(${b.id})">📋 복제</button>
+        <button class="btn-cancel-sm" style="padding:4px 9px;font-size:11px"${i===0?' disabled':''} onclick="opsCatMove(${b.id},-1)">▲</button>
+        <button class="btn-cancel-sm" style="padding:4px 9px;font-size:11px"${i===boards.length-1?' disabled':''} onclick="opsCatMove(${b.id},1)">▼</button>
+        ${opsIsMaster()?`<button class="btn-cancel-sm" style="padding:4px 9px;font-size:11px;color:var(--rd)" onclick="opsCatDelete(${b.id})">🗑️ 삭제</button>`:''}
+      </div>
+    </div>`;
+  }).join('') || '<div style="color:var(--th);font-size:13px;grid-column:1/-1;text-align:center;padding:20px">카테고리가 없습니다.</div>';
+}
+async function opsCatColor(id,c){ const O=window.__ops; O.boardColors=O.boardColors||{}; if(c) O.boardColors[id]=c; else delete O.boardColors[id]; try{ await sb.from('app_settings').upsert({key:'ops_board_colors',value:JSON.stringify(O.boardColors)},{onConflict:'key'}); }catch(e){ alert('색상 저장 오류: '+(e.message||e)); } opsCatMgrRender(); }
+async function opsCatMove(id,dir){ const O=window.__ops; const a=O.boards; const i=a.findIndex(b=>b.id===id); const j=i+dir; if(i<0||j<0||j>=a.length) return; const t=a[i]; a[i]=a[j]; a[j]=t; try{ for(let k=0;k<a.length;k++){ await sb.from('ops_boards').update({sort_order:k}).eq('id',a[k].id); } }catch(e){ alert('순서 저장 오류: '+(e.message||e)); } opsCatMgrRender(); }
+async function opsCatRename(id){ const O=window.__ops; const b=O.boards.find(x=>x.id===id); if(!b) return; const nm=prompt('카테고리 이름 수정:',b.name); if(nm===null||!nm.trim()) return; const {error}=await sb.from('ops_boards').update({name:nm.trim()}).eq('id',id); if(error){ alert('오류: '+error.message); return; } b.name=nm.trim(); opsCatMgrRender(); }
+async function opsCatDuplicate(id){ window.__ops.boardId=id; document.getElementById('opsCatMgr')?.remove(); await opsDuplicateBoard(); }
+async function opsCatDelete(id){
+  if(!opsIsMaster()){ alert('총괄만 삭제할 수 있습니다.'); return; }
+  const O=window.__ops; const b=O.boards.find(x=>x.id===id); if(!b) return;
+  if(!confirm('"'+b.name+'" 카테고리를 삭제할까요?\n안의 모든 카드/노드가 함께 삭제됩니다.')) return;
+  const pw=prompt('총괄 비밀번호를 입력하세요.'); if(!pw) return; if(!(await reauth(pw))){ alert('비밀번호가 일치하지 않습니다.'); return; }
+  try{ await sb.from('ops_cards').delete().eq('board_id',id); await sb.from('ops_groups').delete().eq('board_id',id); await sb.from('ops_mind_edges').delete().eq('board_id',id); await sb.from('ops_mind_nodes').delete().eq('board_id',id); }catch(e){}
+  const {error}=await sb.from('ops_boards').delete().eq('id',id); if(error){ alert('오류: '+error.message); return; }
+  O.boards=O.boards.filter(x=>x.id!==id);
+  if(O.boardId===id) O.boardId=O.boards[0]?O.boards[0].id:null;
+  if(O.boardId){ await opsLoadBoardData(); opsSubscribe(); }
+  opsRender(document.getElementById('contentArea'));
+  opsCategoryManager();
 }
 async function opsSwitchBoard(id){ window.__ops.boardId=id; window.__ops.filter={}; await opsLoadBoardData(); opsSubscribe(); opsRender(document.getElementById('contentArea')); }
 async function opsAddBoard(type){
@@ -11452,6 +11517,8 @@ async function renderRepairs(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
   const isAdmin  = currentUser.role==='admin'||currentUser.is_master||currentUser.is_vice_master;
   const canManage = isAdmin;
+  // 매니저 이상 권한자는 전 매장 보수 내역 열람·검색 가능 (repair_records RLS 오픈 → 클라이언트 필터만 확장)
+  const canSeeAll = isAdmin || /^manager/.test(currentUser.role||'') || ['dept','hr','ceo','executive_director'].includes(currentUser.role) || !!currentUser.part;
   const REPAIR_TYPE_ID = 2;
 
   const [catRes, rpRes, reqRes, storeRes] = await Promise.all([
@@ -11461,14 +11528,14 @@ async function renderRepairs(area) {
       let q = sb.from('repair_records')
         .select('*, cat:repair_categories(label), author:users!repair_records_author_id_fkey(name)')
         .order('repair_date',{ascending:false}).order('created_at',{ascending:false});
-      if (!isAdmin) q = q.eq('store', currentUser.store);
+      if (!canSeeAll) q = q.eq('store', currentUser.store);
       return q;
     })(),
     // 업무 신청 완료된 보수 요청 (보안 RPC — rq_list 'done')
     (async()=>{
       let rows = await rqList('done');
       rows = rows.filter(r => Number(r.type_id) === REPAIR_TYPE_ID);
-      if (!isAdmin) rows = rows.filter(r => r.store === currentUser.store);
+      if (!canSeeAll) rows = rows.filter(r => r.store === currentUser.store);
       rows.sort((a,b)=>{ const av=(a.completed_at||''), bv=(b.completed_at||''); return bv<av?-1:(bv>av?1:0); });
       return { data: rows };
     })(),
