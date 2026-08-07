@@ -309,6 +309,15 @@ textarea.form-input{min-height:120px;resize:vertical}
 .tg-edit{display:none;margin-left:auto;color:var(--th);cursor:pointer;font-size:13px}
 .ql-editor .tg-edit{display:inline}
 .ql-toggle{margin:6px 0}
+.app-toggle{border:0.5px solid var(--crd);border-radius:8px;margin:8px 0;background:#fff;overflow:hidden}
+.app-toggle>summary{cursor:pointer;padding:8px 12px;font-weight:600;list-style:none;user-select:none;outline:none;display:block}
+.app-toggle>summary::-webkit-details-marker{display:none}
+.app-toggle>summary::before{content:'▶';display:inline-block;width:14px;margin-right:6px;font-size:10px;color:var(--th);transition:transform .15s;vertical-align:1px}
+.app-toggle[open]>summary::before{transform:rotate(90deg)}
+.app-toggle .app-toggle-title{outline:none;cursor:text}
+.app-toggle .app-toggle-title:empty::before{content:'접기 제목';color:var(--th);font-weight:400}
+.app-toggle .toggle-body{padding:8px 14px 12px 28px;border-top:0.5px solid var(--crd);outline:none;font-weight:400}
+.ql-editor .app-toggle .toggle-body:empty::before,.ql-editor .app-toggle .toggle-body:has(>br:only-child)::before{content:'내용을 입력하세요';color:var(--th)}
 .mind-node.sel{outline:2px solid #4a90d9;outline-offset:1px}
 .mind-group.sel{outline:2px solid #4a90d9}
 #opsMindSelBtn.active{background:var(--br);color:#fff}
@@ -2707,7 +2716,7 @@ function renderNewPost(area, ex) {
     // 툴바 토글 버튼 아이콘 커스텀
     const toggleBtn = document.querySelector('.ql-toggle');
     if(toggleBtn){ toggleBtn.innerHTML = '<i class="ti ti-chevrons-down" style="font-size:14px;vertical-align:middle"></i>'; toggleBtn.title='토글 목록 삽입'; }
-    if(ex && ex.body) nQuill.root.innerHTML = ex.body;
+    if(ex && ex.body){ nQuill.root.innerHTML = ex.body; qlUpgradeToggles(nQuill); }
     // 본문 이미지 클릭 시 크기 조정 팝업
     nQuill.root.addEventListener('click', (e)=>{
       if(e.target && e.target.tagName === 'IMG'){
@@ -2876,11 +2885,13 @@ function qlBindImages(quill, folder){
   if(!quill||!quill.root||quill.__imgBound) return; quill.__imgBound=true;
   const root=quill.root;
   root.addEventListener('paste', function(e){
+    if(e.target&&e.target.closest&&e.target.closest('.toggle-body, .app-toggle-title')){ return; }
     const items=(e.clipboardData&&e.clipboardData.items)||[]; const imgs=[];
     for(const it of items){ if(it.kind==='file'&&it.type&&it.type.indexOf('image/')===0){ const f=it.getAsFile(); if(f) imgs.push(f); } }
     if(imgs.length){ e.preventDefault(); const sel=quill.getSelection(true); let idx=sel?sel.index:quill.getLength(); (async()=>{ for(const f of imgs){ await qlUploadInsert(quill,f,idx,folder); idx++; } })(); }
   }, true);
   root.addEventListener('drop', function(e){
+    if(e.target&&e.target.closest&&e.target.closest('.toggle-body, .app-toggle-title')){ return; }
     const files=(e.dataTransfer&&e.dataTransfer.files)||[]; const imgs=Array.from(files).filter(f=>f.type&&f.type.indexOf('image/')===0);
     if(imgs.length){ e.preventDefault(); e.stopPropagation(); const sel=quill.getSelection(); let idx=sel?sel.index:quill.getLength(); (async()=>{ for(const f of imgs){ await qlUploadInsert(quill,f,idx,folder); idx++; } })(); }
   }, true);
@@ -3138,7 +3149,7 @@ async function submitPost(isDraft=false) {
   if (isTestMode()) { alert('⚠ 테스트 모드에서는 저장할 수 없습니다.'); return; }
   const title = document.getElementById('nTitle')?.value.trim();
   if(nQuill){ await qlScrubDataImages(nQuill,'images'); }
-  const body = nQuill ? nQuill.root.innerHTML : '';
+  const body = qlCleanToggles(nQuill ? nQuill.root.innerHTML : '');
   const catId = parseInt(document.getElementById('nCat')?.value);
   const commentsOn = document.getElementById('cmtToggle')?.classList.contains('on');
   const schedOn = document.getElementById('schedToggle')?.classList.contains('on');
@@ -6921,12 +6932,12 @@ function opsGuideEdit(id){
   const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='opsGuideEditModal'; modal.style.zIndex='340';
   modal.innerHTML=`<div class="modal-box" style="max-width:760px;width:96vw"><div class="modal-head"><b>가이드 수정 — ${esc(sec.title)}</b><button onclick="document.getElementById('opsGuideEditModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body" style="max-height:74vh;overflow-y:auto"><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"><button class="btn-cancel-sm" style="font-size:11px" onclick="opsDocTableInsert()">＋표</button><button class="btn-cancel-sm" style="font-size:11px" onclick="opsDocTable('insertRowBelow')">행+</button><button class="btn-cancel-sm" style="font-size:11px" onclick="opsDocTable('insertColumnRight')">열+</button><button class="btn-cancel-sm" style="font-size:11px" onclick="opsDocColumns()">다단</button><button class="btn-cancel-sm" style="font-size:11px" onclick="opsInsertToggle(window.__opsGuideQuill)">토글</button></div><div id="opsGuideBox"></div><p style="font-size:11px;color:var(--th);margin-top:8px">표·토글·이미지·하이라이트 사용 가능. 초기 예시로 되돌리려면 '기본값으로'.</p></div><div class="modal-foot" style="display:flex;justify-content:space-between;gap:8px"><button class="btn-cancel-sm" onclick="opsGuideReset('${id}')">기본값으로</button><div style="display:flex;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('opsGuideEditModal').remove()">취소</button><button class="btn-submit" onclick="opsGuideSave()">저장</button></div></div></div>`;
   document.body.appendChild(modal);
-  try{ window.__opsGuideQuill=new Quill('#opsGuideBox',{theme:'snow',modules:{table:true,toolbar:{container:[[{header:[2,3,false]}],['bold','italic','underline'],[{background:['#fff59d','#b2f2bb','#ffc9c9','#a5d8ff','#ffd8a8',false]},{color:[]}],[{list:'ordered'},{list:'bullet'}],['link','image'],['clean']],handlers:{image:opsDocImage}}}}); window.__opsQuill=window.__opsGuideQuill; window.__opsGuideQuill.root.innerHTML=cur; qlBindImages(window.__opsGuideQuill,'opsboard'); }catch(e){ alert('편집기 로드 실패: '+e.message); }
+  try{ window.__opsGuideQuill=new Quill('#opsGuideBox',{theme:'snow',modules:{table:true,toolbar:{container:[[{header:[2,3,false]}],['bold','italic','underline'],[{background:['#fff59d','#b2f2bb','#ffc9c9','#a5d8ff','#ffd8a8',false]},{color:[]}],[{list:'ordered'},{list:'bullet'}],['link','image'],['clean']],handlers:{image:opsDocImage}}}}); window.__opsQuill=window.__opsGuideQuill; window.__opsGuideQuill.root.innerHTML=cur; qlUpgradeToggles(window.__opsGuideQuill); qlBindImages(window.__opsGuideQuill,'opsboard'); }catch(e){ alert('편집기 로드 실패: '+e.message); }
 }
 async function opsGuideSave(){
   const id=window.__opsGuideEditId; if(!id||!window.__opsGuideQuill) return;
   await qlScrubDataImages(window.__opsGuideQuill,'opsboard');
-  const html=window.__opsGuideQuill.root.innerHTML;
+  const html=qlCleanToggles(window.__opsGuideQuill.root.innerHTML);
   window.__opsGuide=window.__opsGuide||{}; window.__opsGuide[id]=html;
   const {error}=await sb.from('app_settings').upsert({key:'ops_guide_content',value:JSON.stringify(window.__opsGuide)},{onConflict:'key'});
   if(error){ alert('저장 오류: '+error.message); return; }
@@ -7364,7 +7375,7 @@ function opsEditCard(cardId, groupId){
   document.body.appendChild(modal);
   try{
     window.__opsQuill=new Quill('#opsDocBox',{theme:'snow',placeholder:'자유롭게 작성하세요 — 제목/목록/체크리스트/표/다단/이미지',modules:{table:true,toolbar:{container:[[{header:[1,2,3,false]}],['bold','italic','underline','strike'],[{background:['#fff59d','#b2f2bb','#ffc9c9','#a5d8ff','#ffd8a8',false]},{color:[]}],[{list:'ordered'},{list:'bullet'},{list:'check'}],['blockquote','code-block'],['link','image'],['clean']],handlers:{image:opsDocImage}}}});
-    if(c.data&&c.data._doc) window.__opsQuill.root.innerHTML=c.data._doc;
+    if(c.data&&c.data._doc){ window.__opsQuill.root.innerHTML=c.data._doc; qlUpgradeToggles(window.__opsQuill); }
     qlBindImages(window.__opsQuill,'opsboard');
   }catch(e){ window.__opsQuill=null; }
   modal.addEventListener('input', opsAutosaveDeb);
@@ -7373,31 +7384,44 @@ function opsDocEnsureSel(){ const q=window.__opsQuill; if(!q) return; q.focus();
 function opsDocTable(method){ try{ const t=window.__opsQuill&&window.__opsQuill.getModule('table'); if(!t) return; opsDocEnsureSel(); t[method](); }catch(e){} }
 function opsDocTableInsert(){ const r=parseInt(prompt('행 수 (1~12):','3')||'0',10); if(!r) return; const c=parseInt(prompt('열 수 (1~8):','3')||'0',10); if(!c) return; try{ opsDocEnsureSel(); window.__opsQuill.getModule('table').insertTable(Math.min(12,Math.max(1,r)),Math.min(8,Math.max(1,c))); }catch(e){ alert('표 삽입 실패: '+e.message); } }
 function opsDocColumns(){ const n=parseInt(prompt('분할 수 (2~5): 이미지·텍스트를 가로로 나눠 배치합니다','2')||'0',10); if(!n) return; try{ opsDocEnsureSel(); window.__opsQuill.getModule('table').insertTable(1,Math.min(5,Math.max(2,n))); }catch(e){ alert('다단 삽입 실패: '+e.message); } }
-(function(){ try{ if(!window.Quill||window.__toggleReg) return; window.__toggleReg=true; const BE=Quill.import('blots/block/embed'); class TG extends BE{ static create(v){ const node=super.create(); v=v||{}; const t=v.title||'접기 제목'; const b=v.body||'내용'; node.setAttribute('data-tt',t); node.setAttribute('data-bb',b); const d=document.createElement('details'); d.className='toggle-block'; const sm=document.createElement('summary'); sm.innerHTML=esc(t)+' <span class="tg-edit" title="편집">✎</span>'; const bd=document.createElement('div'); bd.className='toggle-content'; bd.innerHTML=b; d.appendChild(sm); d.appendChild(bd); node.appendChild(d); return node; } static value(node){ return {title:node.getAttribute('data-tt')||'', body:node.getAttribute('data-bb')||''}; } } TG.blotName='toggleblock'; TG.tagName='DIV'; TG.className='ql-toggle'; Quill.register(TG,true); }catch(e){} })();
-function opsInsertToggle(q){ if(!q) return; const sel=q.getSelection(true); const idx=sel?sel.index:q.getLength(); q.insertEmbed(idx,'toggleblock',{title:'접기 제목',body:'내용'}); q.setSelection(idx+1,0); setTimeout(function(){ const ns=q.root.querySelectorAll('.ql-toggle'); if(ns.length) opsToggleEdit(ns[ns.length-1]); },30); }
-function opsToggleEdit(node){
-  if(!node) return; window.__tgNode=node;
-  const title=node.getAttribute('data-tt')||''; const bodyHtml=node.getAttribute('data-bb')||'';
-  const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='tgEditModal'; modal.style.zIndex='340';
-  modal.innerHTML=`<div class="modal-box" style="max-width:520px"><div class="modal-head"><b>토글(접기) 편집</b><button onclick="window.__tgQuill=null;document.getElementById('tgEditModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body"><label class="form-label">제목</label><input id="tgTitle" class="form-input" value="${esc(title)}"><label class="form-label" style="margin-top:10px">내용 <span style="font-size:11px;color:var(--th)">(링크·이미지 삽입 가능)</span></label><div id="tgBodyBox" style="background:#fff;min-height:120px"></div></div><div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="window.__tgQuill=null;document.getElementById('tgEditModal').remove()">취소</button><button class="btn-submit" onclick="opsToggleSave()">저장</button></div></div>`;
-  document.body.appendChild(modal);
-  try{
-    const tq=new Quill('#tgBodyBox',{theme:'snow',placeholder:'내용을 입력하세요 (링크·이미지 삽입 가능)',modules:{toolbar:{container:[['bold','italic','underline'],[{list:'ordered'},{list:'bullet'}],['link','image'],['clean']],handlers:{image:()=>{ if(typeof isTestMode==='function'&&isTestMode()){alert('테스트 모드에서는 첨부할 수 없습니다.');return;} const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.onchange=async()=>{const f=inp.files&&inp.files[0];if(!f)return;const url=await nUploadFile(f,'images');if(url){const r=tq.getSelection()||{index:tq.getLength()};tq.insertEmbed(r.index,'image',url);tq.setSelection(r.index+1);}};inp.click(); }}}}});
-    tq.root.innerHTML=bodyHtml||''; window.__tgQuill=tq; qlBindImages(tq,'images');
-    tq.root.addEventListener('click',(e)=>{ if(e.target&&e.target.tagName==='IMG'){ e.preventDefault(); if(typeof showImgResizeMenu==='function') showImgResizeMenu(e.target); } });
-  }catch(e){ /* Quill 미로드 대비: 최소한 열기라도 유지 */ }
+// ── 노션형 네이티브 인라인 토글 (팝업 없음: 제목·내용을 본문에서 바로 편집) ──
+(function(){ try{ if(!window.Quill||window.__toggleReg) return; window.__toggleReg=true;
+  const BE=Quill.import('blots/block/embed');
+  class TG extends BE{
+    static create(v){ const node=super.create(); v=v||{};
+      node.setAttribute('contenteditable','false');
+      const t=(v.title!=null&&v.title!=='')?v.title:'접기 제목';
+      const b=(v.body!=null&&v.body!=='')?v.body:'<br>';
+      const d=document.createElement('details'); d.className='app-toggle'; d.open=true;
+      const sm=document.createElement('summary'); sm.className='app-toggle-sum';
+      sm.innerHTML='<span class="app-toggle-title" contenteditable="true">'+t+'</span>';
+      const bd=document.createElement('div'); bd.className='toggle-body'; bd.setAttribute('contenteditable','true'); bd.innerHTML=b;
+      d.appendChild(sm); d.appendChild(bd); node.appendChild(d); return node;
+    }
+    static value(node){ const tt=node.querySelector('.app-toggle-title')||node.querySelector('summary'); const bb=node.querySelector('.toggle-body')||node.querySelector('.toggle-content'); return {title: tt?tt.innerHTML:'', body: bb?bb.innerHTML:''}; }
+  }
+  TG.blotName='toggleblock'; TG.tagName='DIV'; TG.className='ql-toggle'; Quill.register(TG,true);
+}catch(e){} })();
+function opsInsertToggle(q){ if(!q) return; const sel=q.getSelection(true); const idx=sel?sel.index:q.getLength(); q.insertEmbed(idx,'toggleblock',{title:'접기 제목',body:''}); q.setSelection(idx+1,0);
+  setTimeout(function(){ const ns=q.root.querySelectorAll('.ql-toggle'); const last=ns[ns.length-1]; if(last){ const tt=last.querySelector('.app-toggle-title'); if(tt){ tt.focus(); try{ const r=document.createRange(); r.selectNodeContents(tt); const s=window.getSelection(); s.removeAllRanges(); s.addRange(r); }catch(e){} } } },50);
 }
-async function opsToggleSave(){
-  const node=window.__tgNode; if(!node){ document.getElementById('tgEditModal')?.remove(); return; }
-  const title=document.getElementById('tgTitle').value;
-  if(window.__tgQuill){ await qlScrubDataImages(window.__tgQuill,'images'); }
-  let bodyHtml=''; if(window.__tgQuill){ bodyHtml=window.__tgQuill.root.innerHTML; if(bodyHtml==='<p><br></p>') bodyHtml=''; }
-  node.setAttribute('data-tt',title); node.setAttribute('data-bb',bodyHtml);
-  const sm=node.querySelector('summary'); if(sm) sm.innerHTML=esc(title)+' <span class="tg-edit" title="편집">✎</span>';
-  const bd=node.querySelector('.toggle-content'); if(bd) bd.innerHTML=bodyHtml;
-  window.__tgQuill=null; document.getElementById('tgEditModal').remove();
+// 저장 전 정리: 편집용 contenteditable/구버전 연필 제거 → 깔끔한 시맨틱 HTML만 저장
+function qlCleanToggles(html){ if(!html) return html; return String(html).replace(/\scontenteditable="(?:true|false)"/g,'').replace(/<span class="tg-edit"[^>]*>[\s\S]*?<\/span>/g,''); }
+// 구버전(.toggle-block/.toggle-content/✎) 토글을 새 인라인 편집형으로 승격
+function qlUpgradeToggles(q){ if(!q||!q.root) return;
+  q.root.querySelectorAll('.ql-toggle').forEach(function(host){
+    host.setAttribute('contenteditable','false');
+    let det=host.querySelector('details'); if(!det) return;
+    det.classList.add('app-toggle'); det.classList.remove('toggle-block'); if(!det.open) det.open=true;
+    let sm=det.querySelector('summary'); if(sm){ const pen=sm.querySelector('.tg-edit'); if(pen) pen.remove();
+      if(!sm.querySelector('.app-toggle-title')){ const txt=(sm.innerHTML||'').trim()||'접기 제목'; sm.innerHTML='<span class="app-toggle-title" contenteditable="true">'+txt+'</span>'; }
+      else { sm.querySelector('.app-toggle-title').setAttribute('contenteditable','true'); }
+    }
+    let bd=det.querySelector('.toggle-body, .toggle-content'); if(bd){ bd.classList.add('toggle-body'); bd.classList.remove('toggle-content'); bd.setAttribute('contenteditable','true'); if((det.getAttribute('data-bb'))&&(!bd.innerHTML||bd.innerHTML==='내용')) bd.innerHTML=det.getAttribute('data-bb'); }
+  });
 }
-document.addEventListener('click',function(e){ const t=e.target; if(t&&t.classList&&t.classList.contains('tg-edit')){ e.preventDefault(); e.stopPropagation(); const host=t.closest('.ql-toggle'); if(host) opsToggleEdit(host); } });
+// 토글 제목(편집 가능) 클릭 시 details 접힘/펼침 방지 → 캐럿 배치·타이핑
+document.addEventListener('click',function(e){ const titleEl=e.target&&e.target.closest&&e.target.closest('.app-toggle-title[contenteditable="true"]'); if(titleEl){ e.preventDefault(); } }, true);
 function opsDocImage(){ const q=window.__opsQuill; if(!q) return; if(isTestMode()){ alert('테스트 모드에서는 첨부할 수 없습니다.'); return; } const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.onchange=async()=>{ const fl=inp.files&&inp.files[0]; if(!fl) return; const url=await nUploadFile(await compressImage(fl),'opsboard'); if(url){ const r=q.getSelection()||{index:q.getLength()}; q.insertEmbed(r.index,'image',url); q.setSelection(r.index+1); } }; inp.click(); }
 function opsChangeType(typeName){
   const O=window.__ops; opsCollectInto(window.__opsEditingCard);
@@ -7420,7 +7444,7 @@ function opsCollectInto(c){
     else if(f.type==='person') c.data[f.key]=JSON.parse(el.getAttribute('data-sel')||'[]');
     else c.data[f.key]=el.value;
   });
-  if(window.__opsQuill){ try{ const h=window.__opsQuill.root.innerHTML; c.data._doc=(h==='<p><br></p>')?'':h; }catch(e){} }
+  if(window.__opsQuill){ try{ const h=window.__opsQuill.root.innerHTML; c.data._doc=(h==='<p><br></p>')?'':qlCleanToggles(h); }catch(e){} }
 }
 async function opsUploadAtt(input){
   const file=input.files&&input.files[0]; if(!file) return;
@@ -7954,7 +7978,7 @@ function opsDocInit(){
   try{
     window.__opsQuill=new Quill('#opsDocPageBox',{theme:'snow',placeholder:'팀 업무·회의록을 자유롭게 기록하세요 — 제목/목록/체크리스트/표/다단/토글/이미지. 일자별 회의록은 토글로 정리하면 깔끔합니다.',modules:{table:true,toolbar:{container:[[{header:[1,2,3,false]}],['bold','italic','underline','strike'],[{background:['#fff59d','#b2f2bb','#ffc9c9','#a5d8ff','#ffd8a8',false]},{color:[]}],[{list:'ordered'},{list:'bullet'},{list:'check'}],['blockquote','code-block'],['link','image'],['clean']],handlers:{image:opsDocImage}}}});
     const card=(window.__ops.cards&&window.__ops.cards[0])||null;
-    if(card&&card.data&&card.data._doc) window.__opsQuill.root.innerHTML=card.data._doc;
+    if(card&&card.data&&card.data._doc){ window.__opsQuill.root.innerHTML=card.data._doc; qlUpgradeToggles(window.__opsQuill); }
     qlBindImages(window.__opsQuill,'opsboard');
     window.__opsQuill.on('text-change',function(_d,_o,src){ if(src==='user') opsDocAutosave(); });
     window.__opsQuill.root.addEventListener('click',function(e){ if(e.target&&e.target.tagName==='IMG'){ e.preventDefault(); if(typeof showImgResizeMenu==='function') showImgResizeMenu(e.target); } });
@@ -7966,7 +7990,7 @@ async function opsDocSave(silent){
   if(!opsCanManage()){ if(!silent) alert('편집 권한이 없습니다.'); return; }
   const O=window.__ops; const q=window.__opsQuill; if(!q) return;
   await qlScrubDataImages(q,'opsboard');
-  let html=q.root.innerHTML; if(html==='<p><br></p>') html='';
+  let html=qlCleanToggles(q.root.innerHTML); if(html==='<p><br></p>') html='';
   const board=O.boards.find(b=>b.id===O.boardId);
   const now=new Date().toISOString();
   try{
