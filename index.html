@@ -2139,7 +2139,8 @@ let readListHtml = '';
     `;
   });
 
-  // 전체 레이아웃 바인딩 (모든 직원이 볼 수 있도록 UI 결합)
+  // 전체 레이아웃 바인딩 — require_read=false(박제용)이면 확인 현황판 DOM 자체를 렌더링하지 않음 (A2)
+  if (p.require_read !== false) {
   readListHtml = `
     <div style="margin-bottom:16px; margin-top:20px;">
       <div class="section-label" style="font-weight: bold; font-size: 14px; margin-bottom: 10px;">📊 매장별 공지 확인 현황 (현장 대상)</div>
@@ -2157,6 +2158,7 @@ let readListHtml = '';
       </div>
     </div>
   `;
+  }
 
   const iconMap2 = {pdf:'ti-file-type-pdf',doc:'ti-file-type-doc',docx:'ti-file-type-doc',xls:'ti-file-type-xls',xlsx:'ti-file-type-xls',ppt:'ti-file-type-ppt',pptx:'ti-file-type-ppt',txt:'ti-file-type-txt',csv:'ti-file-type-csv',hwp:'ti-file-text',hwpx:'ti-file-text',jpg:'ti-photo',jpeg:'ti-photo',png:'ti-photo',gif:'ti-photo',webp:'ti-photo',svg:'ti-photo',heic:'ti-photo',zip:'ti-file-zip'};
   let attachHtml = '';
@@ -6962,6 +6964,13 @@ async function renderOpsBoard(area){
   await opsLoadBoardData();
   opsSubscribe();
   opsRender(area);
+  // 딥링크: ?card_id=XX (또는 ?opscard=) &opsboard=YY → 해당 카드 전면 열람
+  try{
+    const usp=new URLSearchParams(location.search);
+    const bidp=usp.get('opsboard'); const cidp=usp.get('card_id')||usp.get('opscard');
+    if(bidp){ const b=window.__ops.boards.find(x=>String(x.id)===String(bidp)); if(b && window.__ops.boardId!==b.id){ window.__ops.boardId=b.id; await opsLoadBoardData(); opsSubscribe(); opsRender(area); } }
+    if(cidp){ const c=(window.__ops.cards||[]).find(x=>String(x.id)===String(cidp)); if(c) opsOpenCard(c.id); }
+  }catch(e){}
 }
 
 async function opsLoadBoardData(){
@@ -7016,6 +7025,10 @@ function opsRender(area){
     </div>
     ${isDoc ? opsDocShell(board) : (isMind ? opsMindShell() : `
     <div class="ops-toolbar">
+      <div style="display:inline-flex;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden;margin-right:2px;flex-shrink:0">
+        <button type="button" class="btn-cancel-sm" style="border:none;border-radius:0;font-size:12px;${O.cardView==='list'?'background:var(--crm);font-weight:700':''}" onclick="opsSetCardView('list')">📋 리스트</button>
+        <button type="button" class="btn-cancel-sm" style="border:none;border-radius:0;font-size:12px;${O.cardView!=='list'?'background:var(--crm);font-weight:700':''}" onclick="opsSetCardView('board')">🗂️ 보드</button>
+      </div>
       <input id="opsSearch" class="ops-search" placeholder="카드 검색..." value="${esc(O.filter.q||'')}" oninput="opsSetFilter('q',this.value)">
       <select class="ops-fsel" onchange="opsSetFilter('status',this.value)"><option value="">상태 전체</option>${statusOpts}</select>
       <select class="ops-fsel" onchange="opsSetFilter('type',this.value)"><option value="">유형 전체</option>${typeOpts}</select>
@@ -7040,6 +7053,7 @@ function opsMatchFilter(c){
 
 function opsGroupsHtml(){
   const O=window.__ops;
+  if(O.cardView==='list') return opsListHtml();
   return O.groups.map(g=>{
     const cards=O.cards.filter(c=>c.group_id===g.id && opsMatchFilter(c));
     const cardHtml=cards.map(c=>opsCardMini(c)).join('') || '<div class="ops-empty">카드 없음</div>';
@@ -7089,6 +7103,31 @@ function opsCardMini(c){
 function opsSetFilter(k,v){ window.__ops.filter[k]=v; const b=document.getElementById('opsBoard'); if(b) b.innerHTML=opsGroupsHtml();
   // 검색은 포커스 유지
   if(k==='q'){ const s=document.getElementById('opsSearch'); } }
+function opsSetCardView(v){ window.__ops.cardView=v; opsRender(document.getElementById('contentArea')); }
+// 리스트형(게시판) 보기 — 같은 카테고리 카드들을 한 줄 목록으로
+function opsListHtml(){
+  const O=window.__ops;
+  const gmap={}; (O.groups||[]).forEach(g=>gmap[g.id]=g.name);
+  let cards=(O.cards||[]).filter(c=>opsMatchFilter(c));
+  cards.sort((a,b)=>{ const ad=(a.data&&a.data._due)||'9999-99-99', bd=(b.data&&b.data._due)||'9999-99-99'; if(ad!==bd) return ad<bd?-1:1; return (a.sort_order||0)-(b.sort_order||0); });
+  const addBtn = opsCanManage()?`<button class="btn-cancel-sm" style="margin-top:8px" onclick="opsEditCard(null,${(O.groups[0]&&O.groups[0].id)||'null'})"><i class="ti ti-plus"></i> 카드 추가</button>`:'';
+  if(!cards.length) return `<div style="max-width:900px"><div class="ops-empty" style="padding:30px;text-align:center;color:var(--th)">카드가 없습니다.</div>${addBtn}</div>`;
+  const rows=cards.map(c=>{
+    const st=(c.data&&c.data._status)||''; const pr=(c.data&&c.data._priority)||''; const due=(c.data&&c.data._due)||''; const as=(c.data&&c.data._assignees)||[];
+    const overdue=due && st!=='완료' && (new Date(due)<new Date(new Date().toDateString()));
+    const tcolor=opsCardColor(c); const prColor= pr==='높음'?'#d9534f':(pr==='낮음'?'#8a8a8a':'#c98a3a');
+    return `<div class="ops-listrow" onclick="opsOpenCard(${c.id})" style="display:flex;align-items:center;gap:9px;padding:11px 14px;border:0.5px solid var(--crd);border-left:4px solid ${tcolor};border-radius:8px;margin-bottom:6px;background:#fff;cursor:pointer">
+      ${c.card_type?`<span class="ops-type" style="background:${tcolor};color:#fff;border-color:${tcolor};flex-shrink:0">${esc(c.card_type)}</span>`:''}
+      <span style="flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--tm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(c.data&&c.data._locked)?'<i class="ti ti-lock" style="color:#c98a3a;font-size:12px"></i> ':''}${esc(c.title||'(제목 없음)')}</span>
+      <span style="font-size:11px;color:var(--th);flex-shrink:0;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(gmap[c.group_id]||'')}</span>
+      ${st?`<span class="ops-chip" style="flex-shrink:0">${esc(st)}</span>`:''}
+      ${pr?`<span class="ops-chip" style="color:${prColor};border-color:${prColor};flex-shrink:0">${esc(pr)}</span>`:''}
+      ${due?`<span class="ops-chip${overdue?' ops-over':''}" style="flex-shrink:0"><i class="ti ti-calendar"></i> ${esc(due.slice(5))}</span>`:''}
+      ${as.length?`<span style="font-size:11px;color:var(--th);flex-shrink:0"><i class="ti ti-user"></i> ${as.length}</span>`:''}
+    </div>`;
+  }).join('');
+  return `<div style="max-width:900px">${rows}${addBtn}</div>`;
+}
 function opsClearFilter(){ window.__ops.filter={}; renderOpsBoard(document.getElementById('contentArea')); }
 
 // ── 보드 전환/추가 ──
@@ -7302,9 +7341,9 @@ function opsEditCard(cardId, groupId){
   const delBtn=cardId&&opsCanManage()?`<button class="btn-cancel-sm" style="color:var(--rd)" onclick="opsDeleteCard(${cardId})"><i class="ti ti-trash"></i> 삭제</button>`:'';
   const modal=document.createElement('div');
   modal.className='modal-overlay'; modal.id='opsCardModal';
-  modal.innerHTML=`<div class="modal-box" style="max-width:720px">
+  modal.innerHTML=`<div class="modal-box" style="width:96vw;height:94vh;max-width:100%;max-height:94vh;display:flex;flex-direction:column;border-radius:14px">
     <div class="modal-head"><b>${cardId?'카드 편집':'새 카드'}</b><button onclick="opsCloseCard()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
-    <div class="modal-body" style="max-height:70vh;overflow-y:auto">
+    <div class="modal-body" style="flex:1;overflow-y:auto;width:100%;max-width:940px;margin:0 auto">
       <div class="form-row"><label class="form-label">유형</label><select id="opsCardType" class="form-input" onchange="opsChangeType(this.value)">${typeSel}</select></div>
       <div class="form-row"><label class="form-label">딱지 색상</label><div id="opsCardColorRow">${TYPE_PALETTE.map(cc=>`<span class="ops-cdot" data-c="${cc}" onclick="opsPickCardColor('${cc}')" style="background:${cc};outline:${(c.data&&c.data._color)===cc?'2px solid #2b1a0e':'none'}"></span>`).join('')}<span class="ops-cdot" data-c="" onclick="opsPickCardColor('')" title="유형 기본색" style="background:#fff;border:1px dashed #aaa;color:#aaa">×</span></div></div>
       <div class="form-row"><label class="form-label">제목 <span style="color:var(--rd)">*</span></label><input id="opsCardTitle" class="form-input" value="${esc(c.title||'')}"></div>
@@ -7582,9 +7621,9 @@ function opsOpenCard(cardId, groupId){
     ? `<button class="btn-submit" onclick="opsUnlockEdit(${cardId})"><i class="ti ti-lock-open"></i> 잠금 해제하고 편집</button>`
     : `<button class="btn-cancel-sm" onclick="opsLockCard(${cardId})"><i class="ti ti-lock"></i> 잠그기</button><button class="btn-submit" onclick="document.getElementById('opsCardModal').remove();opsEditCard(${cardId})"><i class="ti ti-edit"></i> 편집</button>`; }
   const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='opsCardModal';
-  modal.innerHTML=`<div class="modal-box" style="max-width:560px">
+  modal.innerHTML=`<div class="modal-box" style="width:96vw;height:94vh;max-width:100%;max-height:94vh;display:flex;flex-direction:column;border-radius:14px">
     <div class="modal-head"><span style="display:flex;align-items:center;gap:8px">${c.card_type?`<span class="ops-type" style="background:${tcolor};color:#fff;border-color:${tcolor}">${esc(c.card_type)}</span>`:''}<b>${esc(c.title||'(제목 없음)')}</b></span><button onclick="document.getElementById('opsCardModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
-    <div class="modal-body" style="max-height:66vh;overflow-y:auto">${fieldsHtml}${(c.data&&c.data._doc&&c.data._doc.replace(/<[^>]+>/g,'').trim())?`<div class="ops-doc">${c.data._doc}</div>`:''}${(!fieldsHtml&&!(c.data&&c.data._doc))?'<div style="color:var(--th);font-size:13px">내용이 없습니다.</div>':''}${attHtml}<div style="margin-top:14px;font-size:11px;color:var(--th);border-top:0.5px solid var(--crd);padding-top:10px">${meta}${lockBadge?' · '+lockBadge:''}</div><div id="opsCcSection" style="margin-top:12px"></div></div>
+    <div class="modal-body" style="flex:1;overflow-y:auto;width:100%;max-width:940px;margin:0 auto">${fieldsHtml}${(c.data&&c.data._doc&&c.data._doc.replace(/<[^>]+>/g,'').trim())?`<div class="ops-doc">${c.data._doc}</div>`:''}${(!fieldsHtml&&!(c.data&&c.data._doc))?'<div style="color:var(--th);font-size:13px">내용이 없습니다.</div>':''}${attHtml}<div style="margin-top:14px;font-size:11px;color:var(--th);border-top:0.5px solid var(--crd);padding-top:10px">${meta}${lockBadge?' · '+lockBadge:''}</div><div id="opsCcSection" style="margin-top:12px"></div></div>
     <div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-cancel-sm" onclick="opsCopyCardLink(${cardId})"><i class="ti ti-link"></i> 링크 복사</button><button class="btn-cancel-sm" onclick="document.getElementById('opsCardModal').remove()">닫기</button>${actionBtns}</div>
   </div>`;
   document.body.appendChild(modal);
