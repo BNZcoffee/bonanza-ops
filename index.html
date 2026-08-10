@@ -318,6 +318,10 @@ textarea.form-input{min-height:120px;resize:vertical}
 .app-toggle .app-toggle-title:empty::before{content:'접기 제목';color:var(--th);font-weight:400}
 .app-toggle .toggle-body{padding:8px 14px 12px 28px;border-top:0.5px solid var(--crd);outline:none;font-weight:400}
 .ql-editor .app-toggle .toggle-body:empty::before,.ql-editor .app-toggle .toggle-body:has(>br:only-child)::before{content:'내용을 입력하세요';color:var(--th)}
+.mind-badges{display:flex;gap:3px;flex-wrap:wrap;margin-top:4px}
+.mind-badge{font-size:9px;font-weight:700;border-radius:6px;padding:1px 5px;line-height:1.5;white-space:nowrap}
+.mind-badge-link{background:#eef3ff;color:#4a6fd0;border:0.5px solid #cdd9f5}
+.mind-opt{border:1px solid var(--crd);border-radius:7px;padding:3px 11px;font-size:12px;font-weight:700;background:#fff;cursor:pointer;font-family:inherit}
 .mind-node.sel{outline:2px solid #4a90d9;outline-offset:1px}
 .mind-group.sel{outline:2px solid #4a90d9}
 #opsMindSelBtn.active{background:var(--br);color:#fff}
@@ -7921,6 +7925,97 @@ async function opsSyncSheet(card){
 window.__mind = window.__mind || { nodes:[], edges:[], panX:40, panY:40, zoom:1, drag:null, sel:new Set(), selectMode:false };
 if(!window.__mind.sel) window.__mind.sel=new Set();
 const MIND_COLORS = ['#c98a3a','#4a90d9','#d9534f','#5cb85c','#8e6fd8','#41403e'];
+const MIND_PRIORITIES=[['P1','#d9534f'],['P2','#e0952b'],['P3','#4a90d9']];
+const MIND_STATUSES=[['대기','#8a8a8a'],['진행중','#4a90d9'],['완료','#5cb85c']];
+Object.assign(window.__mind,{mapId:(window.__mind.mapId||null),maps:(window.__mind.maps||[]),dirty:false,hist:(window.__mind.hist||{undo:[],redo:[]}),tempSeq:(window.__mind.tempSeq||-1),loadedNodeIds:[],loadedEdgeIds:[],mapSort:(window.__mind.mapSort||'updated')});
+// ── 팀 마인드맵 보관함: 맵 목록은 app_settings 에 보관(무마이그레이션), 노드는 data.map_id 로 구분 ──
+function opsMindMapsKey(){ return 'ops_mind_maps_'+window.__ops.boardId; }
+async function opsMindLoadMaps(){ try{ const {data}=await sb.from('app_settings').select('value').eq('key',opsMindMapsKey()).maybeSingle(); let v=(data&&data.value)?(typeof data.value==='string'?JSON.parse(data.value):data.value):[]; window.__mind.maps=Array.isArray(v)?v:[]; }catch(e){ window.__mind.maps=[]; } }
+async function opsMindSaveMaps(){ try{ await sb.from('app_settings').upsert({key:opsMindMapsKey(),value:JSON.stringify(window.__mind.maps)},{onConflict:'key'}); }catch(e){} }
+async function opsMindMigrateLegacy(){ if(window.__mind.maps.length) return; const {data:nodes}=await sb.from('ops_mind_nodes').select('id,data').eq('board_id',window.__ops.boardId); if(!nodes||!nodes.length) return; const untagged=nodes.filter(n=>!(n.data&&n.data.map_id)); if(!untagged.length) return; const mapId='m'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); for(const n of untagged){ const nd=Object.assign({},n.data||{}); nd.map_id=mapId; try{ await sb.from('ops_mind_nodes').update({data:nd}).eq('id',n.id); }catch(e){} } window.__mind.maps.push({id:mapId,name:'기존 마인드맵',priority:'',due:'',updated_at:new Date().toISOString(),created_by:currentUser.id}); await opsMindSaveMaps(); }
+function opsMindMapName(mp){ return (mp&&mp.name)?mp.name:'제목 없는 마인드맵'; }
+// ── Undo/Redo & 명시적 저장 ──
+function opsMindClone(o){ return JSON.parse(JSON.stringify(o)); }
+function opsMindSnapshot(){ return {nodes:opsMindClone(window.__mind.nodes),edges:opsMindClone(window.__mind.edges)}; }
+function opsMindPush(){ const m=window.__mind; m.hist.undo.push(opsMindSnapshot()); if(m.hist.undo.length>60) m.hist.undo.shift(); m.hist.redo=[]; m.dirty=true; opsMindUpdateBar(); }
+function opsMindRestore(s){ window.__mind.nodes=opsMindClone(s.nodes); window.__mind.edges=opsMindClone(s.edges); opsMindRender(); opsMindUpdateBar(); }
+function opsMindUndo(){ const m=window.__mind; if(!m.hist.undo.length) return; m.hist.redo.push(opsMindSnapshot()); m.dirty=true; opsMindRestore(m.hist.undo.pop()); }
+function opsMindRedo(){ const m=window.__mind; if(!m.hist.redo.length) return; m.hist.undo.push(opsMindSnapshot()); m.dirty=true; opsMindRestore(m.hist.redo.pop()); }
+function opsMindUpdateBar(){ const m=window.__mind; const u=document.getElementById('mindUndoBtn'),r=document.getElementById('mindRedoBtn'),s=document.getElementById('mindSaveBtn'); if(u) u.disabled=!m.hist.undo.length; if(r) r.disabled=!m.hist.redo.length; if(s){ s.innerHTML='<i class="ti ti-device-floppy"></i> 저장'+(m.dirty?' *':''); s.style.opacity=m.dirty?'1':'0.75'; } }
+function opsMindNextTempId(){ return window.__mind.tempSeq--; }
+async function opsMindSave(){ const m=window.__mind; if(!m.mapId) return; if(isTestMode()){ alert('테스트 모드에서는 저장할 수 없습니다.'); return; } const bid=window.__ops.boardId; const sbtn=document.getElementById('mindSaveBtn'); if(sbtn) sbtn.disabled=true;
+  try{
+    if(m.loadedEdgeIds&&m.loadedEdgeIds.length) await sb.from('ops_mind_edges').delete().in('id',m.loadedEdgeIds);
+    if(m.loadedNodeIds&&m.loadedNodeIds.length) await sb.from('ops_mind_nodes').delete().in('id',m.loadedNodeIds);
+    const idMap={}; const newNodeIds=[];
+    for(const n of m.nodes){ const nd=Object.assign({},n.data||{}); nd.map_id=m.mapId; const {data,error}=await sb.from('ops_mind_nodes').insert({board_id:bid,text:n.text||'',x:Math.round(n.x)||0,y:Math.round(n.y)||0,color:n.color||'#c98a3a',data:nd,created_by:(n.created_by||currentUser.id),updated_by:currentUser.id}).select().single(); if(error) throw error; idMap[n.id]=data.id; n.id=data.id; n.data=data.data; newNodeIds.push(data.id); }
+    const newEdgeIds=[]; for(const e of m.edges){ const f=idMap[e.from_id],t=idMap[e.to_id]; if(!f||!t) continue; const {data,error}=await sb.from('ops_mind_edges').insert({board_id:bid,from_id:f,to_id:t}).select().single(); if(error) throw error; e.id=data.id; e.from_id=f; e.to_id=t; newEdgeIds.push(data.id); }
+    m.loadedNodeIds=newNodeIds; m.loadedEdgeIds=newEdgeIds; m.dirty=false; m.hist.undo=[]; m.hist.redo=[];
+    const mp=m.maps.find(x=>x.id===m.mapId); if(mp){ mp.updated_at=new Date().toISOString(); await opsMindSaveMaps(); }
+    opsMindRender(); opsMindUpdateBar(); opsMindSetHint('저장되었습니다.'); setTimeout(()=>opsMindSetHint(''),1500);
+  }catch(err){ alert('저장 오류: '+(err.message||err)+'\n\n다시 저장하거나 새로고침 해주세요.'); }
+  if(sbtn) sbtn.disabled=false;
+}
+// ── 보관함(목록) 화면 ──
+function opsMindSortMaps(list){ const s=window.__mind.mapSort; const arr=list.slice(); const rk={P1:1,P2:2,P3:3,'':9}; if(s==='priority'){ arr.sort((a,b)=>(rk[a.priority||'']||9)-(rk[b.priority||'']||9)||(b.updated_at||'').localeCompare(a.updated_at||'')); } else if(s==='due'){ arr.sort((a,b)=>((a.due||'9999-99-99').localeCompare(b.due||'9999-99-99'))||(b.updated_at||'').localeCompare(a.updated_at||'')); } else { arr.sort((a,b)=>(b.updated_at||'').localeCompare(a.updated_at||'')); } return arr; }
+function opsMindArchiveHtml(){ const m=window.__mind; const maps=opsMindSortMaps(m.maps); const canEdit=opsCanManage();
+  const sortSel=`<select class="ops-fsel" onchange="opsMindSetSort(this.value)"><option value="updated"${m.mapSort==='updated'?' selected':''}>최신 수정순</option><option value="priority"${m.mapSort==='priority'?' selected':''}>우선순위순</option><option value="due"${m.mapSort==='due'?' selected':''}>마감 임박순</option></select>`;
+  const cards=maps.map(mp=>{ const pr=mp.priority||''; const prc=(MIND_PRIORITIES.find(p=>p[0]===pr)||[])[1]||''; const due=mp.due||''; const overdue=due&&new Date(due)<new Date(new Date().toDateString());
+    return `<div class="ops-listrow" onclick="opsMindOpenMap('${mp.id}')" style="display:flex;align-items:center;gap:10px;padding:12px 14px;border:0.5px solid var(--crd);border-radius:10px;margin-bottom:8px;background:#fff;cursor:pointer">
+      <i class="ti ti-bulb" style="color:#8256c4;font-size:16px"></i>
+      <span style="flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--tm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(opsMindMapName(mp))}</span>
+      ${pr?`<span class="ops-chip" style="color:${prc};border-color:${prc}">${pr}</span>`:''}
+      ${due?`<span class="ops-chip${overdue?' ops-over':''}"><i class="ti ti-calendar"></i> ${esc(due.slice(5))}</span>`:''}
+      <span style="font-size:11px;color:var(--th);flex-shrink:0">${mp.updated_at?fmtDate(mp.updated_at):''}</span>
+      ${canEdit?`<button class="btn-cancel-sm" style="padding:3px 7px;font-size:11px" onclick="event.stopPropagation();opsMindMapMeta('${mp.id}')"><i class="ti ti-settings"></i></button>`:''}
+    </div>`; }).join('')||'<div style="padding:34px;text-align:center;color:var(--th)">아직 마인드맵이 없습니다. <b>＋ 새 마인드맵</b>으로 시작하세요.</div>';
+  return `<div style="max-width:820px;margin:0 auto;padding:8px 2px 40px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <div style="font-size:16px;font-weight:700;color:var(--tm);flex:1"><i class="ti ti-bulb"></i> 팀 마인드맵 보관함</div>
+      ${sortSel}${canEdit?`<button class="btn-submit" onclick="opsMindNewMap()"><i class="ti ti-plus"></i> 새 마인드맵</button>`:''}
+    </div>${cards}</div>`;
+}
+function opsMindSetSort(v){ window.__mind.mapSort=v; const h=document.getElementById('opsMindHost'); if(h) h.innerHTML=opsMindArchiveHtml(); }
+async function opsMindRenderArchive(){ const host=document.getElementById('opsMindHost'); if(!host) return; window.__mind.mapId=null; await opsMindLoadMaps(); await opsMindMigrateLegacy(); host.innerHTML=opsMindArchiveHtml(); }
+async function opsMindNewMap(){ if(!opsCanManage()){ alert('권한이 없습니다.'); return; } const name=prompt('새 마인드맵 이름:'); if(!name||!name.trim()) return; const mp={id:'m'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),name:name.trim(),priority:'',due:'',updated_at:new Date().toISOString(),created_by:currentUser.id}; window.__mind.maps.push(mp); await opsMindSaveMaps(); opsMindOpenMap(mp.id); }
+function opsMindMapMeta(mapId){ const mp=window.__mind.maps.find(x=>x.id===mapId); if(!mp) return; const prOpts=['','P1','P2','P3'].map(p=>`<option value="${p}"${(mp.priority||'')===p?' selected':''}>${p||'우선순위 없음'}</option>`).join(''); const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='mindMapMetaModal'; modal.style.zIndex='340'; modal.innerHTML=`<div class="modal-box" style="max-width:400px"><div class="modal-head"><b>마인드맵 설정</b><button onclick="document.getElementById('mindMapMetaModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body"><label class="form-label">이름</label><input id="mmName" class="form-input" value="${esc(mp.name||'')}"><label class="form-label" style="margin-top:10px">우선순위</label><select id="mmPr" class="form-input">${prOpts}</select><label class="form-label" style="margin-top:10px">마감일</label><input id="mmDue" type="date" class="form-input" value="${esc(mp.due||'')}"></div><div class="modal-foot" style="display:flex;justify-content:space-between;gap:8px"><button class="btn-cancel-sm" style="color:var(--rd)" onclick="opsMindDeleteMap('${mapId}')"><i class="ti ti-trash"></i> 삭제</button><div style="display:flex;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('mindMapMetaModal').remove()">취소</button><button class="btn-submit" onclick="opsMindSaveMapMeta('${mapId}')">저장</button></div></div></div>`; document.body.appendChild(modal); }
+async function opsMindSaveMapMeta(mapId){ const mp=window.__mind.maps.find(x=>x.id===mapId); if(!mp) return; mp.name=(document.getElementById('mmName').value||'').trim()||mp.name; mp.priority=document.getElementById('mmPr').value||''; mp.due=document.getElementById('mmDue').value||''; mp.updated_at=new Date().toISOString(); await opsMindSaveMaps(); document.getElementById('mindMapMetaModal')?.remove(); opsMindRenderArchive(); }
+async function opsMindDeleteMap(mapId){ if(!opsIsMaster()){ alert('총괄만 삭제할 수 있습니다.'); return; } const mp=window.__mind.maps.find(x=>x.id===mapId); if(!mp) return; if(!confirm('"'+opsMindMapName(mp)+'" 마인드맵을 삭제할까요?\n안의 모든 노드가 삭제됩니다.')) return; const pw=prompt('총괄 비밀번호를 입력하세요.'); if(!pw) return; if(!(await reauth(pw))){ alert('비밀번호가 일치하지 않습니다.'); return; } try{ const {data:ns}=await sb.from('ops_mind_nodes').select('id').eq('board_id',window.__ops.boardId).eq('data->>map_id',mapId); const ids=(ns||[]).map(n=>n.id); if(ids.length){ try{ await sb.from('ops_mind_edges').delete().or('from_id.in.('+ids.join(',')+'),to_id.in.('+ids.join(',')+')'); }catch(e){} await sb.from('ops_mind_nodes').delete().in('id',ids); } }catch(e){} window.__mind.maps=window.__mind.maps.filter(x=>x.id!==mapId); await opsMindSaveMaps(); document.getElementById('mindMapMetaModal')?.remove(); opsMindRenderArchive(); }
+// ── 캔버스 열기/닫기 ──
+async function opsMindOpenMap(mapId){ const host=document.getElementById('opsMindHost'); if(!host) return; const bid=window.__ops.boardId; const m=window.__mind;
+  const {data:nodes}=await sb.from('ops_mind_nodes').select('*').eq('board_id',bid).eq('data->>map_id',mapId); const ns=nodes||[]; const nodeIds=ns.map(n=>n.id); let es=[];
+  if(nodeIds.length){ const {data:edges}=await sb.from('ops_mind_edges').select('*').eq('board_id',bid).in('from_id',nodeIds); es=(edges||[]).filter(e=>nodeIds.indexOf(e.to_id)>=0); }
+  m.mapId=mapId; m.nodes=ns; m.edges=es; m.loadedNodeIds=nodeIds.slice(); m.loadedEdgeIds=es.map(e=>e.id); m.dirty=false; m.hist={undo:[],redo:[]}; m.sel=new Set(); m.selectMode=false; m.panX=40; m.panY=40; m.zoom=1; m.drag=null; window.__mindLinkFrom=null; window.__mindConnectMode=false;
+  host.innerHTML=opsMindCanvasHtml(); opsMindApplyTransform(); opsMindRender(); opsMindUpdateBar();
+}
+function opsMindBackToArchive(){ if(window.__mind.dirty && !confirm('저장하지 않은 변경사항이 있습니다.\n보관함으로 나가면 사라집니다. 계속할까요?')) return; opsMindRenderArchive(); }
+function opsMindLinkBadge(n){ const l=(n.data&&n.data._link)||''; if(!l) return ''; let label='🔗 링크'; if(/notion\./i.test(l)) label='🔗 Notion'; else if(/drive\.google|docs\.google/i.test(l)) label='🔗 Drive'; else if(/card_id=|opscard=/i.test(l)) label='📄 보드연동'; else if(/[?&]post=/i.test(l)) label='📄 공지'; return '<span class="mind-badge mind-badge-link">'+label+'</span>'; }
+function opsMindCanvasHtml(){ const mp=window.__mind.maps.find(x=>x.id===window.__mind.mapId);
+  return `<div class="ops-mind" id="opsMind">
+    <div class="ops-mind-tools">
+      <button class="btn-cancel-sm" onclick="opsMindBackToArchive()"><i class="ti ti-arrow-left"></i> 보관함</button>
+      <span style="font-weight:700;font-size:13px;align-self:center;margin:0 4px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(opsMindMapName(mp))}</span>
+      <button class="btn-cancel-sm" id="mindUndoBtn" onclick="opsMindUndo()" title="실행취소 (Ctrl+Z)"><i class="ti ti-arrow-back-up"></i></button>
+      <button class="btn-cancel-sm" id="mindRedoBtn" onclick="opsMindRedo()" title="다시실행 (Ctrl+Y)"><i class="ti ti-arrow-forward-up"></i></button>
+      <button class="btn-submit" id="mindSaveBtn" onclick="opsMindSave()"><i class="ti ti-device-floppy"></i> 저장</button>
+      <span style="width:1px;height:20px;background:var(--crd);margin:0 3px;align-self:center"></span>
+      <button class="btn-cancel-sm" onclick="opsMindAddNode()"><i class="ti ti-plus"></i> 항목</button>
+      <button class="btn-cancel-sm" onclick="opsMindAddGroup()"><i class="ti ti-box"></i> 꾸러미</button>
+      <button class="btn-cancel-sm" id="opsMindSelBtn" onclick="opsMindToggleSelect()"><i class="ti ti-pointer"></i> 선택</button>
+      <button class="btn-cancel-sm" id="opsMindLinkBtn" onclick="opsMindToggleLink()"><i class="ti ti-link"></i> 연결모드</button>
+      <button class="btn-cancel-sm" onclick="opsMindTemplateMenu(event)"><i class="ti ti-template"></i> 템플릿</button>
+      <button class="btn-cancel-sm" onclick="opsMindExportImage()"><i class="ti ti-photo-down"></i> 이미지</button>
+      <div class="ops-mind-search"><input id="opsMindSearch" placeholder="항목 검색..." oninput="opsMindSearch(this.value)"><div id="opsMindResults" class="ops-mind-results"></div></div>
+      <span id="opsMindHint" style="font-size:11px;color:var(--th);align-self:center"></span>
+    </div>
+    <div class="ops-mind-legend"><span><i class="ti ti-hand-move"></i> 빈곳=화면이동</span><span><i class="ti ti-pointer"></i> 노드=편집</span><span><i class="ti ti-arrows-move"></i> 드래그=위치</span><span><i class="ti ti-device-floppy"></i> 저장을 눌러야 확정</span></div>
+    <div class="ops-mind-zoom"><button class="btn-cancel-sm" onclick="opsMindZoom(1.2)"><i class="ti ti-plus"></i></button><button class="btn-cancel-sm" onclick="opsMindZoom(0.8333)"><i class="ti ti-minus"></i></button></div>
+    <div id="opsMindSelBar" class="ops-mind-selbar" style="display:none"></div>
+    <div class="ops-mind-vp" id="opsMindVp" onpointerdown="opsMindPanStart(event)" onwheel="opsMindWheel(event)">
+      <div class="ops-mind-world" id="opsMindWorld"><div id="opsMindGroups"></div><svg class="mind-edges" id="opsMindEdges" width="8000" height="8000"></svg><div id="opsMindNodes"></div></div>
+    </div>
+  </div>`;
+}
 const MIND_TEMPLATES={
  struct:{name:'업무 구조도', nodes:[{text:'중심 주제',dx:-84,dy:-28,color:'#41403e'},{text:'영역 A',dx:-330,dy:-170,color:'#4a90d9'},{text:'영역 B',dx:190,dy:-170,color:'#5cb85c'},{text:'세부 A-1',dx:-430,dy:60,color:'#c98a3a'},{text:'세부 B-1',dx:300,dy:60,color:'#c98a3a'}], edges:[[0,1],[0,2],[1,3],[2,4]]},
  process:{name:'프로세스 흐름', nodes:[{text:'1단계',dx:-370,dy:-28,color:'#4a90d9'},{text:'2단계',dx:-120,dy:-28,color:'#4a90d9'},{text:'3단계',dx:130,dy:-28,color:'#4a90d9'},{text:'완료',dx:380,dy:-28,color:'#5cb85c'}], edges:[[0,1],[1,2],[2,3]]},
@@ -7928,16 +8023,17 @@ const MIND_TEMPLATES={
  manual:{name:'매뉴얼 목차', nodes:[{text:'매뉴얼 제목',dx:-84,dy:-210,color:'#41403e'},{text:'대분류 1',dx:-310,dy:-40,color:'#c98a3a'},{text:'대분류 2',dx:190,dy:-40,color:'#c98a3a'},{text:'소항목 1-1',dx:-400,dy:150},{text:'소항목 1-2',dx:-200,dy:150},{text:'소항목 2-1',dx:130,dy:150}], edges:[[0,1],[0,2],[1,3],[1,4],[2,5]]}
 };
 function opsMindTemplateMenu(e){ e.stopPropagation(); document.getElementById('opsMindTmplMenu')?.remove(); const mn=document.createElement('div'); mn.id='opsMindTmplMenu'; mn.className='ops-menu'; mn.innerHTML=Object.keys(MIND_TEMPLATES).map(k=>`<button onclick="document.getElementById('opsMindTmplMenu').remove();opsMindApplyTemplate('${k}')">${MIND_TEMPLATES[k].name}</button>`).join(''); document.body.appendChild(mn); const r=e.target.getBoundingClientRect(); mn.style.left=r.left+'px'; mn.style.top=(r.bottom+4)+'px'; setTimeout(()=>document.addEventListener('click',()=>document.getElementById('opsMindTmplMenu')?.remove(),{once:true}),0); }
-async function opsMindApplyTemplate(key){
+function opsMindApplyTemplate(key){
   if(isTestMode()){ alert('테스트 모드에서는 추가할 수 없습니다.'); return; }
   const T=MIND_TEMPLATES[key]; if(!T) return;
   const vp=document.getElementById('opsMindVp'); const m=window.__mind;
   const cx=Math.round((-m.panX+(vp?vp.clientWidth/2:300))/m.zoom)-84;
   const cy=Math.round((-m.panY+(vp?vp.clientHeight/2:200))/m.zoom)-24;
+  opsMindPush();
   const created=[];
-  for(const nd of T.nodes){ const {data,error}=await sb.from('ops_mind_nodes').insert({board_id:window.__ops.boardId,text:nd.text,x:cx+nd.dx,y:cy+nd.dy,color:nd.color||'#c98a3a',created_by:currentUser.id,updated_by:currentUser.id}).select().single(); if(error){ alert('오류: '+error.message); return; } created.push(data); m.nodes.push(data); }
-  for(const e of (T.edges||[])){ const a=created[e[0]], b=created[e[1]]; if(a&&b){ try{ const {data:ed}=await sb.from('ops_mind_edges').insert({board_id:window.__ops.boardId,from_id:a.id,to_id:b.id}).select().single(); if(ed) m.edges.push(ed); }catch(err){} } }
-  if(created.length){ const xs=created.map(n=>n.x), ys=created.map(n=>n.y); const minX=Math.min(...xs)-30, minY=Math.min(...ys)-46, maxX=Math.max(...xs)+180, maxY=Math.max(...ys)+90; try{ const {data:g}=await sb.from('ops_mind_nodes').insert({board_id:window.__ops.boardId,text:'',x:minX,y:minY,color:'#c9b8a4',data:{shape:'group',w:maxX-minX,h:maxY-minY,label:T.name},created_by:currentUser.id,updated_by:currentUser.id}).select().single(); if(g) m.nodes.push(g); }catch(err){} }
+  for(const nd of T.nodes){ const node={id:opsMindNextTempId(),board_id:window.__ops.boardId,text:nd.text,x:cx+nd.dx,y:cy+nd.dy,color:nd.color||'#c98a3a',data:{}}; created.push(node); m.nodes.push(node); }
+  for(const e of (T.edges||[])){ const a=created[e[0]], b=created[e[1]]; if(a&&b){ m.edges.push({id:opsMindNextTempId(),board_id:window.__ops.boardId,from_id:a.id,to_id:b.id}); } }
+  if(created.length){ const xs=created.map(n=>n.x), ys=created.map(n=>n.y); const minX=Math.min(...xs)-30, minY=Math.min(...ys)-46, maxX=Math.max(...xs)+180, maxY=Math.max(...ys)+90; m.nodes.push({id:opsMindNextTempId(),board_id:window.__ops.boardId,text:'',x:minX,y:minY,color:'#c9b8a4',data:{shape:'group',w:maxX-minX,h:maxY-minY,label:T.name}}); }
   opsMindRender();
 }
 async function opsMindLinkPicker(){
@@ -8017,61 +8113,15 @@ async function opsDocSave(silent){
   }catch(e){ if(!silent) alert('저장 오류: '+(e.message||e)); }
 }
 
-function opsMindShell(){
-  return `<div class="ops-mind" id="opsMind">
-    <div class="ops-mind-tools">
-      <button class="btn-cancel-sm" onclick="opsMindAddNode()"><i class="ti ti-plus"></i> 항목</button>
-      <button class="btn-cancel-sm" onclick="opsMindAddGroup()"><i class="ti ti-box"></i> 꾸러미</button>
-      <button class="btn-cancel-sm" id="opsMindSelBtn" onclick="opsMindToggleSelect()"><i class="ti ti-pointer"></i> 선택</button>
-      <button class="btn-cancel-sm" id="opsMindLinkBtn" onclick="opsMindToggleLink()"><i class="ti ti-link"></i> 연결모드</button>
-      <button class="btn-cancel-sm" onclick="opsMindTemplateMenu(event)"><i class="ti ti-template"></i> 템플릿</button>
-      <button class="btn-cancel-sm" onclick="opsMindExportImage()"><i class="ti ti-photo-down"></i> 이미지 저장</button>
-      <div class="ops-mind-search"><input id="opsMindSearch" placeholder="항목 검색..." oninput="opsMindSearch(this.value)"><div id="opsMindResults" class="ops-mind-results"></div></div>
-      <span id="opsMindHint" style="font-size:11px;color:var(--th);align-self:center"></span>
-    </div>
-    <div class="ops-mind-legend"><span><i class="ti ti-hand-move"></i> 빈곳=화면이동</span><span><i class="ti ti-pointer"></i> 노드클릭=보기/편집</span><span><i class="ti ti-arrows-move"></i> 드래그=위치</span><span><i class="ti ti-link"></i> 연결모드→두 노드 클릭</span><span><i class="ti ti-search"></i> 검색→위치이동</span></div>
-    <div class="ops-mind-zoom">
-      <button class="btn-cancel-sm" onclick="opsMindZoom(1.2)"><i class="ti ti-plus"></i></button>
-      <button class="btn-cancel-sm" onclick="opsMindZoom(0.8333)"><i class="ti ti-minus"></i></button>
-    </div>
-    <div id="opsMindSelBar" class="ops-mind-selbar" style="display:none"></div>
-    <div class="ops-mind-vp" id="opsMindVp" onpointerdown="opsMindPanStart(event)" onwheel="opsMindWheel(event)">
-      <div class="ops-mind-world" id="opsMindWorld">
-        <div id="opsMindGroups"></div>
-        <svg class="mind-edges" id="opsMindEdges" width="8000" height="8000"></svg>
-        <div id="opsMindNodes"></div>
-      </div>
-    </div>
-  </div>`;
-}
+function opsMindShell(){ return '<div id="opsMindHost"></div>'; }
 
 async function opsMindInit(){
-  const bid=window.__ops.boardId;
-  const [{data:nodes},{data:edges}]=await Promise.all([
-    sb.from('ops_mind_nodes').select('*').eq('board_id',bid),
-    sb.from('ops_mind_edges').select('*').eq('board_id',bid)
-  ]);
-  window.__mind.nodes=nodes||[];
-  window.__mind.edges=edges||[];
-  opsMindApplyTransform();
-  opsMindRender();
-  if(!window.__mindBound){
-    document.addEventListener('pointermove', opsMindPointerMove);
-    document.addEventListener('pointerup', opsMindPointerUp);
-    window.__mindBound=true;
-  }
+  if(!window.__mindBound){ document.addEventListener('pointermove', opsMindPointerMove); document.addEventListener('pointerup', opsMindPointerUp); window.__mindBound=true; }
+  if(!window.__mindKeyBound){ window.__mindKeyBound=true; document.addEventListener('keydown',function(e){ if(currentPage!=='opsboard'||!window.__mind.mapId) return; if(document.querySelector('.modal-overlay')) return; const tag=(e.target&&e.target.tagName)||''; if(/INPUT|TEXTAREA|SELECT/.test(tag)||(e.target&&e.target.isContentEditable)) return; const z=(e.key==='z'||e.key==='Z'),y=(e.key==='y'||e.key==='Y'); if((e.ctrlKey||e.metaKey)&&z&&!e.shiftKey){ e.preventDefault(); opsMindUndo(); } else if((e.ctrlKey||e.metaKey)&&(y||(z&&e.shiftKey))){ e.preventDefault(); opsMindRedo(); } }); }
+  await opsMindRenderArchive();
 }
-async function opsMindReload(){
-  if(window.__ops.view!=='mind'||currentPage!=='opsboard') return;
-  if(window.__mind.drag) return;
-  const bid=window.__ops.boardId;
-  const [{data:nodes},{data:edges}]=await Promise.all([
-    sb.from('ops_mind_nodes').select('*').eq('board_id',bid),
-    sb.from('ops_mind_edges').select('*').eq('board_id',bid)
-  ]);
-  window.__mind.nodes=nodes||[]; window.__mind.edges=edges||[];
-  opsMindRender();
-}
+// 실시간 리로드는 명시적 저장 모델에서 캔버스를 덮어쓰지 않도록 비활성화
+async function opsMindReload(){ return; }
 
 function opsMindApplyTransform(){
   const w=document.getElementById('opsMindWorld'); if(!w) return;
@@ -8083,7 +8133,12 @@ function opsMindRender(){
   const m=window.__mind;
   const items=m.nodes.filter(n=>!(n.data&&n.data.shape==='group'));
   const groups=m.nodes.filter(n=>n.data&&n.data.shape==='group');
-  nodesDiv.innerHTML=items.map(n=>`<div class="mind-node${window.__mindLinkFrom===n.id?' linking':''}${window.__mindHighlight===n.id?' highlight':''}${(window.__mind.sel&&window.__mind.sel.has(n.id))?' sel':''}" data-nid="${n.id}" style="left:${n.x}px;top:${n.y}px;border-left:5px solid ${n.color||'#c98a3a'}" onpointerdown="opsMindNodeDown(event,${n.id})">${(n.data&&n.data._link)?'<i class="ti ti-link" style="color:#4a90d9;font-size:11px"></i> ':''}${esc(n.text||'')}</div>`).join('');
+  nodesDiv.innerHTML=items.map(n=>{
+    const pr=(n.data&&n.data._priority)||''; const stt=(n.data&&n.data._status)||'';
+    const prc=(MIND_PRIORITIES.find(p=>p[0]===pr)||[])[1]||''; const stc=(MIND_STATUSES.find(s=>s[0]===stt)||[])[1]||'';
+    const badges=(pr?`<span class="mind-badge" style="background:${prc};color:#fff">${pr}</span>`:'')+(stt?`<span class="mind-badge" style="background:${stc}22;color:${stc};border:0.5px solid ${stc}">${esc(stt)}</span>`:'')+opsMindLinkBadge(n);
+    return `<div class="mind-node${window.__mindLinkFrom===n.id?' linking':''}${window.__mindHighlight===n.id?' highlight':''}${(window.__mind.sel&&window.__mind.sel.has(n.id))?' sel':''}" data-nid="${n.id}" style="left:${n.x}px;top:${n.y}px;border-left:5px solid ${n.color||'#c98a3a'}" onpointerdown="opsMindNodeDown(event,${n.id})">${esc(n.text||'제목 없음')}${badges?`<div class="mind-badges">${badges}</div>`:''}</div>`;
+  }).join('');
   const gDiv=document.getElementById('opsMindGroups');
   if(gDiv) gDiv.innerHTML=groups.map(g=>{ const w=(g.data&&g.data.w)||300,h=(g.data&&g.data.h)||200,label=(g.data&&g.data.label)||'꾸러미',col=g.color||'#e9e2d6'; return `<div class="mind-group${(window.__mind.sel&&window.__mind.sel.has(g.id))?' sel':''}" data-nid="${g.id}" style="left:${g.x}px;top:${g.y}px;width:${w}px;height:${h}px;background:${col}59;border:1.5px dashed ${col}" onpointerdown="opsMindNodeDown(event,${g.id})"><div class="mind-group-label" onpointerdown="event.stopPropagation()" onclick="opsMindGroupEdit(${g.id})">${esc(label)}</div><div class="mind-group-resize" onpointerdown="opsMindGroupResizeDown(event,${g.id})"></div></div>`; }).join('');
   opsMindRenderEdges();
@@ -8096,7 +8151,7 @@ function opsMindSelectGroup(g){ const m=window.__mind; m.sel=new Set([g.id, ...o
 function opsMindToggleSelect(){ const m=window.__mind; m.selectMode=!m.selectMode; if(!m.selectMode) m.sel.clear(); const b=document.getElementById('opsMindSelBtn'); if(b) b.classList.toggle('active',m.selectMode); opsMindSetHint(m.selectMode?'선택 모드: 항목을 클릭해 여러 개 선택 → 삭제 (다시 누르면 해제)':''); opsMindUpdateSelBar(); opsMindRender(); }
 function opsMindUpdateSelBar(){ const bar=document.getElementById('opsMindSelBar'); if(!bar) return; const n=window.__mind.sel?window.__mind.sel.size:0; if(!n){ bar.style.display='none'; return; } bar.style.display='flex'; bar.innerHTML='<span style="font-size:12px;font-weight:600">선택 '+n+'개</span><button class="btn-cancel-sm" style="color:var(--rd)" onclick="opsMindDeleteSelected()"><i class="ti ti-trash"></i> 삭제</button><button class="btn-cancel-sm" onclick="opsMindClearSel()">해제</button>'; }
 function opsMindClearSel(){ window.__mind.sel.clear(); opsMindUpdateSelBar(); opsMindRender(); }
-async function opsMindDeleteSelected(){ const ids=[...window.__mind.sel]; if(!ids.length) return; if(!confirm(ids.length+'개 항목을 삭제할까요? (연결선도 함께 삭제)')) return; for(const id of ids){ try{ await sb.from('ops_mind_nodes').delete().eq('id',id); }catch(e){} } window.__mind.nodes=window.__mind.nodes.filter(nd=>ids.indexOf(nd.id)<0); window.__mind.edges=window.__mind.edges.filter(e=>ids.indexOf(e.from_id)<0&&ids.indexOf(e.to_id)<0); window.__mind.sel.clear(); opsMindUpdateSelBar(); opsMindRender(); }
+function opsMindDeleteSelected(){ const ids=[...window.__mind.sel]; if(!ids.length) return; if(!confirm(ids.length+'개 항목을 삭제할까요? (연결선도 함께 삭제)')) return; opsMindPush(); window.__mind.nodes=window.__mind.nodes.filter(nd=>ids.indexOf(nd.id)<0); window.__mind.edges=window.__mind.edges.filter(e=>ids.indexOf(e.from_id)<0&&ids.indexOf(e.to_id)<0); window.__mind.sel.clear(); opsMindUpdateSelBar(); opsMindRender(); }
 function opsMindNodeTap(id){
   const m=window.__mind;
   if(m.selectMode){ if(m.sel.has(id)) m.sel.delete(id); else m.sel.add(id); opsMindUpdateSelBar(); opsMindRender(); return; }
@@ -8125,7 +8180,7 @@ function opsMindNodeDown(e,id){
 function opsMindPointerMove(e){
   const m=window.__mind; if(!m.drag) return;
   const dx=e.clientX-m.drag.sx, dy=e.clientY-m.drag.sy;
-  if(Math.abs(dx)+Math.abs(dy)>3) m.drag.moved=true;
+  if(Math.abs(dx)+Math.abs(dy)>3){ if(!m.drag.moved && !m.drag.__snap && m.drag.kind!=='pan'){ m.drag.__snap=true; opsMindPush(); } m.drag.moved=true; }
   if(m.drag.kind==='pan'){ m.panX=m.drag.ox+dx; m.panY=m.drag.oy+dy; opsMindApplyTransform(); }
   else if(m.drag.kind==='gresize'){ const g=m.nodes.find(x=>x.id===m.drag.id); if(g){ g.data=g.data||{}; g.data.w=Math.max(120,Math.round(m.drag.ow+dx/m.zoom)); g.data.h=Math.max(80,Math.round(m.drag.oh+dy/m.zoom)); const el=document.querySelector('.mind-group[data-nid="'+g.id+'"]'); if(el){ el.style.width=g.data.w+'px'; el.style.height=g.data.h+'px'; } } }
   else if(m.drag.kind==='group'){ const g=m.nodes.find(x=>x.id===m.drag.id); if(g){ g.x=Math.round(m.drag.ox+dx/m.zoom); g.y=Math.round(m.drag.oy+dy/m.zoom); const gel=document.querySelector('.mind-group[data-nid="'+g.id+'"]'); if(gel){ gel.style.left=g.x+'px'; gel.style.top=g.y+'px'; } m.drag.mem.forEach(mm=>{ const nn=m.nodes.find(x=>x.id===mm.id); if(nn){ nn.x=Math.round(mm.ox+dx/m.zoom); nn.y=Math.round(mm.oy+dy/m.zoom); const el=document.querySelector('[data-nid="'+nn.id+'"]'); if(el){ el.style.left=nn.x+'px'; el.style.top=nn.y+'px'; } } }); opsMindRenderEdges(); } }
@@ -8136,41 +8191,34 @@ function opsMindRenderEdges(){
   const m=window.__mind; const byId={}; m.nodes.forEach(n=>byId[n.id]=n);
   svg.innerHTML=MIND_DEFS+m.edges.map(e=>{ const a=byId[e.from_id], b=byId[e.to_id]; if(!a||!b) return ''; return `<line x1="${a.x+84}" y1="${a.y+28}" x2="${b.x+84}" y2="${b.y+28}" marker-end="url(#mindArrow)" onclick="opsMindEdgeClick(${e.id})"></line>`; }).join('');
 }
-async function opsMindPointerUp(e){
+function opsMindPointerUp(e){
   const m=window.__mind; if(!m.drag) return;
   const d=m.drag; m.drag=null;
-  if(d.kind==='gresize'){ const g=m.nodes.find(x=>x.id===d.id); if(g){ try{ await sb.from('ops_mind_nodes').update({data:g.data,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',g.id); }catch(e){} } return; }
-  if(d.kind==='group'){
-    if(d.moved){ const g=m.nodes.find(x=>x.id===d.id); if(g){ try{ await sb.from('ops_mind_nodes').update({x:g.x,y:g.y,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',g.id); }catch(err){} } for(const mm of (d.mem||[])){ const nn=m.nodes.find(x=>x.id===mm.id); if(nn){ try{ await sb.from('ops_mind_nodes').update({x:nn.x,y:nn.y}).eq('id',nn.id); }catch(err){} } } }
-    else { opsMindGroupEdit(d.id); }
-    return;
-  }
-  if(d.kind==='node'){
-    if(d.moved){ if(d.multi&&d.memPos){ for(const mm of d.memPos){ const nn=m.nodes.find(x=>x.id===mm.id); if(nn){ try{ await sb.from('ops_mind_nodes').update({x:nn.x,y:nn.y}).eq('id',nn.id); }catch(err){} } } } else { const n=m.nodes.find(x=>x.id===d.id); if(n){ try{ await sb.from('ops_mind_nodes').update({x:n.x,y:n.y,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',n.id); }catch(err){} } } }
-    else { opsMindNodeTap(d.id); }
-  }
+  if(d.kind==='gresize'){ if(d.moved) opsMindUpdateBar(); return; }
+  if(d.kind==='group'){ if(!d.moved) opsMindGroupEdit(d.id); return; }
+  if(d.kind==='node'){ if(!d.moved) opsMindNodeTap(d.id); }
 }
 function opsMindZoom(f){ const m=window.__mind; m.zoom=Math.max(0.3,Math.min(2.5,m.zoom*f)); opsMindApplyTransform(); }
 function opsMindZoomReset(){ const m=window.__mind; m.zoom=1; m.panX=40; m.panY=40; opsMindApplyTransform(); }
 function opsMindWheel(e){ e.preventDefault(); opsMindZoom(e.deltaY<0?1.1:0.9); }
 
 // ── 노드 추가/편집/삭제 ──
-async function opsMindAddNode(){
+function opsMindAddNode(){
   if(isTestMode()){ alert('테스트 모드에서는 추가할 수 없습니다.'); return; }
   const vp=document.getElementById('opsMindVp'); const m=window.__mind;
   const cx=Math.round((-m.panX+(vp?vp.clientWidth/2:200))/m.zoom)-84;
   const cy=Math.round((-m.panY+(vp?vp.clientHeight/2:200))/m.zoom)-24;
   const color=MIND_COLORS[m.nodes.length%MIND_COLORS.length];
-  const {data,error}=await sb.from('ops_mind_nodes').insert({board_id:window.__ops.boardId,text:'새 항목',x:cx,y:cy,color,created_by:currentUser.id,updated_by:currentUser.id}).select().single();
-  if(error){ alert('오류: '+error.message); return; }
-  m.nodes.push(data); opsMindRender(); opsMindOpenNode(data.id);
+  opsMindPush();
+  const node={id:opsMindNextTempId(),board_id:window.__ops.boardId,text:'새 항목',x:cx,y:cy,color,data:{}};
+  m.nodes.push(node); opsMindRender(); opsMindOpenNode(node.id);
 }
 function opsMindGroupResizeDown(e,id){ e.stopPropagation(); const g=window.__mind.nodes.find(x=>x.id===id); if(!g) return; window.__mind.drag={kind:'gresize',id,sx:e.clientX,sy:e.clientY,ow:(g.data&&g.data.w)||300,oh:(g.data&&g.data.h)||200,moved:false}; }
-async function opsMindAddGroup(){ if(isTestMode()){ alert('테스트 모드에서는 추가할 수 없습니다.'); return; } const vp=document.getElementById('opsMindVp'); const m=window.__mind; const cx=Math.round((-m.panX+(vp?vp.clientWidth/2:300))/m.zoom)-150; const cy=Math.round((-m.panY+(vp?vp.clientHeight/2:200))/m.zoom)-100; const {data,error}=await sb.from('ops_mind_nodes').insert({board_id:window.__ops.boardId,text:'',x:cx,y:cy,color:'#c9b8a4',data:{shape:'group',w:320,h:220,label:'꾸러미'},created_by:currentUser.id,updated_by:currentUser.id}).select().single(); if(error){ if(/data|column|schema|42703/i.test((error.message||'')+(error.code||''))){ alert('꾸러미는 ops_mind_link.sql(data 컬럼) 적용이 필요합니다.'); } else alert('오류: '+error.message); return; } m.nodes.push(data); opsMindRender(); }
+function opsMindAddGroup(){ if(isTestMode()){ alert('테스트 모드에서는 추가할 수 없습니다.'); return; } const vp=document.getElementById('opsMindVp'); const m=window.__mind; const cx=Math.round((-m.panX+(vp?vp.clientWidth/2:300))/m.zoom)-150; const cy=Math.round((-m.panY+(vp?vp.clientHeight/2:200))/m.zoom)-100; opsMindPush(); m.nodes.push({id:opsMindNextTempId(),board_id:window.__ops.boardId,text:'',x:cx,y:cy,color:'#c9b8a4',data:{shape:'group',w:320,h:220,label:'꾸러미'}}); opsMindRender(); }
 function opsMindGroupEdit(id){ const g=window.__mind.nodes.find(x=>x.id===id); if(!g) return; window.__mindGroupId=id; window.__mindGroupColor=g.color||'#c9b8a4'; const cols=['#c9b8a4','#8fb8d9','#8fc99a','#e0989a','#b79fd9','#e0b56b']; const sw=cols.map(c=>`<span onclick="opsMindGroupColor('${c}')" data-c="${c}" style="width:24px;height:24px;border-radius:6px;background:${c};cursor:pointer;display:inline-block;border:2px solid ${g.color===c?'#2b1a0e':'#fff'}"></span>`).join(''); const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='mindGroupModal'; modal.innerHTML=`<div class="modal-box" style="max-width:360px"><div class="modal-head"><b>꾸러미</b><button onclick="document.getElementById('mindGroupModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div class="modal-body"><label class="form-label">이름</label><input id="mindGroupLabel" class="form-input" value="${esc((g.data&&g.data.label)||'꾸러미')}"><div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">색상 ${sw}</div></div><div class="modal-foot" style="display:flex;justify-content:space-between;gap:8px"><div style="display:flex;gap:6px"><button class="btn-cancel-sm" onclick="opsMindGroupDelete(${id},false)">꾸러미만</button><button class="btn-cancel-sm" style="color:var(--rd)" onclick="opsMindGroupDelete(${id},true)"><i class="ti ti-trash"></i> 내용까지 삭제</button></div><div style="display:flex;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('mindGroupModal').remove()">취소</button><button class="btn-submit" onclick="opsMindGroupSave()">저장</button></div></div></div>`; document.body.appendChild(modal); }
 function opsMindGroupColor(c){ window.__mindGroupColor=c; document.querySelectorAll('#mindGroupModal [data-c]').forEach(sp=>sp.style.border='2px solid '+(sp.getAttribute('data-c')===c?'#2b1a0e':'#fff')); }
-async function opsMindGroupSave(){ const id=window.__mindGroupId; const g=window.__mind.nodes.find(x=>x.id===id); if(!g) return; const label=document.getElementById('mindGroupLabel').value; const color=window.__mindGroupColor||g.color; g.data=g.data||{}; g.data.label=label; g.color=color; await sb.from('ops_mind_nodes').update({color,data:g.data,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',id); document.getElementById('mindGroupModal').remove(); opsMindRender(); }
-async function opsMindGroupDelete(id, withContents){ const g=window.__mind.nodes.find(x=>x.id===id); if(!g) return; if(withContents){ const mem=opsMindGroupMembers(g); if(!confirm('꾸러미와 안의 항목 '+mem.length+'개를 모두 삭제할까요?')) return; const mIds=mem.map(x=>x.id); for(const mid of mIds){ try{ await sb.from('ops_mind_nodes').delete().eq('id',mid); }catch(e){} } window.__mind.nodes=window.__mind.nodes.filter(n=>mIds.indexOf(n.id)<0); window.__mind.edges=window.__mind.edges.filter(e=>mIds.indexOf(e.from_id)<0&&mIds.indexOf(e.to_id)<0); } else { if(!confirm('꾸러미만 삭제할까요? (안의 항목은 유지)')) return; } await sb.from('ops_mind_nodes').delete().eq('id',id); window.__mind.nodes=window.__mind.nodes.filter(n=>n.id!==id); document.getElementById('mindGroupModal')?.remove(); opsMindRender(); }
+function opsMindGroupSave(){ const id=window.__mindGroupId; const g=window.__mind.nodes.find(x=>x.id===id); if(!g) return; const label=document.getElementById('mindGroupLabel').value; const color=window.__mindGroupColor||g.color; opsMindPush(); g.data=g.data||{}; g.data.label=label; g.color=color; document.getElementById('mindGroupModal').remove(); opsMindRender(); }
+function opsMindGroupDelete(id, withContents){ const g=window.__mind.nodes.find(x=>x.id===id); if(!g) return; if(withContents){ const mem=opsMindGroupMembers(g); if(!confirm('꾸러미와 안의 항목 '+mem.length+'개를 모두 삭제할까요?')) return; opsMindPush(); const mIds=mem.map(x=>x.id); window.__mind.nodes=window.__mind.nodes.filter(n=>mIds.indexOf(n.id)<0); window.__mind.edges=window.__mind.edges.filter(e=>mIds.indexOf(e.from_id)<0&&mIds.indexOf(e.to_id)<0); } else { if(!confirm('꾸러미만 삭제할까요? (안의 항목은 유지)')) return; opsMindPush(); } window.__mind.nodes=window.__mind.nodes.filter(n=>n.id!==id); document.getElementById('mindGroupModal')?.remove(); opsMindRender(); }
 function opsMindNodeClick(id){
   const gn=window.__mind.nodes.find(x=>x.id===id); if(gn&&gn.data&&gn.data.shape==='group'){ opsMindGroupEdit(id); return; }
   if(window.__mindConnectMode || window.__mindLinkFrom){
@@ -8185,48 +8233,63 @@ function opsMindNodeClick(id){
 }
 function opsMindOpenNode(id){
   const n=window.__mind.nodes.find(x=>x.id===id); if(!n) return;
-  const swatches=MIND_COLORS.map(c=>`<span onclick="opsMindPickColor('${c}')" data-c="${c}" style="width:24px;height:24px;border-radius:50%;background:${c};cursor:pointer;display:inline-block;border:2px solid ${n.color===c?'#2b1a0e':'#fff'}"></span>`).join('');
-  const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='mindNodeModal';
+  if(n.data&&n.data.shape==='group'){ opsMindGroupEdit(id); return; }
   window.__mindEditId=id; window.__mindPickedColor=n.color||'#c98a3a'; window.__mindPrevText=n.text||'';
+  const pr=(n.data&&n.data._priority)||''; const stt=(n.data&&n.data._status)||''; window.__mindPickedPr=pr; window.__mindPickedSt=stt;
+  const swatches=MIND_COLORS.map(c=>`<span onclick="opsMindPickColor('${c}')" data-c="${c}" style="width:22px;height:22px;border-radius:50%;background:${c};cursor:pointer;display:inline-block;border:2px solid ${n.color===c?'#2b1a0e':'#fff'}"></span>`).join('');
+  const prBtns=MIND_PRIORITIES.map(p=>`<button type="button" class="mind-opt" data-pr="${p[0]}" style="border-color:${p[1]};color:${pr===p[0]?'#fff':p[1]};background:${pr===p[0]?p[1]:'#fff'}" onclick="opsMindPickPr('${p[0]}')">${p[0]}</button>`).join('')+`<button type="button" class="mind-opt" data-pr="" style="color:var(--th);background:${!pr?'var(--crm)':'#fff'}" onclick="opsMindPickPr('')">없음</button>`;
+  const stBtns=MIND_STATUSES.map(s=>`<button type="button" class="mind-opt" data-st="${s[0]}" style="border-color:${s[1]};color:${stt===s[0]?'#fff':s[1]};background:${stt===s[0]?s[1]:'#fff'}" onclick="opsMindPickSt('${s[0]}')">${esc(s[0])}</button>`).join('')+`<button type="button" class="mind-opt" data-st="" style="color:var(--th);background:${!stt?'var(--crm)':'#fff'}" onclick="opsMindPickSt('')">없음</button>`;
   const nlink=(n.data&&n.data._link)||''; const nlabel=(n.data&&n.data._linkLabel)||'';
-  modal.innerHTML=`<div class="modal-box" style="max-width:440px">
+  const modal=document.createElement('div'); modal.className='modal-overlay'; modal.id='mindNodeModal';
+  modal.innerHTML=`<div class="modal-box" style="max-width:560px;width:94vw">
     <div class="modal-head"><b>항목 편집</b><button onclick="document.getElementById('mindNodeModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
-    <div class="modal-body" style="max-height:70vh;overflow-y:auto">
-      <textarea id="mindNodeText" class="form-input" style="min-height:90px" placeholder="내용 · @이름 으로 참여자를 멘션하면 알림이 갑니다">${esc(n.text||'')}</textarea>
-      <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">색상 ${swatches}</div>
-      <div style="margin-top:14px">
-        <label class="form-label" style="font-size:12px"><i class="ti ti-link"></i> 연결 링크 (보드 카드·게시물·자료 URL)</label>
-        <input id="mindNodeLink" class="form-input" placeholder="https://... (앱 링크·게시물·구글드라이브 등)" value="${esc(nlink)}">
+    <div class="modal-body" style="max-height:76vh;overflow-y:auto">
+      <label class="form-label">제목</label>
+      <input id="mindNodeTitle" class="form-input" value="${esc(n.text||'')}" placeholder="항목 제목 (@이름 멘션 시 알림 발송)">
+      <label class="form-label" style="margin-top:10px">내용</label>
+      <div id="mindNodeQuill" style="background:#fff;min-height:120px"></div>
+      <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap;align-items:center"><span style="font-size:12px;color:var(--th);width:52px">우선순위</span>${prBtns}</div>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center"><span style="font-size:12px;color:var(--th);width:52px">상태</span>${stBtns}</div>
+      <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap"><span style="font-size:12px;color:var(--th);width:52px">색상</span>${swatches}</div>
+      <div style="margin-top:14px;border-top:0.5px solid var(--crd);padding-top:12px">
+        <label class="form-label" style="font-size:12px"><i class="ti ti-link"></i> 연동 링크 (내부 카드·공지 / Notion·Drive 등 외부 URL)</label>
+        <input id="mindNodeLink" class="form-input" placeholder="https://... 또는 ?card_id=…" value="${esc(nlink)}">
         <input id="mindNodeLinkLabel" class="form-input" style="margin-top:6px" placeholder="링크 이름 (선택)" value="${esc(nlabel)}">
-        <button class="btn-cancel-sm" style="margin-top:6px" onclick="opsMindLinkPicker()"><i class="ti ti-clipboard-list"></i> 보드 항목에서 선택</button>
-        ${nlink?`<button class="btn-cancel-sm" style="margin-top:6px" onclick="window.open('${nlink.replace(/'/g,"\\'")}','_blank')"><i class="ti ti-external-link"></i> 링크 열기</button>`:''}
-        <p style="font-size:10px;color:var(--th);margin-top:4px">보드 카드는 카드 화면의 링크, 게시물은 ?post= 링크를 붙여넣으면 됩니다.</p>
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+          <button class="btn-cancel-sm" onclick="opsMindLinkPicker()"><i class="ti ti-clipboard-list"></i> 내부 카드 선택</button>
+          <button class="btn-cancel-sm" onclick="var v=document.getElementById('mindNodeLink').value;if(v)window.open(v,'_blank')"><i class="ti ti-external-link"></i> 열기</button>
+        </div>
       </div>
     </div>
     <div class="modal-foot" style="display:flex;justify-content:space-between;gap:8px">
-      <div style="display:flex;gap:8px">
-        <button class="btn-cancel-sm" style="color:var(--rd)" onclick="opsMindDeleteNode(${id})"><i class="ti ti-trash"></i> 삭제</button>
-        <button class="btn-cancel-sm" onclick="opsMindStartLink(${id})"><i class="ti ti-link"></i> 연결</button>
-      </div>
-      <div style="display:flex;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('mindNodeModal').remove()">취소</button><button class="btn-submit" onclick="opsMindSaveNode()">저장</button></div>
+      <div style="display:flex;gap:8px"><button class="btn-cancel-sm" style="color:var(--rd)" onclick="opsMindDeleteNode(${id})"><i class="ti ti-trash"></i> 삭제</button><button class="btn-cancel-sm" onclick="opsMindStartLink(${id})"><i class="ti ti-link"></i> 연결</button></div>
+      <div style="display:flex;gap:8px"><button class="btn-cancel-sm" onclick="document.getElementById('mindNodeModal').remove()">취소</button><button class="btn-submit" onclick="opsMindSaveNode()">확인</button></div>
     </div>
   </div>`;
   document.body.appendChild(modal);
+  try{ window.__mindNodeQuill=new Quill('#mindNodeQuill',{theme:'snow',placeholder:'세부 내용 (글자크기·색상·링크·체크리스트)',modules:{toolbar:[[{header:[1,2,3,false]}],['bold','italic','underline'],[{color:[]},{background:[]}],[{list:'ordered'},{list:'bullet'},{list:'check'}],['link','clean']]}}); if(n.data&&n.data.html) window.__mindNodeQuill.root.innerHTML=n.data.html; }catch(e){ window.__mindNodeQuill=null; }
 }
+function opsMindPickPr(v){ window.__mindPickedPr=v; MIND_PRIORITIES.forEach(p=>{ const b=document.querySelector('#mindNodeModal [data-pr="'+p[0]+'"]'); if(b){ const on=v===p[0]; b.style.background=on?p[1]:'#fff'; b.style.color=on?'#fff':p[1]; } }); const nb=document.querySelector('#mindNodeModal [data-pr=""]'); if(nb) nb.style.background=(!v)?'var(--crm)':'#fff'; }
+function opsMindPickSt(v){ window.__mindPickedSt=v; MIND_STATUSES.forEach(s=>{ const b=document.querySelector('#mindNodeModal [data-st="'+s[0]+'"]'); if(b){ const on=v===s[0]; b.style.background=on?s[1]:'#fff'; b.style.color=on?'#fff':s[1]; } }); const nb=document.querySelector('#mindNodeModal [data-st=""]'); if(nb) nb.style.background=(!v)?'var(--crm)':'#fff'; }
 function opsMindPickColor(c){ window.__mindPickedColor=c; document.querySelectorAll('#mindNodeModal [data-c]').forEach(s=>{ s.style.border='2px solid '+(s.getAttribute('data-c')===c?'#2b1a0e':'#fff'); }); }
-async function opsMindSaveNode(){
+function opsMindSaveNode(){
   if(isTestMode()){ alert('테스트 모드에서는 저장할 수 없습니다.'); return; }
   const id=window.__mindEditId; const n=window.__mind.nodes.find(x=>x.id===id); if(!n) return;
-  const text=document.getElementById('mindNodeText').value;
+  const title=(document.getElementById('mindNodeTitle')?document.getElementById('mindNodeTitle').value:'')||'';
   const color=window.__mindPickedColor||n.color;
   const link=document.getElementById('mindNodeLink')?document.getElementById('mindNodeLink').value.trim():'';
   const linkLabel=document.getElementById('mindNodeLinkLabel')?document.getElementById('mindNodeLinkLabel').value.trim():'';
-  const data=Object.assign({}, n.data||{}); if(link) data._link=link; else delete data._link; if(linkLabel) data._linkLabel=linkLabel; else delete data._linkLabel;
-  let up=await sb.from('ops_mind_nodes').update({text,color,data,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',id);
-  if(up.error && /data|column|schema|42703/i.test((up.error.message||'')+(up.error.code||''))){ up=await sb.from('ops_mind_nodes').update({text,color,updated_by:currentUser.id,updated_at:new Date().toISOString()}).eq('id',id); }
-  if(up.error){ alert('오류: '+up.error.message); return; }
+  let html=''; if(window.__mindNodeQuill){ try{ html=window.__mindNodeQuill.root.innerHTML; if(html==='<p><br></p>') html=''; }catch(e){} }
   const prevText=window.__mindPrevText||'';
-  n.text=text; n.color=color; n.data=data;
+  opsMindPush();
+  const data=Object.assign({}, n.data||{});
+  if(link) data._link=link; else delete data._link;
+  if(linkLabel) data._linkLabel=linkLabel; else delete data._linkLabel;
+  if(window.__mindPickedPr) data._priority=window.__mindPickedPr; else delete data._priority;
+  if(window.__mindPickedSt) data._status=window.__mindPickedSt; else delete data._status;
+  if(html) data.html=html; else delete data.html;
+  n.text=(title.trim()||'제목 없음'); n.color=color; n.data=data;
+  window.__mindNodeQuill=null;
   document.getElementById('mindNodeModal').remove();
   opsMindRender();
   opsMindNotifyNodeMentions(n, prevText).catch(()=>{});
@@ -8261,10 +8324,9 @@ async function opsMindExportImage(){
     m.panX=save.panX; m.panY=save.panY; m.zoom=save.zoom; opsMindApplyTransform();
   }catch(e){ alert('이미지 저장 실패: '+(e.message||e)); }
 }
-async function opsMindDeleteNode(id){
+function opsMindDeleteNode(id){
   if(!confirm('이 항목과 연결선을 삭제할까요?')) return;
-  await sb.from('ops_mind_edges').delete().or('from_id.eq.'+id+',to_id.eq.'+id);
-  await sb.from('ops_mind_nodes').delete().eq('id',id);
+  opsMindPush();
   window.__mind.nodes=window.__mind.nodes.filter(n=>n.id!==id);
   window.__mind.edges=window.__mind.edges.filter(e=>e.from_id!==id&&e.to_id!==id);
   document.getElementById('mindNodeModal')?.remove();
@@ -8273,15 +8335,14 @@ async function opsMindDeleteNode(id){
 // ── 연결선 ──
 function opsMindStartLink(id){ window.__mindLinkFrom=id; document.getElementById('mindNodeModal')?.remove(); opsMindSetHint('연결할 다른 항목을 클릭하세요 (취소하려면 시작 항목 다시 클릭)'); opsMindRender(); }
 function opsMindSetHint(t){ const h=document.getElementById('opsMindHint'); if(h) h.textContent=t||''; }
-async function opsMindCreateEdge(a,b){
+function opsMindCreateEdge(a,b){
   if(window.__mind.edges.some(e=>(e.from_id===a&&e.to_id===b)||(e.from_id===b&&e.to_id===a))) return;
-  const {data,error}=await sb.from('ops_mind_edges').insert({board_id:window.__ops.boardId,from_id:a,to_id:b}).select().single();
-  if(error){ alert('오류: '+error.message); return; }
-  window.__mind.edges.push(data); opsMindRender();
+  opsMindPush();
+  window.__mind.edges.push({id:opsMindNextTempId(),board_id:window.__ops.boardId,from_id:a,to_id:b}); opsMindRender();
 }
-async function opsMindEdgeClick(id){
+function opsMindEdgeClick(id){
   if(!confirm('이 연결선을 삭제할까요?')) return;
-  await sb.from('ops_mind_edges').delete().eq('id',id);
+  opsMindPush();
   window.__mind.edges=window.__mind.edges.filter(e=>e.id!==id);
   opsMindRender();
 }
@@ -9912,6 +9973,17 @@ async function rqCommentAdd(id, content, tagged){
   if(window.__rqSecure) return await sb.rpc('rq_comment_add', { p_token:getSessionToken(), p_id:id, p_content:content, p_tagged:((tagged&&tagged.length)?tagged:null) });
   return await sb.from('request_comments').insert({request_id:id, author_id:currentUser.id, content:content, tagged_users:((tagged&&tagged.length)?tagged:null), created_at:new Date().toISOString()});
 }
+async function rqCommentDelete(cid){
+  if(window.__rqSecure){ return await sb.rpc('rq_comment_delete', { p_token:getSessionToken(), p_id:cid }); }
+  return await sb.from('request_comments').delete().eq('id',cid);
+}
+async function deleteReqComment(cid, reqId){
+  if(isTestMode()){ alert('테스트 모드에서는 삭제할 수 없습니다.'); return; }
+  if(!confirm('댓글을 삭제하시겠습니까?')) return;
+  const { error } = await rqCommentDelete(cid);
+  if(error){ alert('삭제 오류: '+(error.message||error)); return; }
+  renderReqComments(reqId);
+}
 
 // ── 신청 목록 ────────────────────────────────────────────────────
 let arcType = '';   // 완료내역 유형 필터
@@ -10710,6 +10782,7 @@ async function renderReqComments(reqId) {
 
   const cmtHtml = (comments||[]).map(c => {
     const isMine = c.author_id === currentUser.id;
+    const canDel = isMine || currentUser.is_master || currentUser.is_vice_master || currentUser.role==='admin';
     const tags   = Array.isArray(c.tagged_users) ? c.tagged_users : [];
     const tagBadge = tags.length
       ? `<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px">
@@ -10720,7 +10793,7 @@ async function renderReqComments(reqId) {
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
           <span style="font-size:12px;font-weight:600;color:var(--tm)">${c.author?.name||'?'}</span>
           <span style="font-size:10px;color:var(--th)">${c.author?.store||''}</span>
-          <span style="font-size:10px;color:var(--th);margin-left:auto">${(fmtDateTime(c.created_at||''))}</span>
+          <span style="font-size:10px;color:var(--th);margin-left:auto">${(fmtDateTime(c.created_at||''))}</span>${canDel?`<i class="ti ti-trash" style="cursor:pointer;color:var(--th);font-size:13px;margin-left:8px" title="댓글 삭제" onclick="deleteReqComment(${c.id}, ${reqId})"></i>`:''}
         </div>
         <div style="font-size:13px;color:var(--tm);white-space:pre-wrap;line-height:1.6">${c.content||''}</div>
         ${tagBadge}
