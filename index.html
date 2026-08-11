@@ -12788,7 +12788,7 @@ async function renderScheduleEdit(area) {
         onpaste="handleSchedulePaste(event)">
         <table style="border-collapse:collapse;font-size:11px" id="schTable">
           <thead><tr>
-            <th style="position:sticky;left:0;background:var(--crm);z-index:3;padding:6px 8px;border:0.5px solid var(--crd);min-width:90px">이름</th>
+            <th style="position:sticky;left:0;background:var(--crm);z-index:3;padding:5px 6px;border:0.5px solid var(--crd);width:160px;min-width:160px;max-width:160px;white-space:nowrap">이름</th>
             ${dateHeaderHtml}
           </tr></thead>
           <tbody id="schTbody">${rowsHtml}</tbody>
@@ -13155,6 +13155,7 @@ function addExtraStaff() {
     // 편집 모드에서 즉시 셀 비활성화 (최종 퇴사일+1 ~ 월말)
     if (window.__schEditMode) applyRetireToSchedule(id, retireDate);
     renderRetirePanel();
+    schRefreshBalance();
     staffSel.value = '';
     if (lastInput) lastInput.value = '';
     dateInput.value = '';
@@ -13354,6 +13355,7 @@ function removeRetireEntry(idx) {
   if (r) restoreRetireCells(r.id);
   window.__retireList.splice(idx, 1);
   renderRetirePanel();
+  schRefreshBalance();
 }
 
 function editRetireEntry(idx) {
@@ -13374,6 +13376,7 @@ function editRetireEntry(idx) {
   sb.from('users').update({retire_date: newRetire}).eq('id', r.id).then(() => {});
   applyRetireToSchedule(r.id, newRetire);
   renderRetirePanel();
+  schRefreshBalance();
 }
 
 // 퇴사 비활성 셀 복원 (삭제/수정 시)
@@ -13459,6 +13462,8 @@ function restoreRetireCells(userId) {
  *  - 기존 발생휴무 소진(휴무/대휴) 기간의 주말/공휴일은 제외
  *  - 당월에 한정 (이전 달은 별도)
  */
+// 기간 내 주말+공휴일 수 — 고정 발생 기준(소진 여부와 무관). 퇴사/신규입사 조정 휴무기준용.
+function schPeriodOffCount(year, month, fromDay, toDay, holSet){ let c=0; const dim=new Date(year,month,0).getDate(); const f=Math.max(1,fromDay), t=Math.min(dim,toDay); for(let d=f; d<=t; d++){ const ds=`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const dow=new Date(year,month-1,d).getDay(); if(dow===0||dow===6||(holSet&&holSet.has(ds))) c++; } return c; }
 function calcRetireLeave(retiree, year, month, retireDate, holSet, daysInMonth) {
   const tbody = document.getElementById('schTbody');
   if (!tbody) return { offDays: 0, note: '' };
@@ -13708,7 +13713,7 @@ async function buildStaffRowWithCross(staff, si, daysInMonth, year, month, allCo
   const _roleLbl = staff.isExtra ? '지원' : (userPosition(staff) || '');
 
   let rowHtml = `<tr data-staff-idx="${si}" data-staff-id="${staff.id||''}" draggable="false">
-    <td style="position:sticky;left:0;background:#fff;z-index:2;padding:4px 6px;font-size:12px;font-weight:600;border:0.5px solid var(--crd);white-space:nowrap;min-width:100px">
+    <td style="position:sticky;left:0;background:#fff;z-index:2;padding:4px 5px;font-size:12px;font-weight:600;border:0.5px solid var(--crd);white-space:nowrap;width:160px;min-width:160px;max-width:160px;overflow:hidden">
       <div style="display:flex;align-items:center;gap:2px">
         <div style="display:flex;flex-direction:column;gap:0;flex-shrink:0">
           <button onclick="moveStaffRow(${si},-1)" title="위로" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:9px;padding:0 1px;line-height:1.1">▲</button>
@@ -14634,6 +14639,10 @@ async function renderBalancePanel() {
 
   const tbody       = document.getElementById('schTbody');
   const daysInMonth = new Date(year, month, 0).getDate();
+  const __monthStart = `${year}-${String(month).padStart(2,'0')}-01`;
+  const __monthEnd   = `${year}-${String(month).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
+  const { data: __balHols } = await sb.from('holidays').select('date').gte('date',__monthStart).lte('date',__monthEnd);
+  const __balHolSet = new Set((__balHols||[]).map(h=>h.date));
 
   // 소속 직원만
   const staffList = curScheduleStaff.filter(s => s.id && !s.isExtra);
@@ -14702,8 +14711,18 @@ async function renderBalancePanel() {
     const carryIn   = slb.carry_in   || 0;
     const carryUsed = slb.carry_used  || 0;
     const carryOut  = carryIn - carryUsed;
-    // 당월 휴무 기준 (주말+공휴일)
-    const baseQuota = slb.base_quota || 0;
+    // 당월 휴무 기준 (주말+공휴일) — 퇴사예정=[1일~마지막 실근무일], 신규입사=[입사일~월말]로 조정
+    let baseQuota = slb.base_quota || 0;
+    {
+      const __rt = (window.__retireList||[]).find(x=>x.id===staff.id);
+      if (__rt) {
+        const __lw = __rt.lastWorkDate || __rt.retireDate;
+        if (__lw && __lw >= __monthStart && __lw <= __monthEnd) baseQuota = schPeriodOffCount(year, month, 1, parseInt(__lw.slice(8,10)), __balHolSet);
+        else if (__lw && __lw < __monthStart) baseQuota = 0;
+      } else if (staff.hire_date && staff.hire_date >= __monthStart && staff.hire_date <= __monthEnd) {
+        baseQuota = schPeriodOffCount(year, month, parseInt(staff.hire_date.slice(8,10)), daysInMonth, __balHolSet);
+      }
+    }
     const baseUsed  = leaveDays;
     const baseRemain= baseQuota - baseUsed;
 
@@ -14740,7 +14759,7 @@ async function renderBalancePanel() {
   });
 
   const thStyle  = 'padding:5px 8px;text-align:center;border-bottom:0.5px solid var(--crd);border-left:0.5px solid var(--crd);font-size:10px';
-  const thStyleL = 'padding:5px 10px;text-align:left;border-bottom:0.5px solid var(--crd);font-size:10px';
+  const thStyleL = 'padding:5px 8px;text-align:left;border-bottom:0.5px solid var(--crd);font-size:10px;width:150px;white-space:nowrap';
 
   const theadHtml = `
     <tr style="background:var(--cr);color:var(--ts)">
@@ -14765,7 +14784,7 @@ async function renderBalancePanel() {
       : r.workDays;
     return `
     <tr style="border-bottom:0.5px solid var(--crd)${isPT?';background:#FFFEF5':''}">
-      <td style="padding:5px 10px;font-size:11px;font-weight:600;white-space:nowrap">
+      <td style="padding:5px 8px;font-size:11px;font-weight:600;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis">
         ${r.name}${isPT?'<span style="font-size:9px;color:var(--bl);margin-left:4px">PT</span>':''}
       </td>
       ${isPT ? `
@@ -14813,6 +14832,8 @@ async function initBalancePanel() {
   await renderBalancePanel();
   updateDailyCountRow();
 }
+// 퇴사/신규 등 변경 후 집계표 자동 갱신 (셀 반영 후 재계산되도록 소폭 지연)
+function schRefreshBalance(){ setTimeout(()=>{ try{ if(document.getElementById('leaveBalanceTable')) initBalancePanel(); }catch(e){} }, 150); }
 
 // ── 인원 순서 드래그 정렬 ──────────────────────────────────
 
