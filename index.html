@@ -12583,6 +12583,7 @@ async function renderScheduleEdit(area) {
   const monthEnd   = `${year}-${String(month).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
   const { data: holidays } = await sb.from('holidays').select('date,name').gte('date',monthStart).lte('date',monthEnd);
   const holidaySet  = new Set((holidays||[]).map(h=>h.date));
+  window.__schHolSet = holidaySet;  // 퇴사 휴무 계산용 캐시
   const holidayName = Object.fromEntries((holidays||[]).map(h=>[h.date, h.name]));
 
   // 휴무코드 → 색상 매핑
@@ -13077,6 +13078,19 @@ async function loadRetireStaffOptions() {
     myStaff.map(u => `<option value="${u.id}|${u.name}|${u.store}">${u.name}</option>`).join('');
 }
 
+// 퇴사자 휴무 계산: A=1일~마지막실근무일 주말/공휴일, B=전월이월대휴, C=A+B, D=배치된 휴무+대휴, E=C-D
+function schRetireLeaveCalc(staffId, lastWorkDate){
+  const y=window.__schYear, m=window.__schMonth; const dim=new Date(y,m,0).getDate();
+  const ms=`${y}-${String(m).padStart(2,'0')}-01`, me=`${y}-${String(m).padStart(2,'0')}-${String(dim).padStart(2,'0')}`;
+  let A=0;
+  if(lastWorkDate && lastWorkDate>=ms && lastWorkDate<=me) A=schPeriodOffCount(y,m,1,parseInt(lastWorkDate.slice(8,10)),window.__schHolSet);
+  else if(lastWorkDate && lastWorkDate>me) A=schPeriodOffCount(y,m,1,dim,window.__schHolSet);
+  const B=(window.__leaveBalanceMap&&window.__leaveBalanceMap[staffId])?(window.__leaveBalanceMap[staffId].carryIn||0):0;
+  let D=0;
+  for(let d=1;d<=dim;d++){ const ds=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const v=schCellVal(staffId,ds); if(v==='휴무'||v==='대휴') D++; }
+  const C=A+B, E=C-D;
+  return {A,B,C,D,E};
+}
 // 퇴사 폼: '실근무일과 동일' 체크 시 최종 퇴사일 비활성+동기화
 function toggleRetireSame(){ const chk=document.getElementById('retireSameChk'); const rd=document.getElementById('retireDateInput'); const lw=document.getElementById('lastWorkDateInput'); if(!chk||!rd||!lw) return; if(chk.checked){ rd.disabled=true; rd.value=lw.value||''; } else { rd.disabled=false; if(!rd.value) rd.value=lw.value||''; } }
 function syncRetireDate(){ const chk=document.getElementById('retireSameChk'); const rd=document.getElementById('retireDateInput'); const lw=document.getElementById('lastWorkDateInput'); if(chk&&chk.checked&&rd&&lw){ rd.value=lw.value||''; } }
@@ -13124,31 +13138,25 @@ function addExtraStaff() {
       return;
     }
 
-    // 💡 [안전 보정] 매니저가 추가하는 시점에는 DB에 쓰지 않고 스케줄러 임시 메모리에만 담아둡니다.
-    // 추후 운영팀이 최종 '컨펌 완료' 버튼을 누르는 트랜잭션 함수에서 이 _retireDate 값을 긁어 한 번에 DB에 저장하게 됩니다.
+    // 셀 현재값을 메모리에 반영한 뒤 정확한 휴무 계산으로 확인 팝업
+    syncCellsToMemory();
+    const _lc = schRetireLeaveCalc(id, lastWorkDate);
+    const _leaveLine = (_lc.E < 0)
+      ? `· 당월 발생 휴무: ${_lc.A}개 (전월 이월 ${_lc.B}개 포함 총 ${_lc.C}개) · 현재 스케줄에 배치된 휴무: ${_lc.D}개  ⚠ 휴무가 ${Math.abs(_lc.E)}개 초과 배치됨`
+      : `· 당월 발생 휴무: ${_lc.A}개 (전월 이월 ${_lc.B}개 포함 총 ${_lc.C}개) · 현재 스케줄에 배치된 휴무: ${_lc.D}개  👉 소진해야 할 잔여 휴무: ${_lc.E}개`;
+    const _msg = `${name} 직원의 퇴사 일정을 등록하시겠습니까?\n\n`
+      + `· 마지막 실근무일: ${lastWorkDate}\n`
+      + `${_leaveLine}\n`
+      + `· 최종 퇴사일: ${retireDate}\n\n`
+      + `→ 지급품 반납 및 최종 퇴사일로 비즈메카 사직서 상신토록 지도 바랍니다.`;
+    if (!confirm(_msg)) return;
+
+    // 매니저 추가 시점: DB엔 retire_date만 연동, 최종 반영은 운영팀 '컨펌 완료' 시
     const targetIdx = curScheduleStaff.findIndex(s => s.id === id);
     if (targetIdx > -1) {
       curScheduleStaff[targetIdx]._retireDate = retireDate;
       curScheduleStaff[targetIdx]._lastWorkDate = lastWorkDate;
       curScheduleStaff[targetIdx]._isRetirePending = true; // 운영팀 승인 대기 플래그
-    }
-
-    alert(`[${name}] 마지막 실근무일 ${lastWorkDate} · 최종 퇴사일 ${retireDate}로 임시 등록되었습니다. 운영팀 컨펌 완료 시 최종 반영됩니다.`);
-    
-    syncCellsToMemory();
-    // 잔여 휴무 경고 (집계 패널 기준 · 권장 알림, 등록은 계속 가능)
-    let remainLeave = 0;
-    const balTable = document.getElementById('leaveBalanceTable');
-    if (balTable) {
-      const rows = balTable.querySelectorAll('tbody tr');
-      const staffIdx = curScheduleStaff.findIndex(s => s.id === id);
-      if (staffIdx >= 0 && rows[staffIdx]) {
-        const cells = rows[staffIdx].querySelectorAll('td');
-        remainLeave = (parseFloat(cells[2]?.textContent||'0')||0) + (parseFloat(cells[6]?.textContent||'0')||0);
-      }
-    }
-    if (remainLeave > 0) {
-      if (!confirm(`⚠ ${name} 직원의 잔여 휴무 ${remainLeave}일이 남아있습니다.\n퇴사일 전에 휴무를 모두 소진하는 것을 권장합니다.\n\n[확인] 그래도 등록  [취소] 취소`)) return;
     }
 
     if (!window.__retireList) window.__retireList = [];
@@ -14714,6 +14722,8 @@ async function renderBalancePanel() {
     // 전월 휴무 이월
     const slb = slbMap[staff.id] || {};
     const carryIn   = slb.carry_in   || 0;
+    if(!window.__leaveBalanceMap) window.__leaveBalanceMap = {};
+    window.__leaveBalanceMap[staff.id] = { carryIn };  // 대휴/퇴사 계산용
     const carryUsed = slb.carry_used  || 0;
     const carryOut  = carryIn - carryUsed;
     // 당월 휴무 기준 (주말+공휴일) — 퇴사예정=[1일~마지막 실근무일], 신규입사=[입사일~월말]로 조정
