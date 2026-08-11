@@ -322,6 +322,8 @@ textarea.form-input{min-height:120px;resize:vertical}
 .mind-badge{font-size:9px;font-weight:700;border-radius:6px;padding:1px 5px;line-height:1.5;white-space:nowrap}
 .mind-badge-link{background:#eef3ff;color:#4a6fd0;border:0.5px solid #cdd9f5}
 .mind-opt{border:1px solid var(--crd);border-radius:7px;padding:3px 11px;font-size:12px;font-weight:700;background:#fff;cursor:pointer;font-family:inherit}
+select.sch-warn{outline:2px solid #d9534f;outline-offset:-2px;border-radius:3px}
+td.sch-consec{background:#FFE7C7 !important;box-shadow:inset 0 0 0 2px #E8952B}
 .mind-node.sel{outline:2px solid #4a90d9;outline-offset:1px}
 .mind-group.sel{outline:2px solid #4a90d9}
 #opsMindSelBtn.active{background:var(--br);color:#fff}
@@ -767,10 +769,17 @@ function esc(v){
   if (v == null) return '';
   return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
+// 공지 작성자 라벨: 재직중=이름, 퇴사/비활성/null=파트·부서명
+function postAuthorLabel(p){ const u=p&&p.users; if(!u) return '[운영팀]'; if(u.active===false) return '['+(u.part||u.store||'운영팀')+']'; return (u.part||u.role||'')+' '+u.name; }
 function isManagerRole(role) {
   if (!role) return false;
   return role === 'manager' || role.indexOf('manager') === 0;  // manager, manager_b, managerB(소문자화) 등
 }
+// 직책(position): 화면 표시·정렬 전용. 권한 role과 분리. null이면 role 기반 폴백.
+const SCH_POSITIONS = ['매니저','매니저B','바리스타','파티쉐','팀원','PT'];
+function userPosition(u){ if(!u) return ''; if(u.position) return u.position; if(u.employment_type==='parttime') return 'PT'; const r=u.role||''; return (typeof roleLbl!=='undefined' && roleLbl[r]) || r || ''; }
+function positionRank(u){ const p=userPosition(u); if(p==='매니저') return 0; if(p==='매니저B'||/매니저\s*b/i.test(p)) return 1; if(p==='PT'||p==='파트타임'||(u&&u.employment_type==='parttime')) return 6; const r=(u&&u.role)||''; if(r==='manager') return 0; if(r.indexOf('manager')===0) return 1; const ord={ceo:0,executive_director:1,admin:2,dept:3,member:5}; if(r in ord) return ord[r]; return 5; }
+function schPositionOptions(cur){ const list=['',...SCH_POSITIONS]; if(cur && list.indexOf(cur)<0) list.push(cur); return list.map(o=>`<option value="${esc(o)}"${(cur||'')===o?' selected':''}>${o||'(직책 없음 · 직위 기준 자동)'}</option>`).join(''); }
 let roleOptions = [];  // [{role_key,label,is_core,sort_order}]
 
 // 직위 목록을 DB에서 로드해 roleLbl 갱신
@@ -2313,7 +2322,7 @@ let readListHtml = '';
       <div class="detail-header">
         <div class="detail-title-row">${isNew?'<span class="badge-new">NEW</span>':''} ${esc(p.title)}</div>
         <div class="detail-meta">
-          <span style="font-weight: 500; color: var(--br); margin-right: 8px;">작성: ${p.users ? ((p.users.part || p.users.role || '') + ' ' + p.users.name) : '알 수 없음'}</span>
+          <span style="font-weight: 500; color: var(--br); margin-right: 8px;">작성: ${postAuthorLabel(p)}</span>
           <span style="opacity: 0.3; margin-right: 8px;">|</span>
           <span>${fmtDate(p.created_at)}</span>
           <span>${p.categories?.name||''}</span>
@@ -3334,7 +3343,7 @@ async function renderStaff(area) {
   const renderTab = (list) => list.map(u => `
     <tr id="urow-${u.id}">
       <td><input type="checkbox" class="uchk" data-id="${u.id}" onclick="toggleUserSel('${u.id}',this.checked)"></td>
-      <td><span class="staff-role ${roleCls[u.role]||''}" style="font-size:10px">${roleLbl[u.role]||u.role}</span></td>
+      <td><span class="staff-role ${roleCls[u.role]||''}" style="font-size:10px">${esc(userPosition(u)||u.role||'')}</span></td>
       <td style="font-weight:600">${esc(u.name)}</td>
       <td>${u.store}</td>
       <td style="font-size:12px;color:var(--ts)">${u.part||'-'}</td>
@@ -3674,10 +3683,13 @@ async function openEditUser(userId){
           ? `<input class="form-input" value="${u?.code||''}" disabled style="background:var(--crm);color:var(--ts)"/>`
           : `<input class="form-input" id="eu_code" placeholder="자동 부여 (BCK-순번)" disabled style="background:var(--crm);color:var(--ts)"/>`}
       </div>
-      <div><label class="form-label">직위 *</label>
+      <div><label class="form-label">직위 * <span style="font-size:10px;color:var(--th);font-weight:400">(권한)</span></label>
         <select class="form-input" id="eu_role">
           ${roleSelectOptions(u?.role)}
         </select>
+      </div>
+      <div><label class="form-label">직책 <span style="font-size:10px;color:var(--th);font-weight:400">(표시·정렬)</span></label>
+        <select class="form-input" id="eu_position">${schPositionOptions(u?.position)}</select>
       </div>
       <div><label class="form-label">고용 형태 <span style="color:var(--rd)">*</span></label>
         <select class="form-input" id="eu_employment" onchange="onEmpChange(this.value)">
@@ -3870,7 +3882,7 @@ async function submitEditUser(){
   }
 
   const payload = {
-    name, role, store, phone: phone||null, email: email||null,
+    name, role, position: (document.getElementById('eu_position')?.value || null), store, phone: phone||null, email: email||null,
     hire_date: hire, retire_date: retire, active, part,
     is_master: isMaster, is_vice_master: isVice,
     employment_type: employmentType,
@@ -6417,7 +6429,7 @@ async function renderAll(area) {
           <div class="post-card-bottom" style="display:flex; gap:8px; font-size:12px; color:#666; margin-top:6px; align-items:center;">
             <span>${p.created_at.slice(0, 10)}</span>
             <span style="opacity:0.4;">|</span>
-            <span style="font-weight:500; color:var(--br);">${p.users ? ((p.users.part || p.users.role || '') + ' ' + p.users.name) : '알 수 없음'}</span>
+            <span style="font-weight:500; color:var(--br);">${postAuthorLabel(p)}</span>
           </div>
         </div>`;
   }).join('') || '<div style="text-align:center;padding:40px;color:var(--th)">등록된 공지가 없습니다.</div>';
@@ -6451,7 +6463,7 @@ async function doSearchAll(){
       <div class="post-card-bottom" style="display:flex; gap:8px; font-size:12px; color:#666; margin-top:6px; align-items:center;">
         <span>${p.created_at.slice(0, 10)}</span>
         <span style="opacity:0.4;">|</span>
-        <span style="font-weight:500; color:var(--br);">${p.users ? ((p.users.part || p.users.role || '') + ' ' + p.users.name) : '알 수 없음'}</span>
+        <span style="font-weight:500; color:var(--br);">${postAuthorLabel(p)}</span>
       </div>
     </div>`;
   }).join('') || '<div style="text-align:center;padding:40px;color:var(--th)">검색 결과가 없습니다.</div>';
@@ -12501,7 +12513,7 @@ async function renderScheduleEdit(area) {
 
   // 직원, 근무조코드, 휴무유형, 기존 entries, 휴무잔여 병렬 로드
   const [staffRes, shiftRes, leaveRes, entriesRes, balRes] = await Promise.all([
-    sb.from('users').select('id,name,store,role,employment_type,hire_date,retire_date,active,pt_work_hours,pt_hours_per_day,pt_weekly_days').eq('store',store).order('name'),
+    sb.from('users').select('id,name,store,role,position,employment_type,hire_date,retire_date,active,pt_work_hours,pt_hours_per_day,pt_weekly_days').eq('store',store).order('name'),
     sb.from('store_shift_codes').select('*').eq('store',store).eq('active',true).order('sort_order'),
     sb.from('leave_types').select('*').order('sort_order'),
     curSchedule ? schEntries(curSchedule.id).then(d=>({data:d})) : Promise.resolve({data:[]}),
@@ -12523,15 +12535,14 @@ async function renderScheduleEdit(area) {
 
   // 직원 정렬: 매니저 → 일반 직원(입사일이 빠른 순)
   const ROLE_ORDER = {'ceo':0, 'executive_director':1, 'admin':2, 'dept':3, 'manager':4, 'member':5, 'parttime':6};
+  // 다중 정렬: 1차 직책(position 우선, 없으면 role 폴백: 매니저→매니저B→팀원→PT) · 2차 입사일 오름차순 · 3차 이름 가나다
+  const schTier = (u) => positionRank(u);
   staffList.sort((a,b) => {
-    const roleA = a.role||'';
-    const roleB = b.role||'';
-    // 매니저 계열은 최상위(0~1)
-    const orderA = roleA === 'manager' ? 0 : roleA.startsWith('manager') ? 1 : (ROLE_ORDER[roleA]??5);
-    const orderB = roleB === 'manager' ? 0 : roleB.startsWith('manager') ? 1 : (ROLE_ORDER[roleB]??5);
-    if (orderA !== orderB) return orderA - orderB;
-    // 같은 직급 내 근무 경력이 오래된 입사일 오름차순
-    return (a.hire_date||'9999').localeCompare(b.hire_date||'9999');
+    const ta=schTier(a), tb=schTier(b);
+    if (ta !== tb) return ta - tb;
+    const hd = (a.hire_date||'9999').localeCompare(b.hire_date||'9999');
+    if (hd !== 0) return hd;
+    return (a.name||'').localeCompare(b.name||'','ko');
   });
 
   // 지원인력: user_id가 있는 지원 entries에서 user 정보 보강
@@ -12559,7 +12570,7 @@ async function renderScheduleEdit(area) {
   const extraNames = [...new Set(entries.filter(e=>e.extra_name && !e.user_id).map(e=>e.extra_name))];
 
   curScheduleStaff = [
-    ...staffList.map(u=>({id:u.id, name:u.name, isExtra:false, hire_date:u.hire_date, retire_date:u.retire_date, employment_type:u.employment_type, pt_work_hours:u.pt_work_hours||null, pt_hours_per_day:u.pt_hours_per_day||null, pt_weekly_days:u.pt_weekly_days||null})),
+    ...staffList.map(u=>({id:u.id, name:u.name, isExtra:false, role:u.role, position:u.position, hire_date:u.hire_date, retire_date:u.retire_date, employment_type:u.employment_type, pt_work_hours:u.pt_work_hours||null, pt_hours_per_day:u.pt_hours_per_day||null, pt_weekly_days:u.pt_weekly_days||null})),
     ...extraStaffData,
     ...extraNames.map(n=>({id:null, extra_name:n, name:n, isExtra:true}))
   ];
@@ -12624,7 +12635,7 @@ async function renderScheduleEdit(area) {
 
   const statusBadge = curSchedule ? {
     draft:'<span class="badge-access">작성중</span>',
-    requested:'<span class="badge-access" style="background:var(--blb);color:var(--bl)">컨펌 요청중</span>',
+    requested:'<span class="badge-access" style="background:var(--blb);color:var(--bl)">운영팀 승인 대기</span>',
     confirmed:'<span class="badge-access all">컨펌 완료</span>',
     rejected:'<span class="badge-access" style="background:var(--rdb);color:var(--rd)">반려됨</span>'
   }[curSchedule.status] : '<span class="badge-access">신규 작성</span>';
@@ -12814,9 +12825,30 @@ async function renderScheduleEdit(area) {
       // 재렌더 후 퇴사일 이후 셀 재비활성화
       (window.__retireList||[]).forEach(r => applyRetireToSchedule(r.id, r.retireDate));
     }
+    schRefreshChecks();
   }, 300);
+  setTimeout(schRefreshChecks, 900);
 }
 
+// ── 대휴 규칙 검증 + 연속근무(6일+) 하이라이트 ──
+function schCellVal(staffId, ds){ const tb=document.getElementById('schTbody'); const sel=tb&&tb.querySelector(`select[data-staff="${staffId}"][data-date="${ds}"]`); if(sel) return sel.value||''; const e=curScheduleEntries[staffId+'_'+ds]; return e?(e.shift_code||e.entry_type||e._rawCode||''):''; }
+function schLeaveViolations(staffId){
+  const y=window.__schYear,m=window.__schMonth; if(!y) return {over:[],order:[]};
+  const dim=new Date(y,m,0).getDate();
+  const C=(window.__leaveBalanceMap&&window.__leaveBalanceMap[staffId])?(window.__leaveBalanceMap[staffId].carryIn||0):0;
+  const rest=[]; for(let d=1;d<=dim;d++){ const ds=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const v=schCellVal(staffId,ds); if(v==='대휴'||v==='휴무') rest.push({date:ds,val:v}); }
+  const dae=rest.filter(r=>r.val==='대휴'); const over=[]; if(dae.length>C) dae.slice(C).forEach(r=>over.push(r.date));
+  const order=[]; if(C>0){ const need=Math.min(C,rest.length); for(let i=0;i<need;i++){ if(rest[i].val!=='대휴') order.push(rest[i].date); } }
+  return {over,order};
+}
+function schMarkLeaveWarnings(){ const tb=document.getElementById('schTbody'); if(!tb) return; tb.querySelectorAll('select.sch-warn').forEach(s=>s.classList.remove('sch-warn')); (curScheduleStaff||[]).forEach(st=>{ if(!st.id) return; const v=schLeaveViolations(st.id); [...v.over,...v.order].forEach(ds=>{ const sel=tb.querySelector(`select[data-staff="${st.id}"][data-date="${ds}"]`); if(sel){ sel.classList.add('sch-warn'); const td=sel.closest('td'); if(td) td.title='대휴 규칙 위반: 대휴 우선 소진/이월 잔여 확인'; } }); }); }
+function schHighlightConsec(){ const tb=document.getElementById('schTbody'); if(!tb) return; const rest=new Set((window.__cachedLeaveTypes||[]).map(l=>l.code)); rest.add('결근'); const y=window.__schYear,m=window.__schMonth; if(!y) return; const days=new Date(y,m,0).getDate();
+  Array.from(tb.rows).forEach(tr=>{ const tds=tr.querySelectorAll('td'); const cells=[];
+    for(let d=1;d<=days;d++){ const td=tds[d]; if(!td){ cells.push(null); continue; } td.classList.remove('sch-consec'); const sel=td.querySelector('select'); let v=sel?(sel.value||''):((td.textContent||'').trim()); if(v==='-') v=''; cells.push({td,work:!!v&&!rest.has(v)}); }
+    let i=0; while(i<cells.length){ if(cells[i]&&cells[i].work){ let j=i; while(j<cells.length&&cells[j]&&cells[j].work) j++; if(j-i>=6){ for(let k=i;k<j;k++){ if(cells[k]&&cells[k].td) cells[k].td.classList.add('sch-consec'); } } i=j; } else i++; }
+  });
+}
+function schRefreshChecks(){ try{ schMarkLeaveWarnings(); schHighlightConsec(); }catch(e){} }
 // 셀 변경 시 메모리에 즉시 반영 (저장은 별도 버튼)
 function onCellChange(sel) {
   const userId    = sel.dataset.staff || null;
@@ -12927,37 +12959,8 @@ function onCellChange(sel) {
     }
   }
 
-  // ── 대휴 입력 검증 (전월 이월 잔여 있어야만 입력 가능 — 정규직+지원 모두) ──
-  if (val === '대휴' && userId) {
-    const staffInfo0 = curScheduleStaff.find(s => s.id === userId);
-    if (staffInfo0) {
-      // __leaveBalanceMap이 없으면 집계 패널에서 생성 (안전장치)
-      if (!window.__leaveBalanceMap) window.__leaveBalanceMap = {};
-      const carryIn = window.__leaveBalanceMap[userId]?.carryIn || 0;
-      // 이미 이 스케줄에 입력된 대휴 개수
-      let usedCarry = 0;
-      const year  = window.__schYear;
-      const month = window.__schMonth;
-      const daysInMonth = new Date(year, month, 0).getDate();
-      for (let d = 1; d <= daysInMonth; d++) {
-        const ds = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-        const k  = userId + '_' + ds;
-        const otherSel = tbody?.querySelector(`select[data-staff="${userId}"][data-date="${ds}"]`);
-        const otherVal = otherSel?.value !== undefined ? otherSel.value
-          : (curScheduleEntries[k]?.shift_code || curScheduleEntries[k]?.entry_type || '');
-        if (otherVal === '대휴' && ds !== date) usedCarry++;
-      }
-      if (carryIn - usedCarry < 1) {
-        const prev = curScheduleEntries[key];
-        const prevVal = prev?._rawCode || prev?.entry_type || prev?.shift_code || '';
-        sel.value = prevVal;
-        // 값 확실히 롤백
-        setTimeout(() => { sel.value = prevVal; }, 0);
-        alert(`⚠ ${staffInfo0.name} 직원의 전월 휴무 이월 잔여가 없습니다.\n\n이월 잔여: ${carryIn - usedCarry}일 (이월 ${carryIn}일 · 이번 달 사용 ${usedCarry}일)\n\n대휴는 전월 잔여 휴무가 있을 때만 입력할 수 있습니다.\n일반 휴무(오프)로 변경하거나 인사팀에 문의하세요.`);
-        return;
-      }
-    }
-  }
+  // ── 대휴/휴무 규칙: 실시간은 경고 테두리만(엑셀 붙여넣기 호환), [임시저장]/[컨펌 요청] 시 정확히 차단 ──
+  schRefreshChecks();
 
   if (val && userId) {
     const staffInfo = curScheduleStaff.find(s => s.id === userId);
@@ -13115,22 +13118,19 @@ function addExtraStaff() {
     alert(`[${name}] 직원의 퇴사 예정일(${retireDate})이 스케줄 안안에 임시 등록되었습니다. 운영팀 컨펌 완료 시 최종 반영됩니다.`);
     
     syncCellsToMemory();
-    window.__leaveBalanceMap = {};
-  rows.forEach(r => {
-    if (r.userId) window.__leaveBalanceMap[r.userId] = {carryIn: r.carryIn||0};
-  });
-  const balTable = document.getElementById('leaveBalanceTable');
+    // 잔여 휴무 경고 (집계 패널 기준 · 권장 알림, 등록은 계속 가능)
     let remainLeave = 0;
+    const balTable = document.getElementById('leaveBalanceTable');
     if (balTable) {
-      const staffIdx = curScheduleStaff.findIndex(s => s.id === id);
       const rows = balTable.querySelectorAll('tbody tr');
+      const staffIdx = curScheduleStaff.findIndex(s => s.id === id);
       if (staffIdx >= 0 && rows[staffIdx]) {
         const cells = rows[staffIdx].querySelectorAll('td');
         remainLeave = (parseFloat(cells[2]?.textContent||'0')||0) + (parseFloat(cells[6]?.textContent||'0')||0);
       }
     }
     if (remainLeave > 0) {
-      if (!confirm(`⚠ ${name} 직원의 잔여 휴무 ${remainLeave}일이 남아있습니다.\n퇴사일 전에 휴무를 모두 소진 후 등록해주세요.\n\n[확인] 무시하고 등록  [취소] 닫기`)) return;
+      if (!confirm(`⚠ ${name} 직원의 잔여 휴무 ${remainLeave}일이 남아있습니다.\n퇴사일 전에 휴무를 모두 소진하는 것을 권장합니다.\n\n[확인] 그래도 등록  [취소] 취소`)) return;
     }
 
     if (!window.__retireList) window.__retireList = [];
@@ -13190,7 +13190,8 @@ async function renderNewHirePanel() {
   const { data: newHires } = await sb.from('users')
     .select('id,name,hire_date,role,employment_type,pt_work_hours,pt_break_minutes,pt_hours_per_day')
     .eq('store', store).eq('active', true)
-    .gte('hire_date', monthStart).lte('hire_date', monthEnd);
+    .gte('hire_date', monthStart).lte('hire_date', monthEnd)
+    .order('hire_date');
 
   if (!newHires || newHires.length === 0) { panel.style.display='none'; return; }
 
@@ -13250,6 +13251,8 @@ async function renderNewHirePanel() {
 async function renderRetirePanel() {
   const panel = document.getElementById('retirePanel');
   if (!panel) return;
+  // 퇴사일 오름차순(1일 퇴사자 상단) — 원본 배열을 정렬해 편집/삭제 인덱스 일치 유지
+  if (window.__retireList) window.__retireList.sort((a,b)=>(a.retireDate||'').localeCompare(b.retireDate||''));
   const list  = (window.__retireList || []).filter(r =>
     // 현재 스케줄에 포함된 직원만 표시 (다른 매장 퇴사자 방어)
     curScheduleStaff.some(s => s.id === r.id)
@@ -13681,6 +13684,7 @@ async function loadCrossStoreEntries(userId, year, month) {
 async function buildStaffRowWithCross(staff, si, daysInMonth, year, month, allCodeOptions, leaveColorMap, canEdit) {
   const crossMap = staff.id ? await loadCrossStoreEntries(staff.id, year, month) : {};
   const store = window.__schStore;
+  const _roleLbl = staff.isExtra ? '지원' : (userPosition(staff) || '');
 
   let rowHtml = `<tr data-staff-idx="${si}" data-staff-id="${staff.id||''}" draggable="false">
     <td style="position:sticky;left:0;background:#fff;z-index:2;padding:4px 6px;font-size:12px;font-weight:600;border:0.5px solid var(--crd);white-space:nowrap;min-width:100px">
@@ -13689,7 +13693,7 @@ async function buildStaffRowWithCross(staff, si, daysInMonth, year, month, allCo
           <button onclick="moveStaffRow(${si},-1)" title="위로" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:9px;padding:0 1px;line-height:1.1">▲</button>
           <button onclick="moveStaffRow(${si},1)" title="아래로" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:9px;padding:0 1px;line-height:1.1">▼</button>
         </div>
-        <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${staff.name}${staff.isExtra?' <span style="font-size:9px;color:var(--th)">(지원)</span>':''}</span>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${staff.name}${_roleLbl?` <span style="font-size:9px;color:var(--brm);background:var(--crm);border-radius:4px;padding:0 4px;font-weight:600">${esc(_roleLbl)}</span>`:''}${staff.hire_date?` <span style="font-size:9px;color:var(--th);font-weight:400">(${staff.hire_date.slice(2).replace(/-/g,'.')})</span>`:''}</span>
         ${!staff.isExtra
           ? `<button onclick="removeStaffFromSchedule(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px;flex-shrink:0" title="목록에서 제외">✕</button>`
           : `<button onclick="removeExtraStaff(${si})" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:11px;flex-shrink:0" title="지원인력 제외">✕</button>`}
@@ -13972,22 +13976,18 @@ async function saveScheduleDraftQuiet() {
 async function saveScheduleDraft() {
   if (isTestMode()) { alert('⚠ 테스트 모드에서는 저장할 수 없습니다.'); return; }
 
-  // ── 저장 전 대휴 잔여 검증 ──
+  // ── 저장 전 대휴 규칙 검증 (이월 초과 + 대휴 우선 소진 순서) ──
   const _tbody = document.getElementById('schTbody');
-  if (_tbody && window.__leaveBalanceMap) {
+  if (_tbody) {
     for (const _st of curScheduleStaff) {
       if (!_st.id) continue;
-      const _ci = window.__leaveBalanceMap[_st.id]?.carryIn || 0;
-      let _uc = 0;
-      const _y = window.__schYear, _m = window.__schMonth;
-      const _dim = new Date(_y, _m, 0).getDate();
-      for (let _d = 1; _d <= _dim; _d++) {
-        const _ds = `${_y}-${String(_m).padStart(2,'0')}-${String(_d).padStart(2,'0')}`;
-        const _sel = _tbody.querySelector(`select[data-staff="${_st.id}"][data-date="${_ds}"]`);
-        if (_sel?.value === '대휴') _uc++;
+      const _v = schLeaveViolations(_st.id);
+      if (_v.over.length) {
+        alert(`⚠ 저장 불가: ${_st.name} 직원의 대휴가 전월 이월 잔여를 초과합니다.\n\n초과분(${_v.over.map(d=>d.slice(8)+'일').join(', ')})을 '휴무'로 변경 후 저장해주세요.`);
+        return;
       }
-      if (_uc > _ci) {
-        alert(`⚠ 저장 불가: ${_st.name} 직원의 대휴(${_uc}일)가 전월 이월 잔여(${_ci}일)를 초과합니다.\n\n초과분을 '휴무'로 변경 후 저장해주세요.`);
+      if (_v.order.length) {
+        alert(`⚠ 저장 불가: ${_st.name} 직원은 대휴를 날짜순(1일~)으로 먼저 소진해야 합니다.\n\n${_v.order.map(d=>d.slice(8)+'일').join(', ')}의 '휴무'보다 앞선 날짜에 대휴를 배치하거나, 해당 휴무를 대휴로 변경 후 저장해주세요.`);
         return;
       }
     }
@@ -15190,7 +15190,7 @@ async function loadOtherStoreSchedule() {
   });
 
   const statusBadge = schList.status==='confirmed' ? '<span style="background:var(--gnb);color:var(--gn);border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600">컨펌 완료</span>'
-    : schList.status==='requested' ? '<span style="background:var(--blb);color:var(--bl);border-radius:6px;padding:2px 8px;font-size:11px">컨펌 요청중</span>'
+    : schList.status==='requested' ? '<span style="background:var(--blb);color:var(--bl);border-radius:6px;padding:2px 8px;font-size:11px">운영팀 승인 대기</span>'
     : '<span style="background:var(--crm);color:var(--ts);border-radius:6px;padding:2px 8px;font-size:11px">작성중</span>';
 
   cont.innerHTML = `
