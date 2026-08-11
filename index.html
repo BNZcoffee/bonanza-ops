@@ -12761,11 +12761,15 @@ async function renderScheduleEdit(area) {
             </select>
           </span>
           <!-- 퇴사 예정: 본 매장 직원 + 퇴사일 선택 -->
-          <span id="extraRetireWrap" style="display:flex;gap:6px;align-items:center">
-            <select class="form-input" id="retireStaffSelect" style="padding:7px 8px;font-size:12px;min-width:120px">
+          <span id="extraRetireWrap" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <select class="form-input" id="retireStaffSelect" style="padding:7px 8px;font-size:12px;min-width:110px">
               <option value="">직원 선택</option>
             </select>
-            <input type="date" class="form-input" id="retireDateInput" style="padding:7px 8px;font-size:12px;width:140px" placeholder="퇴사일"/>
+            <span style="font-size:10px;color:var(--th)">마지막 실근무일</span>
+            <input type="date" class="form-input" id="lastWorkDateInput" oninput="syncRetireDate()" style="padding:7px 8px;font-size:12px;width:132px"/>
+            <span style="font-size:10px;color:var(--th)">최종 퇴사일</span>
+            <input type="date" class="form-input" id="retireDateInput" style="padding:7px 8px;font-size:12px;width:132px" disabled/>
+            <label style="font-size:11px;color:var(--ts);display:inline-flex;align-items:center;gap:3px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="retireSameChk" checked onchange="toggleRetireSame()"> 실근무일과 동일</label>
           </span>
           <button class="btn-submit" onclick="addExtraStaff()" style="padding:7px 14px;font-size:12px;white-space:nowrap">
             <i class="ti ti-plus"></i> 추가
@@ -13068,6 +13072,9 @@ async function loadRetireStaffOptions() {
     myStaff.map(u => `<option value="${u.id}|${u.name}|${u.store}">${u.name}</option>`).join('');
 }
 
+// 퇴사 폼: '실근무일과 동일' 체크 시 최종 퇴사일 비활성+동기화
+function toggleRetireSame(){ const chk=document.getElementById('retireSameChk'); const rd=document.getElementById('retireDateInput'); const lw=document.getElementById('lastWorkDateInput'); if(!chk||!rd||!lw) return; if(chk.checked){ rd.disabled=true; rd.value=lw.value||''; } else { rd.disabled=false; if(!rd.value) rd.value=lw.value||''; } }
+function syncRetireDate(){ const chk=document.getElementById('retireSameChk'); const rd=document.getElementById('retireDateInput'); const lw=document.getElementById('lastWorkDateInput'); if(chk&&chk.checked&&rd&&lw){ rd.value=lw.value||''; } }
 function addExtraStaff() {
   // 💡 [권한 보정] 총괄, 부총괄, 인사팀 뿐만 아니라 현장 매장 '매니저(manager)'도 추가할 수 있도록 허용
   const uRole = currentUser.role || '';
@@ -13092,12 +13099,17 @@ function addExtraStaff() {
   // ⚠️ 퇴사 예정 처리 ⚠️
   if (extraType === '퇴사예정') {
     const staffSel = document.getElementById('retireStaffSelect');
+    const lastInput = document.getElementById('lastWorkDateInput');
     const dateInput = document.getElementById('retireDateInput');
+    const sameChk = document.getElementById('retireSameChk');
     const val = staffSel?.value;
-    const retireDate = dateInput?.value;
+    const lastWorkDate = lastInput?.value;
+    let retireDate = (sameChk && sameChk.checked) ? lastWorkDate : (dateInput?.value || lastWorkDate);
 
     if (!val) { alert('직원을 선택해주세요.'); return; }
-    if (!retireDate) { alert('퇴사일을 선택해주세요.'); return; }
+    if (!lastWorkDate) { alert('마지막 실근무일을 선택해주세요.'); return; }
+    if (!retireDate) { retireDate = lastWorkDate; }
+    if (retireDate < lastWorkDate) { alert('최종 퇴사일은 마지막 실근무일과 같거나 이후여야 합니다.'); return; }
 
     const [id, name, store] = val.split('|');
     
@@ -13112,10 +13124,11 @@ function addExtraStaff() {
     const targetIdx = curScheduleStaff.findIndex(s => s.id === id);
     if (targetIdx > -1) {
       curScheduleStaff[targetIdx]._retireDate = retireDate;
+      curScheduleStaff[targetIdx]._lastWorkDate = lastWorkDate;
       curScheduleStaff[targetIdx]._isRetirePending = true; // 운영팀 승인 대기 플래그
     }
 
-    alert(`[${name}] 직원의 퇴사 예정일(${retireDate})이 스케줄 안안에 임시 등록되었습니다. 운영팀 컨펌 완료 시 최종 반영됩니다.`);
+    alert(`[${name}] 마지막 실근무일 ${lastWorkDate} · 최종 퇴사일 ${retireDate}로 임시 등록되었습니다. 운영팀 컨펌 완료 시 최종 반영됩니다.`);
     
     syncCellsToMemory();
     // 잔여 휴무 경고 (집계 패널 기준 · 권장 알림, 등록은 계속 가능)
@@ -13135,15 +13148,17 @@ function addExtraStaff() {
 
     if (!window.__retireList) window.__retireList = [];
     const existing = window.__retireList.find(r => r.id === id);
-    if (existing) { existing.retireDate = retireDate; }
-    else { window.__retireList.push({ id, name, store, retireDate }); }
-    // users 테이블 retire_date 자동 연동
+    if (existing) { existing.retireDate = retireDate; existing.lastWorkDate = lastWorkDate; }
+    else { window.__retireList.push({ id, name, store, retireDate, lastWorkDate }); }
+    // users 테이블 retire_date(최종 퇴사일) 자동 연동
     sb.from('users').update({retire_date: retireDate}).eq('id', id).then(() => {});
-    // 편집 모드에서 즉시 셀 비활성화
+    // 편집 모드에서 즉시 셀 비활성화 (최종 퇴사일+1 ~ 월말)
     if (window.__schEditMode) applyRetireToSchedule(id, retireDate);
     renderRetirePanel();
     staffSel.value = '';
+    if (lastInput) lastInput.value = '';
     dateInput.value = '';
+    if (sameChk) { sameChk.checked = true; toggleRetireSame(); }
     return;
   }
 
@@ -13270,7 +13285,8 @@ async function renderRetirePanel() {
   const holSet = new Set((hols||[]).map(h=>h.date));
 
   const items = list.map((r,i) => {
-    const retireD = r.retireDate; // YYYY-MM-DD
+    const retireD = r.retireDate; // 최종 퇴사일
+    const lastWorkD = r.lastWorkDate || r.retireDate; // 마지막 실근무일(휴무 발생 기준)
     const retireInMonth = retireD >= monthStart && retireD <= monthEnd;
 
     // 직원 정보 조회 (PT 여부 + 연차)
@@ -13288,25 +13304,24 @@ async function renderRetirePanel() {
         const { days: annualDays } = calcAnnualLeave(staffInfo.hire_date, today);
         leaveInfo = `
           <div style="font-size:11px;color:var(--ts);margin-top:5px;line-height:1.8">
-            퇴사일: <strong>${retireD}</strong>
-            &nbsp;|&nbsp; 계약 근로시간: <strong>${ptWorkH}h</strong>
+            마지막 실근무일: <strong>${lastWorkD}</strong> | 최종 퇴사일: <strong>${retireD}</strong>
+            <br>계약 근로시간: <strong>${ptWorkH}h</strong>
             &nbsp;|&nbsp; 총 체류시간: <strong>${ptTotalH}h</strong>
             &nbsp;|&nbsp; 발생 연차: <strong>${annualDays}일</strong>
             <span style="font-size:10px;color:var(--th);display:block;margin-top:2px">※ PT 직원은 실근무 기반 휴무 발생 없음</span>
           </div>`;
       } else {
         // 정규직: 실근무 기간 주말/공휴일 = 휴무 발생 기준
-        const result = calcRetireLeave(r, year, month, retireD, holSet, daysInM);
+        const result = calcRetireLeave(r, year, month, lastWorkD, holSet, daysInM);
         leaveInfo = `
           <div style="font-size:11px;color:var(--ts);margin-top:5px;line-height:1.8">
-            퇴사일: <strong>${retireD}</strong> &nbsp;|&nbsp;
-            실근무 기간 내 주말/공휴일: <strong>${result.offDays}일</strong>
-            (= 당월 휴무 발생 기준)
+            마지막 실근무일: <strong>${lastWorkD}</strong> | 최종 퇴사일: <strong>${retireD}</strong><br>
+            실근무 기간 내 주말/공휴일: <strong>${result.offDays}일</strong> (= 당월 휴무 발생 기준)
             ${result.note ? `<br><span style="color:var(--th)">${result.note}</span>` : ''}
           </div>`;
       }
     } else {
-      leaveInfo = `<div style="font-size:11px;color:var(--th);margin-top:4px">퇴사일: <strong>${retireD}</strong> (이번 달 외)</div>`;
+      leaveInfo = `<div style="font-size:11px;color:var(--th);margin-top:4px">마지막 실근무일: <strong>${lastWorkD}</strong> | 최종 퇴사일: <strong>${retireD}</strong> (이번 달 외)</div>`;
     }
 
     return `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:8px 10px;background:#fff;border-radius:7px;margin-bottom:5px">
@@ -13345,13 +13360,19 @@ function editRetireEntry(idx) {
   if (!window.__retireList) return;
   const r = window.__retireList[idx];
   if (!r) return;
-  const newDate = prompt(`[${r.name}] 퇴사일 수정\n현재: ${r.retireDate}\n\n새 퇴사일을 입력하세요 (YYYY-MM-DD):`, r.retireDate);
-  if (!newDate) return;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) { alert('날짜 형식이 올바르지 않습니다.'); return; }
+  const newLast = prompt(`[${r.name}] 마지막 실근무일 수정 (YYYY-MM-DD):`, r.lastWorkDate || r.retireDate);
+  if (!newLast) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(newLast)) { alert('날짜 형식이 올바르지 않습니다.'); return; }
+  const newRetire = (prompt(`[${r.name}] 최종 퇴사일 수정 (YYYY-MM-DD) — 실근무일과 같으면 그대로 두세요:`, r.retireDate || newLast) || newLast).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(newRetire)) { alert('날짜 형식이 올바르지 않습니다.'); return; }
+  if (newRetire < newLast) { alert('최종 퇴사일은 마지막 실근무일과 같거나 이후여야 합니다.'); return; }
   // 이전 퇴사일 기준 셀 복원 후 새 날짜 적용
   restoreRetireCells(r.id);
-  r.retireDate = newDate;
-  applyRetireToSchedule(r.id, newDate);
+  r.lastWorkDate = newLast; r.retireDate = newRetire;
+  const i2 = curScheduleStaff.findIndex(s => s.id === r.id);
+  if (i2 > -1) { curScheduleStaff[i2]._retireDate = newRetire; curScheduleStaff[i2]._lastWorkDate = newLast; }
+  sb.from('users').update({retire_date: newRetire}).eq('id', r.id).then(() => {});
+  applyRetireToSchedule(r.id, newRetire);
   renderRetirePanel();
 }
 
