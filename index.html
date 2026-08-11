@@ -13141,14 +13141,16 @@ function addExtraStaff() {
     // 셀 현재값을 메모리에 반영한 뒤 정확한 휴무 계산으로 확인 팝업
     syncCellsToMemory();
     const _lc = schRetireLeaveCalc(id, lastWorkDate);
-    const _leaveLine = (_lc.E < 0)
-      ? `· 당월 발생 휴무: ${_lc.A}개 (전월 이월 ${_lc.B}개 포함 총 ${_lc.C}개) · 현재 스케줄에 배치된 휴무: ${_lc.D}개  ⚠ 휴무가 ${Math.abs(_lc.E)}개 초과 배치됨`
-      : `· 당월 발생 휴무: ${_lc.A}개 (전월 이월 ${_lc.B}개 포함 총 ${_lc.C}개) · 현재 스케줄에 배치된 휴무: ${_lc.D}개  👉 소진해야 할 잔여 휴무: ${_lc.E}개`;
-    const _msg = `${name} 직원의 퇴사 일정을 등록하시겠습니까?\n\n`
+    const _resultLine = (_lc.E < 0)
+      ? `   → ⚠ 휴무가 ${Math.abs(_lc.E)}개 초과 배치되었습니다.`
+      : `   → 소진해야 할 잔여 휴무: ${_lc.E}개`;
+    const _msg = `${name} 직원의 퇴사 일정을 등록하시겠습니까?\n`
       + `· 마지막 실근무일: ${lastWorkDate}\n`
-      + `${_leaveLine}\n`
-      + `· 최종 퇴사일: ${retireDate}\n\n`
-      + `→ 지급품 반납 및 최종 퇴사일로 비즈메카 사직서 상신토록 지도 바랍니다.`;
+      + `· 당월 발생 휴무: ${_lc.A}개 + 전월 이월 ${_lc.B}개 = 총 ${_lc.C}개\n`
+      + ` · 현재 스케줄에 배치된 휴무: ${_lc.D}개\n`
+      + `${_resultLine}\n`
+      + `· 최종 퇴사일: ${retireDate}\n`
+      + `   → 최종 퇴사일로 비즈메카 사직서 상신 및 지급품 반납하도록 지도 바랍니다.`;
     if (!confirm(_msg)) return;
 
     // 매니저 추가 시점: DB엔 retire_date만 연동, 최종 반영은 운영팀 '컨펌 완료' 시
