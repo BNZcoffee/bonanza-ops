@@ -738,18 +738,23 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
     const { data } = await sb.from('app_settings').select('value').eq('key','logo_url').maybeSingle();
     const logo = data && data.value;
     if (!logo) return;                       // 커스텀 로고 없으면 정적 기본 아이콘(파일) 유지
-    const apple = document.getElementById('appleTouchIcon');
-    if (apple) apple.href = logo;            // iOS 홈화면 아이콘
+    // iOS + 폴백용 정적 아이콘 링크까지 로고로 덮어써, manifest 미적용 시에도 로고가 뜨게 함
+    document.querySelectorAll('link[rel="apple-touch-icon"]').forEach(l=>{ l.href = logo; });
+    document.querySelectorAll('link[rel="icon"]').forEach(l=>{ l.href = logo; });
     const theme = '#3B2314';
+    // ⚠ Android 홈아이콘 폴백(브라운 B) 방지:
+    //  1) blob manifest 에서 start_url/scope 는 반드시 '절대 URL' (상대경로는 blob 기준 무효)
+    //  2) 아이콘 sizes 는 'any' — 실제 픽셀과 불일치해도 거부되지 않도록
+    const baseUrl = location.href.split('#')[0].split('?')[0];   // 현재 파일 절대 URL
+    const scopeUrl = baseUrl.replace(/[^/]*$/, '');              // 디렉터리 절대 URL
+    const ext = (logo.split('?')[0].match(/\.(png|jpe?g|webp)$/i)||[])[1];
+    const mime = ext ? ('image/'+(/jpe?g/i.test(ext)?'jpeg':ext.toLowerCase())) : null;
+    const mkIcon = (purpose)=>{ const o={ src:logo, sizes:'any', purpose }; if(mime) o.type=mime; return o; };
     const mani = {
       name:'보난자커피 운영 매뉴얼', short_name:'보난자',
-      start_url:'./index.html', scope:'./', display:'standalone',
+      start_url: baseUrl, scope: scopeUrl, display:'standalone',
       background_color:theme, theme_color:theme,
-      icons:[
-        { src:logo, sizes:'192x192', type:'image/png', purpose:'any' },
-        { src:logo, sizes:'512x512', type:'image/png', purpose:'any' },
-        { src:logo, sizes:'512x512', type:'image/png', purpose:'maskable' }
-      ]
+      icons:[ mkIcon('any'), mkIcon('maskable') ]
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(mani)], { type:'application/json' }));
     let link = document.querySelector('link[rel="manifest"]');
