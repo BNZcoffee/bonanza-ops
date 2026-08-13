@@ -1851,14 +1851,14 @@ function goPage(page) {
     const nb = document.getElementById('nav-repairs');
     if (nb) nb.classList.add('active');
     renderRepairNew(area);
-  } else if (page === 'schedules') {
-    const nb = document.getElementById('nav-schedules');
-    if (nb) nb.classList.add('active');
-    renderSchedules(area);
   } else if (page === 'attendanceIssue') {
     const nb = document.getElementById('nav-attendanceIssue');
     if (nb) nb.classList.add('active');
     renderAttendanceIssue(area);
+  } else if (page === 'schedules') {
+    const nb = document.getElementById('nav-schedules');
+    if (nb) nb.classList.add('active');
+    renderSchedules(area);
   } else if (page === 'scheduleEdit') {
     const nb = document.getElementById('nav-schedules');
     if (nb) nb.classList.add('active');
@@ -5217,6 +5217,7 @@ function applyFeatureFlagsToUI() {
     'interviews':  'nav-interviews',
     'handover':    'nav-handover',
     'repairs':     'nav-repairs',
+    'attendanceIssue': 'nav-attendanceIssue',
     'schedules':   'nav-schedules',
     'sch_confirm': 'nav-sch-confirm',
     'attendance':  'nav-attendance',
@@ -6435,6 +6436,7 @@ async function renderAll(area) {
   }).join('') || '<div style="text-align:center;padding:40px;color:var(--th)">등록된 공지가 없습니다.</div>';
   area.innerHTML = `
     <div class="page-header"><div class="page-title">전체보기</div><div class="page-sub">모든 게시판 공지 최신순</div></div>
+    <div id="attApologyWidget"></div>
     <div class="board-tabs"><button class="tab-btn active">전체보기</button>${tabs}${adminBtn}</div>
     <div class="board-toolbar">
       <div class="search-box"><i class="ti ti-search" style="color:var(--th)"></i><input id="allSearch" placeholder="제목·본문 검색..." onkeydown="if(event.key==='Enter')doSearchAll()"/>
@@ -6442,7 +6444,33 @@ async function renderAll(area) {
       ${newBtn}
     </div>
     <div class="post-list" id="allPostList">${postHtml}</div>`;
+  attRenderApologyWidget();
 }
+// [증축] 홈(전체보기) 상단: 본인 앞으로 요청된 '사유서 대기' 위젯 (있을 때만 노출)
+async function attRenderApologyWidget(){
+  const box=document.getElementById('attApologyWidget'); if(!box||!currentUser) return;
+  let rows=[];
+  try{
+    const { data } = await sb.from('attendance_issues')
+      .select('id,issue_date,report_type,reason_category,apology_text,apology_required,is_locked')
+      .eq('user_id', currentUser.id).eq('apology_required', true).eq('is_locked', false)
+      .order('issue_date',{ascending:false}).limit(20);
+    rows=data||[];
+  }catch(e){ box.innerHTML=''; return; }
+  if(!rows.length){ box.innerHTML=''; return; }
+  const items=rows.map(r=>{
+    const done=!!(r.apology_text && r.apology_text.trim());
+    const badge=done?'<span class="badge-access" style="background:var(--blb);color:var(--bl)">제출·검토중</span>':'<span class="badge-access" style="background:var(--rdb);color:var(--rd)">미작성</span>';
+    return `<div onclick="openAttIssueDetail(${r.id})" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#fff;border:0.5px solid #E8B0A8;border-radius:8px;margin-top:6px;cursor:pointer">
+      <i class="ti ti-file-text" style="color:var(--rd)"></i>
+      <span style="flex:1;font-size:13px;color:var(--tm)">${esc(r.issue_date||'')} · ${esc(r.reason_category||(r.report_type==='late'?'지각·결근':'연장·야간'))}</span>
+      ${badge}<i class="ti ti-chevron-right" style="color:var(--th)"></i></div>`;
+  }).join('');
+  box.innerHTML=`<div style="background:#fdeaea;border:0.5px solid #E8B0A8;border-radius:10px;padding:12px 14px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#8a2a2a"><i class="ti ti-alert-triangle" style="color:#d9534f"></i> 사유서 제출 요청 ${rows.length}건 — 항목을 눌러 사유를 작성/수정하세요.</div>
+    ${items}</div>`;
+}
+function attRefreshApologyWidget(){ try{ if(document.getElementById('attApologyWidget')) attRenderApologyWidget(); }catch(e){} }
 async function doSearchAll(){
   const q = (document.getElementById('allSearch')?.value||'').trim().toLowerCase();
   if (!q) { renderAll(document.getElementById('contentArea')); return; }
@@ -6574,6 +6602,7 @@ async function renderAppSettings(area){
   const tog = key => `<button class="toggle-switch${APP[key]==='true'?' on':''}" id="ts-${key}" onclick="this.classList.toggle('on');APP['${key}']=this.classList.contains('on')?'true':'false'"></button>`;
   area.innerHTML = `
     <div class="page-header"><div class="page-title">앱 관리</div><div class="page-sub">버전 <strong>v${APP.app_version}</strong>  ·  최근 업데이트: <strong>${APP_UPDATED_AT ? fmtDateTime(APP_UPDATED_AT).slice(0,10) : APP_BUILD_DATE}</strong></div></div>
+    ${(currentUser.is_master||currentUser.role==='admin') ? '<div id="attEvTypeCard" class="notif-card" style="margin-bottom:12px"><div class="section-label" style="margin-bottom:8px"><i class="ti ti-alarm"></i> 근태 증빙 종류 관리</div><div style="font-size:12px;color:var(--th)">불러오는 중...</div></div>' : ''}
     <div class="notif-card" style="margin-bottom:12px">
       <div class="section-label" style="margin-bottom:12px">UI 설정</div>
       <div class="form-row"><label class="form-label">앱 이름 (상단 로고)</label><input class="form-input" id="cfg-name" value="${APP.app_name||''}"/></div>
@@ -6668,6 +6697,53 @@ async function renderAppSettings(area){
     if(picker&&hex){picker.oninput=()=>{hex.value=picker.value;};hex.oninput=()=>{if(/^#[0-9a-f]{6}$/i.test(hex.value))picker.value=hex.value;};}
   },100);
   (async()=>{ try{ const [swRes,brRes]=await Promise.all([sb.from('app_settings').select('value').eq('key','schedule_sheet_webhook').maybeSingle(), sb.from('app_settings').select('value').eq('key','biz_record_sheet_url').maybeSingle()]); const sw=document.getElementById('scheduleSheetWebhook'); if(sw&&swRes.data&&swRes.data.value) sw.value=swRes.data.value; const br=document.getElementById('bizRecordSheetUrl'); if(br&&brRes.data&&brRes.data.value) br.value=brRes.data.value; }catch(e){} })();
+  if(currentUser.is_master||currentUser.role==='admin') renderAttEvTypesAdmin();
+}
+// [증축] 근태 증빙 종류(카테고리) 관리 — master/admin 전용, 등록 폼 '사유' 드롭다운과 실시간 연동
+async function renderAttEvTypesAdmin(){
+  const box=document.getElementById('attEvTypeCard'); if(!box) return;
+  let rows=[]; let tableErr='';
+  try{ const { data, error }=await sb.from('attendance_evidence_types').select('*').order('sort_order').order('name'); if(error) tableErr=error.message; rows=data||[]; }catch(e){ tableErr=String(e); }
+  if(tableErr){
+    box.innerHTML=`<div class="section-label" style="margin-bottom:8px"><i class="ti ti-alarm"></i> 근태 증빙 종류 관리</div>
+      <div style="font-size:12px;color:var(--th);line-height:1.7">테이블 준비가 필요합니다. 총괄에게 <b>attendance_upgrade.sql</b> 실행을 요청하세요.<br><span style="font-size:11px">(${esc(tableErr)})</span></div>`;
+    return;
+  }
+  const list=rows.map(r=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:0.5px solid var(--crm)">
+    <span style="flex:1;font-size:13px;${r.is_active?'':'color:var(--th);text-decoration:line-through'}">${esc(r.name)}</span>
+    <label style="font-size:11px;display:flex;align-items:center;gap:4px;white-space:nowrap"><input type="checkbox" ${r.is_active?'checked':''} onchange="attEvTypeToggle(${r.id},this.checked)" style="width:auto"> 사용</label>
+    <button class="btn-cancel-sm" style="font-size:11px;padding:4px 8px;color:var(--rd);border-color:var(--rd)" onclick="attEvTypeDelete(${r.id},'${esc((r.name||'').replace(/'/g,''))}')"><i class="ti ti-trash"></i></button>
+  </div>`).join('') || '<div style="font-size:12px;color:var(--th);padding:6px 0">등록된 증빙 종류가 없습니다.</div>';
+  box.innerHTML=`<div class="section-label" style="margin-bottom:8px"><i class="ti ti-alarm"></i> 근태 증빙 종류 관리</div>
+    <div style="font-size:12px;color:var(--th);margin-bottom:8px;line-height:1.6">근태 이슈 등록 폼의 <b>사유</b> 드롭다운 목록입니다. 여기서 추가·사용여부·삭제하면 폼에 즉시 반영됩니다.</div>
+    ${list}
+    <div style="display:flex;gap:6px;margin-top:10px">
+      <input class="form-input" id="attEvTypeNew" placeholder="새 증빙 종류 (예: 지하철 지연증명서)" style="flex:1;font-size:13px" onkeydown="if(event.key==='Enter')attEvTypeAdd()">
+      <button class="btn-submit" style="font-size:12px;padding:6px 12px" onclick="attEvTypeAdd()"><i class="ti ti-plus"></i> 추가</button>
+    </div>`;
+}
+async function attEvTypeAdd(){
+  if(!(currentUser.is_master||currentUser.role==='admin')){ alert('권한이 없습니다.'); return; }
+  const inp=document.getElementById('attEvTypeNew'); const name=(inp?.value||'').trim();
+  if(!name){ alert('증빙 종류명을 입력하세요.'); return; }
+  const { data: mx } = await sb.from('attendance_evidence_types').select('sort_order').order('sort_order',{ascending:false}).limit(1);
+  const so=((mx&&mx[0]&&mx[0].sort_order)||0)+1;
+  const { error } = await sb.from('attendance_evidence_types').insert({name, sort_order:so, is_active:true});
+  if(error){ alert(/duplicate|unique/i.test(error.message)?'이미 있는 종류입니다.':('오류: '+error.message)); return; }
+  renderAttEvTypesAdmin();
+}
+async function attEvTypeToggle(id,active){
+  if(!(currentUser.is_master||currentUser.role==='admin')){ alert('권한이 없습니다.'); renderAttEvTypesAdmin(); return; }
+  const { error } = await sb.from('attendance_evidence_types').update({is_active:!!active}).eq('id',id);
+  if(error){ alert('오류: '+error.message); }
+  renderAttEvTypesAdmin();
+}
+async function attEvTypeDelete(id,name){
+  if(!(currentUser.is_master||currentUser.role==='admin')){ alert('권한이 없습니다.'); return; }
+  if(!confirm(`'${name}' 증빙 종류를 삭제할까요?\n(이미 등록된 근태 이슈의 기록은 유지됩니다.)`)) return;
+  const { error } = await sb.from('attendance_evidence_types').delete().eq('id',id);
+  if(error){ alert('오류: '+error.message); return; }
+  renderAttEvTypesAdmin();
 }
 async function saveSheetSettings(){
   const webhookUrl = currentUser.is_master ? document.getElementById('scheduleSheetWebhook')?.value.trim() : undefined;
@@ -10376,8 +10452,10 @@ async function selectReqType(typeId) {
         fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
           '<input type="date" class="form-input" id="rf-' + i + '"/></div>';
       } else if (f.type === 'number') {
+        // 숫자 전용 필드: 브라우저 number 입력은 "9,750원"처럼 쉼표·단위가 섞이면 값이 비어버려
+        // 필수검증에서 반려됨. → text + inputmode 로 두고 입력 즉시 숫자 외 문자를 제거(숫자만 허용).
         fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
-          '<input type="number" class="form-input" id="rf-' + i + '" placeholder="숫자 입력"/></div>';
+          '<input type="text" inputmode="numeric" class="form-input" id="rf-' + i + '" placeholder="숫자만 입력 (예: 9750)" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>';
       } else if (f.type === 'ox') {
         fieldsHtml += '<div class="form-row"><label class="form-label">' + f.label + req + '</label>' +
           '<select class="form-input" id="rf-' + i + '"><option value="">선택</option><option value="O">O</option><option value="X">X</option></select></div>';
@@ -10503,6 +10581,19 @@ document.getElementById('reqFormArea').innerHTML =
       '<button class="btn-submit" onclick="submitRequest()">신청 접수</button>' +
     '</div>';
   try{ document.querySelectorAll('#reqFormArea [data-ft="repeat"]').forEach(function(c){ const idx=parseInt((c.id||'').split('-')[1]); if(!isNaN(idx)) reqRepeatAdd('rf-',idx); }); }catch(e){}
+  // 첫 글자 앞 공백 자동 제거: 텍스트/텍스트영역 입력 시 앞쪽 공백(띄어쓰기)을 실시간으로 없앰
+  try{
+    const __rfa = document.getElementById('reqFormArea');
+    if(__rfa) __rfa.addEventListener('input', function(e){
+      const el = e.target;
+      if(!el) return;
+      const tag = (el.tagName||'').toLowerCase();
+      const typ = (el.getAttribute && el.getAttribute('type')||'').toLowerCase();
+      if(tag==='textarea' || (tag==='input' && (typ===''||typ==='text'||typ==='search'))){
+        if(/^\s/.test(el.value)) el.value = el.value.replace(/^\s+/, '');
+      }
+    });
+  }catch(e){}
 }
 
 async function reqAddFiles(files) {
@@ -11668,6 +11759,7 @@ async function deleteInterviewOption(id, label) {
 // 매장 보수 내역
 // ══════════════════════════════════════════════════════════
 let curRepair = null;
+
 
 async function renderRepairs(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
@@ -17697,6 +17789,54 @@ function canSeeAtt(){ const u=currentUser; return !!(u && (isAttAdmin()||isManag
 function attHm2min(t){ if(!t||t.indexOf(':')<0) return null; const [h,m]=t.split(':').map(Number); if(isNaN(h)||isNaN(m)) return null; return h*60+m; }
 function attDiffLabel(min){ if(min==null||isNaN(min)) return '-'; const sg=min<0?'-':''; const a=Math.abs(min); if(a<=60) return sg+a+'분'; return sg+Math.floor(a/60)+'시간 '+(a%60)+'분'; }
 const ATT_REASONS = { late:['지각','시스템 오류','결근','기타'], overtime:['연장','야간','단순 지각','시스템 이상','기타'] };
+// [증축] 사유(증빙 종류) 드롭다운: 관리자 편집 테이블 attendance_evidence_types 에서 로드, 없으면 ATT_REASONS 폴백
+async function attLoadEvTypes(){
+  try{ const { data }=await sb.from('attendance_evidence_types').select('name,is_active,sort_order').eq('is_active',true).order('sort_order').order('name'); if(data && data.length){ window.__attEvTypes=data.map(x=>x.name); return; } }catch(e){}
+  window.__attEvTypes=null; // 폴백(테이블 미생성/빈 값)
+}
+function attEvTypeOptions(){
+  const list=(window.__attEvTypes && window.__attEvTypes.length)?window.__attEvTypes:(ATT_REASONS[__attTab]||[]);
+  return list.map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');
+}
+// [증축] (uid,date)로 해당일 근무조를 조회 → {work_store,shift_code,start,end} 또는 null (다중 대상 저장 시 재사용)
+async function attResolveShift(uid, date){
+  try{
+    const ent=await schUserDay(uid, date); const e=(ent||[])[0];
+    if(e && e.shift_code){
+      const wstore=e.support_store || e.schedule?.store || '';
+      const { data: sc }=await sb.from('store_shift_codes').select('start_time,end_time').eq('store',wstore).eq('code',e.shift_code).limit(1);
+      const c=(sc||[])[0];
+      if(c && c.start_time && c.end_time) return { manual:false, work_store:wstore, shift_code:e.shift_code, start:c.start_time.slice(0,5), end:c.end_time.slice(0,5) };
+    }
+  }catch(e){}
+  return null;
+}
+// [증축] 증빙 이미지 업로드 전 썸네일 미리보기 (클릭 시 확대)
+function attProofPreview(input){
+  const box=document.getElementById('att_proof_prev'); if(!box) return;
+  box.innerHTML='';
+  const files=input.files?Array.from(input.files):[];
+  files.forEach(f=>{ const url=URL.createObjectURL(f); const im=document.createElement('img'); im.src=url; im.title=f.name; im.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:6px;border:0.5px solid var(--crd);cursor:zoom-in'; im.onclick=function(){ openImageZoom(url); }; box.appendChild(im); });
+  if(files.length) { const cap=document.createElement('div'); cap.style.cssText='width:100%;font-size:11px;color:var(--th)'; cap.textContent=files.length+'장 첨부 예정'; box.appendChild(cap); }
+}
+// [증축] 대상 직원 검색 필터
+function attTargetFilter(){
+  const q=(document.getElementById('att_user_search')?.value||'').trim().toLowerCase();
+  document.querySelectorAll('#att_tgt_list .att-tgt-row').forEach(row=>{ const nm=row.getAttribute('data-name')||''; row.style.display=(!q||nm.indexOf(q)>=0)?'flex':'none'; });
+}
+// [증축] 대상 체크박스 변경 → 1명이면 근무조 자동 미리보기, 여러 명이면 다중 안내
+function attOnTargetToggle(){
+  const cbs=[...document.querySelectorAll('.att-tgt-cb:checked')];
+  const cnt=document.getElementById('att_tgt_count'); if(cnt) cnt.textContent=cbs.length?(cbs.length+'명 선택됨'):'';
+  const box=document.getElementById('att_shift_box'); const diff=document.getElementById('att_diff');
+  if(cbs.length===1){ attLoadShift(); }
+  else {
+    window.__attFormShift=null; if(diff) diff.textContent='';
+    if(box) box.innerHTML = cbs.length>1
+      ? `<b>${cbs.length}명 다중 등록</b> — 저장 시 각 직원의 해당일 근무조를 개별 자동 조회해 지각/초과(분)를 계산합니다. 실제 출/퇴근 시각·사유·증빙은 공통 적용됩니다. (근무조 미배정자는 분 계산 없이 기록)`
+      : '발생일자·직원 선택 시 해당일 근무조가 자동 표시됩니다.';
+  }
+}
 function attStatusBadge(st){
   if(st==='confirmed') return '<span class="badge-access" style="background:var(--gnb);color:var(--gn)">확인</span>';
   if(st==='rejected')  return '<span class="badge-access" style="background:var(--rdb);color:var(--rd)">반려</span>';
@@ -17764,13 +17904,8 @@ async function renderAttendanceIssue(area){
 }
 
 async function openAttIssueForm(){
-  // 대상 직원 목록 (매니저=소속매장, 관리자=전체 활성)
-  let uq=sb.from('users').select('id,name,store').eq('active',true).order('name');
-  if(!isAttAdmin()) uq=uq.eq('store', currentUser.store);
-  const { data: us } = await uq;
-  __attUsers = us||[];
+  await attLoadEvTypes();
   const typeLabel = __attTab==='late' ? '근태 이슈(지각·결근)' : '근무시간 이슈(연장·야간)';
-  const reasons = ATT_REASONS[__attTab];
   const old=document.getElementById('attFormModal'); if(old) old.remove();
   const m=document.createElement('div'); m.id='attFormModal'; m.className='modal-bg open';
   m.innerHTML=`<div class="modal-inner" style="width:min(96vw,540px);max-height:92vh;overflow-y:auto">
@@ -17779,8 +17914,13 @@ async function openAttIssueForm(){
       <button onclick="document.getElementById('attFormModal').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--th)"><i class="ti ti-x"></i></button>
     </div>
     <div style="display:grid;gap:10px">
-      <div><label class="form-label">발생 일자</label><input type="date" class="form-input" id="att_date" value="${todayKST()}" onchange="attReloadFormUsers();attLoadShift()"/></div>
-      <div><label class="form-label">대상 직원</label><select class="form-input" id="att_user" onchange="attLoadShift()"><option value="">선택</option>${__attUsers.map(u=>`<option value="${u.id}">${u.name} (${u.store||''})</option>`).join('')}</select></div>
+      <div><label class="form-label">발생 일자</label><input type="date" class="form-input" id="att_date" value="${todayKST()}" onchange="attReloadFormUsers()"/></div>
+      <div>
+        <label class="form-label">대상 직원 <span style="font-size:11px;color:var(--th)">(여러 명 선택 시 각각 등록 · 동일 지점 전원 + 타 지점 매니저↑)</span></label>
+        <input class="form-input" id="att_user_search" placeholder="이름 검색" oninput="attTargetFilter()" style="margin-bottom:6px"/>
+        <div id="att_tgt_list" style="max-height:184px;overflow-y:auto;border:0.5px solid var(--crd);border-radius:8px;padding:4px">불러오는 중...</div>
+        <div id="att_tgt_count" style="font-size:11px;color:var(--bl);margin-top:4px"></div>
+      </div>
       <div id="att_shift_box" style="background:var(--cr);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--th)">발생일자·직원 선택 시 해당일 근무조가 자동 표시됩니다.</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div><label class="form-label">실제 출근 (분)</label><input type="time" class="form-input" id="att_in" onchange="attCalcDiff()"/></div>
@@ -17788,9 +17928,11 @@ async function openAttIssueForm(){
       </div>
       <div id="att_diff" style="font-size:13px;font-weight:600;color:var(--rd)"></div>
       <div><label class="form-label">휴게</label><select class="form-input" id="att_break"><option value="30m">30분</option><option value="1h">1시간</option></select></div>
-      <div><label class="form-label">사유</label><select class="form-input" id="att_reason">${reasons.map(r=>`<option value="${r}">${r}</option>`).join('')}</select></div>
+      <div><label class="form-label">사유 <span style="font-size:11px;color:var(--th)">(증빙 종류 · 설정에서 관리)</span></label><select class="form-input" id="att_reason">${attEvTypeOptions()}</select></div>
       <div><label class="form-label">상세 (1~2줄)</label><textarea class="form-input" id="att_text" rows="2" placeholder="상황을 간단히 적어주세요"></textarea></div>
-      <div><label class="form-label">증빙 이미지 (여러 장 선택 시 1장으로 자동 합침)</label><input type="file" id="att_proof" accept="image/*" multiple class="form-input"/></div>
+      <div><label class="form-label">증빙 이미지 <span style="font-size:11px;color:var(--th)">(다중 첨부 · 썸네일 미리보기 · 클릭 시 확대)</span></label>
+        <input type="file" id="att_proof" accept="image/*" multiple class="form-input" onchange="attProofPreview(this)"/>
+        <div id="att_proof_prev" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div></div>
       <button class="btn-submit" style="margin-top:4px" onclick="submitAttIssue()"><i class="ti ti-device-floppy"></i> 보고 저장</button>
       <div id="att_form_err" style="font-size:12px;color:var(--rd);min-height:15px"></div>
     </div></div>`;
@@ -17799,39 +17941,45 @@ async function openAttIssueForm(){
   attReloadFormUsers();
 }
 
-// 대상 직원 목록: (관리자=전체 활성) / (매니저=소속 매장 + 그 날짜 내 매장으로 지원 온 직원)
+// [증축] 대상 직원 = 체크박스 다중선택. 범위: 관리자=전체 활성 / 매니저=동일 지점 전원 + 타 지점 매니저↑ + 그 날짜 지원 온 직원
 async function attReloadFormUsers(){
-  const sel=document.getElementById('att_user'); if(!sel) return;
-  const date=document.getElementById('att_date')?.value; const cur=sel.value;
-  let uq=sb.from('users').select('id,name,store').eq('active',true).order('name');
-  if(!isAttAdmin()) uq=uq.eq('store', currentUser.store);
-  const { data: base } = await uq;
-  let merged = (base||[]).slice();
-  if(!isAttAdmin() && date){
-    const sup = await schSupportIncoming(date, currentUser.store);
-    const supIds=[...new Set((sup||[]).map(e=>e.user_id))].filter(id=>!merged.some(u=>u.id===id));
-    if(supIds.length){ const {data:su}=await sb.from('users').select('id,name,store').in('id',supIds); (su||[]).forEach(u=>merged.push(Object.assign({},u,{__support:true}))); }
+  const box=document.getElementById('att_tgt_list'); if(!box) return;
+  const date=document.getElementById('att_date')?.value;
+  const admin=isAttAdmin();
+  const { data: all } = await sb.from('users').select('id,name,store,role').eq('active',true).order('store').order('name');
+  let elig=[];
+  if(admin){ elig=(all||[]).slice(); }
+  else {
+    elig=(all||[]).filter(u=> u.store===currentUser.store || isManagerRole(u.role));
+    if(date){
+      const sup=await schSupportIncoming(date, currentUser.store);
+      const supIds=[...new Set((sup||[]).map(e=>e.user_id))];
+      supIds.forEach(id=>{ if(!elig.some(u=>String(u.id)===String(id))){ const u=(all||[]).find(x=>String(x.id)===String(id)); if(u) elig.push(Object.assign({},u,{__support:true})); } });
+    }
   }
-  __attUsers = merged;
-  sel.innerHTML = '<option value="">선택</option>'+merged.map(u=>`<option value="${u.id}"${u.id===cur?' selected':''}>${u.name} (${u.store||''})${u.__support?' · 지원':''}</option>`).join('');
+  __attUsers=elig;
+  const prev=new Set([...document.querySelectorAll('.att-tgt-cb:checked')].map(c=>c.value));
+  box.innerHTML = elig.length ? elig.map(u=>`<label class="att-tgt-row" data-name="${esc((u.name||'').toLowerCase())}" style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer">
+      <input type="checkbox" class="att-tgt-cb" value="${u.id}" ${prev.has(String(u.id))?'checked':''} onchange="attOnTargetToggle()" style="width:auto">
+      <span style="font-size:13px">${esc(u.name)} <span style="color:var(--th);font-size:11px">(${esc(u.store||'')})${isManagerRole(u.role)?' · 매니저↑':''}${u.__support?' · 지원':''}</span></span>
+    </label>`).join('') : '<div style="font-size:12px;color:var(--th);padding:8px">대상 직원이 없습니다.</div>';
+  attOnTargetToggle();
 }
 
+// [증축] 단일 선택 시 근무조 자동 미리보기 (다중 선택은 저장 시 개별 조회)
 async function attLoadShift(){
   const box=document.getElementById('att_shift_box'); if(!box) return;
-  const date=document.getElementById('att_date').value; const uid=document.getElementById('att_user').value;
+  const date=document.getElementById('att_date')?.value;
+  const cbs=[...document.querySelectorAll('.att-tgt-cb:checked')];
   window.__attFormShift=null;
+  if(cbs.length!==1){ return; }
+  const uid=cbs[0].value;
   if(!date||!uid){ box.innerHTML='발생일자·직원 선택 시 해당일 근무조가 자동 표시됩니다.'; return; }
-  const ent = await schUserDay(uid, date);
-  const e=(ent||[])[0];
-  if(e && e.shift_code){
-    const wstore = e.support_store || e.schedule?.store || '';
-    const { data: sc } = await sb.from('store_shift_codes').select('start_time,end_time').eq('store',wstore).eq('code',e.shift_code).limit(1);
-    const c=(sc||[])[0];
-    if(c && c.start_time && c.end_time){
-      window.__attFormShift={ manual:false, work_store:wstore, shift_code:e.shift_code, start:c.start_time.slice(0,5), end:c.end_time.slice(0,5) };
-      box.innerHTML=`<b>근무조 자동:</b> ${wstore} · ${e.shift_code} · <b>${window.__attFormShift.start}~${window.__attFormShift.end}</b>${e.support_store?' <span style="color:var(--bl)">(지원)</span>':''}`;
-      attCalcDiff(); return;
-    }
+  const sh=await attResolveShift(uid, date);
+  if(sh){
+    window.__attFormShift=sh;
+    box.innerHTML=`<b>근무조 자동:</b> ${esc(sh.work_store)} · ${esc(sh.shift_code)} · <b>${sh.start}~${sh.end}</b>`;
+    attCalcDiff(); return;
   }
   // 근무조 미배정 → 예정 시각 수동 입력
   window.__attFormShift={ manual:true, work_store:'', shift_code:'' };
@@ -17852,44 +18000,62 @@ function attCalcDiff(){
   window.__attCalcMin = min;
 }
 
+// [증축] 다중 대상 Loop Insert — 선택한 직원 각각을 개별 row 로 저장 (증빙·사유·실제시각 공통 적용)
 async function submitAttIssue(){
   const err=document.getElementById('att_form_err');
-  const date=document.getElementById('att_date').value, uid=document.getElementById('att_user').value;
-  const sh=window.__attFormShift;
-  if(!date||!uid){ err.textContent='발생일자와 대상 직원을 선택하세요.'; return; }
-  if(!sh||!sh.start||!sh.end){ err.textContent='근무조(또는 예정 출/퇴근 시각)를 확인하세요.'; return; }
+  const date=document.getElementById('att_date').value;
+  const cbs=[...document.querySelectorAll('.att-tgt-cb:checked')];
+  const uids=cbs.map(c=>c.value);
+  if(!date){ err.textContent='발생일자를 선택하세요.'; return; }
+  if(!uids.length){ err.textContent='대상 직원을 1명 이상 선택하세요.'; return; }
   const ain=document.getElementById('att_in').value||null, aout=document.getElementById('att_out').value||null;
   if(__attTab==='late' && !ain){ err.textContent='실제 출근 시각을 입력하세요.'; return; }
   if(__attTab==='overtime' && !aout){ err.textContent='실제 퇴근 시각을 입력하세요.'; return; }
   err.style.color=''; err.textContent='저장 중...';
-  const min = (__attTab==='late') ? (ain?attHm2min(ain)-attHm2min(sh.start):null) : (aout?attHm2min(aout)-attHm2min(sh.end):null);
-  // 증빙 업로드 (여러 장 → 콜라주 1장)
-  let proofUrl=null;
+  // 증빙 업로드 (다중 → proof_urls 배열, proof_url=[0] 하위호환)
+  let proofUrls=[];
   const fi=document.getElementById('att_proof');
   if(fi && fi.files && fi.files.length){
-    let file=fi.files[0];
-    if(fi.files.length>1){ try{ file=await mergeImages(Array.from(fi.files)); }catch(e){} }
-    proofUrl = await nUploadFile(file,'attendance');
+    for(const f of Array.from(fi.files)){ try{ const url=await nUploadFile(await compressImage(f),'attendance'); if(url) proofUrls.push(url); }catch(e){} }
   }
-  // 동일 직원·날짜·유형 중복 방지 (A·B 매장 매니저 중복 등록 방지)
-  const { data: __dup } = await sb.from('attendance_issues').select('id').eq('user_id',uid).eq('issue_date',date).eq('report_type',__attTab).neq('status','rejected').limit(1);
-  if(__dup && __dup.length){ err.textContent='이미 이 직원의 같은 날짜·유형 보고가 있습니다. (중복 등록 불가)'; return; }
-  const targetStore = (__attUsers.find(u=>u.id===uid)||{}).store || currentUser.store;
-  const wstore = sh.work_store||currentUser.store||targetStore;
-  const { data: __newAtt, error } = await sb.from('attendance_issues').insert({
-    report_type:__attTab, store:targetStore, user_id:uid, issue_date:date,
-    work_store:wstore, shift_code:sh.shift_code||null,
-    shift_start:sh.start, shift_end:sh.end, actual_in:ain, actual_out:aout,
-    diff_minutes:min, break_option:document.getElementById('att_break').value,
-    reason_category:document.getElementById('att_reason').value,
-    reason_text:document.getElementById('att_text').value.trim()||null,
-    proof_url:proofUrl, status:'submitted', created_by:currentUser.id
-  });
-  if(error){ err.textContent = /duplicate|unique|ux_att_dup/i.test(error.message) ? '이미 동일 직원·날짜·유형 보고가 있습니다.' : ('저장 오류: '+error.message); return; }
+  const proofUrl=proofUrls[0]||null;
+  const breakOpt=document.getElementById('att_break').value;
+  const reason=document.getElementById('att_reason').value;
+  const rtext=document.getElementById('att_text').value.trim()||null;
+  const single=(uids.length===1);
+  let okCount=0, dupCount=0, noShiftCount=0, lastErr='', lastId=null; const notifyStores=new Set();
+  for(const uid of uids){
+    // 중복 방지
+    const { data: __dup } = await sb.from('attendance_issues').select('id').eq('user_id',uid).eq('issue_date',date).eq('report_type',__attTab).neq('status','rejected').limit(1);
+    if(__dup && __dup.length){ dupCount++; continue; }
+    // 근무조: 단일이면 폼 미리보기값(수동입력 포함), 다중이면 개별 자동 조회
+    let sh=null;
+    if(single && window.__attFormShift && window.__attFormShift.start && window.__attFormShift.end){ sh=window.__attFormShift; }
+    else { sh=await attResolveShift(uid, date); }
+    let sstart=null, send=null, scode=null, min=null;
+    if(sh && sh.start && sh.end){ sstart=sh.start; send=sh.end; scode=sh.shift_code||null; min=(__attTab==='late')?(ain?attHm2min(ain)-attHm2min(sstart):null):(aout?attHm2min(aout)-attHm2min(send):null); }
+    else { noShiftCount++; }
+    const targetStore=(__attUsers.find(u=>String(u.id)===String(uid))||{}).store || currentUser.store;
+    const wstore=(sh&&sh.work_store)||targetStore||currentUser.store;
+    const { data: __newAtt, error } = await sb.from('attendance_issues').insert({
+      report_type:__attTab, store:targetStore, user_id:uid, issue_date:date,
+      work_store:wstore, shift_code:scode,
+      shift_start:sstart, shift_end:send, actual_in:ain, actual_out:aout,
+      diff_minutes:min, break_option:breakOpt,
+      reason_category:reason, reason_text:rtext,
+      proof_url:proofUrl, proof_urls:proofUrls, status:'submitted', created_by:currentUser.id
+    }).select('id').single();
+    if(error){ lastErr=error.message; continue; }
+    okCount++; lastId=__newAtt&&__newAtt.id; if(targetStore) notifyStores.add(targetStore); if(wstore) notifyStores.add(wstore);
+    const __un=(__attUsers.find(u=>String(u.id)===String(uid))||{}).name||'직원'; const __tl=__attTab==='late'?'근태(지각·결근)':'근무시간(연장·야간)';
+    try{ notifyStoreManagers([targetStore, wstore], 'att_new', lastId, 'attendance', '[근태이슈 등록] '+date+' '+__un+' · '+__tl, [currentUser.id]); }catch(e){}
+  }
+  if(okCount===0){ err.textContent = dupCount?('선택한 직원 모두 같은 날짜·유형 보고가 이미 있습니다. (중복)'):('저장 실패'+(lastErr?': '+lastErr:'')); return; }
   document.getElementById('attFormModal').remove();
-  { const __un=(__attUsers.find(u=>u.id===uid)||{}).name||'직원'; const __tl=__attTab==='late'?'근태(지각·결근)':'근무시간(연장·야간)';
-    notifyStoreManagers([targetStore, wstore], 'att_new', __newAtt&&__newAtt.id, 'attendance', '[근태이슈 등록] '+date+' '+__un+' · '+__tl, [currentUser.id]); }
-  if(targetStore !== currentUser.store) alert('저장되었습니다.\n이 건은 대상 직원 소속 매장('+targetStore+') 관리자 목록에서 조회·마감됩니다.');
+  let msg=okCount+'건 저장되었습니다.';
+  if(dupCount) msg+='\n중복 제외: '+dupCount+'건';
+  if(noShiftCount) msg+='\n근무조 미배정(분 계산 없이 기록): '+noShiftCount+'건';
+  alert(msg);
   renderAttendanceIssue(document.getElementById('contentArea'));
 }
 
@@ -17898,12 +18064,16 @@ async function openAttIssueDetail(id){
   if(!r) return;
   const { data: u } = await sb.from('users').select('name,active,store').eq('id',r.user_id).maybeSingle();
   const admin=isAttAdmin();
+  const mine=String(r.user_id)===String(currentUser.id);
+  const locked=!!r.is_locked;
   const diffTxt=(r.report_type==='late'?'지각 ':'초과 ')+attDiffLabel(r.diff_minutes);
+  const evUrls=(r.proof_urls&&r.proof_urls.length)?r.proof_urls:(r.proof_url?[r.proof_url]:[]);
+  const evHtml=evUrls.length?`<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">${evUrls.map(x=>`<img src="${esc(x)}" onclick="openImageZoom('${esc(x)}')" style="width:82px;height:82px;object-fit:cover;border-radius:8px;cursor:zoom-in;border:0.5px solid var(--crd)"/>`).join('')}</div><div style="font-size:10px;color:var(--th)">클릭하여 확대</div>`:'';
   const old=document.getElementById('attDetailModal'); if(old) old.remove();
   const m=document.createElement('div'); m.id='attDetailModal'; m.className='modal-bg open';
   m.innerHTML=`<div class="modal-inner" style="width:min(96vw,560px);max-height:92vh;overflow-y:auto">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <span style="font-size:15px;font-weight:600">${r.issue_date} · ${u?.name||'(직원)'} ${attStatusBadge(r.status)}</span>
+      <span style="font-size:15px;font-weight:600">${r.issue_date} · ${u?.name||'(직원)'} ${attStatusBadge(r.status)}${locked?' <span class="badge-access" style="background:var(--pub);color:var(--pu)"><i class="ti ti-lock"></i> 잠금</span>':''}</span>
       <button onclick="document.getElementById('attDetailModal').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--th)"><i class="ti ti-x"></i></button>
     </div>
     <div style="font-size:13px;line-height:1.9;color:var(--tm)">
@@ -17912,22 +18082,65 @@ async function openAttIssueDetail(id){
       <div>실제 출근: <b>${r.actual_in||'-'}</b> · 실제 퇴근: <b>${r.actual_out||'-'}</b> · 휴게: ${r.break_option==='1h'?'1시간':'30분'}</div>
       <div style="color:var(--rd);font-weight:600">${diffTxt}</div>
       <div>사유: <b>${esc(r.reason_category)||'-'}</b> ${r.reason_text?('— '+esc(r.reason_text)):''}</div>
-      ${r.proof_url?`<div style="margin-top:6px"><img src="${r.proof_url}" onclick="openImageZoom('${r.proof_url}')" style="max-width:160px;border-radius:8px;cursor:zoom-in;border:0.5px solid var(--crd)"/><div style="font-size:10px;color:var(--th)">클릭하여 확대</div></div>`:''}
+      ${evHtml}
+    </div>
+    <div style="border-top:0.5px solid var(--crd);margin-top:12px;padding-top:12px">
+      <div class="section-label" style="margin-bottom:6px">사유서 / 소명 ${locked?'<span class="badge-access" style="background:var(--pub);color:var(--pu)"><i class="ti ti-lock"></i> 처리완료·잠금</span>':(r.apology_required?'<span class="badge-access" style="background:var(--rdb);color:var(--rd)">제출 요청됨</span>':'')}</div>
+      ${(mine && r.apology_required && !locked)
+        ? `<textarea id="att_apo_${r.id}" class="form-input" style="min-height:100px" placeholder="사유 및 개선 방안을 작성해주세요">${esc(r.apology_text||'')}</textarea><button class="btn-submit" style="margin-top:8px" onclick="attSubmitApology(${r.id})"><i class="ti ti-send"></i> 사유서 ${r.apology_text?'수정':'제출'}</button>`
+        : `<div style="background:var(--cr);border:0.5px solid var(--crd);border-radius:8px;padding:10px 12px;font-size:13px;white-space:pre-wrap;min-height:36px">${r.apology_text?esc(r.apology_text):('<span style="color:var(--th)">'+(r.apology_required?'아직 제출된 사유서가 없습니다.':'사유서 요청이 없습니다.')+'</span>')}</div>`}
     </div>
     ${admin?`<div style="border-top:0.5px solid var(--crd);margin-top:12px;padding-top:12px">
+      ${locked?'<div style="font-size:12px;color:var(--pu)"><i class="ti ti-lock"></i> 처리완료로 잠긴 건입니다. 당사자·등록자의 수정/삭제가 차단됩니다.</div>':`
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
         <button class="btn-cancel-sm" style="color:var(--gn);border-color:var(--gn)" onclick="attReview(${r.id},'confirmed')"><i class="ti ti-check"></i> 확인</button>
         <button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd)" onclick="attReview(${r.id},'rejected')"><i class="ti ti-x"></i> 반려</button>
-        <label style="display:flex;align-items:center;gap:5px;font-size:12px;margin-left:6px"><input type="checkbox" ${r.payroll_applied?'checked':''} onchange="attTogglePayroll(${r.id},this.checked)" style="width:auto"/> 급여 반영 처리</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;margin-left:6px"><input type="checkbox" ${r.payroll_applied?'checked':''} onchange="attTogglePayroll(${r.id},this.checked)" style="width:auto"/> 급여 반영</label>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;font-size:12px">발생 대휴 부여(수동): <input type="number" step="0.5" id="att_extra_${r.id}" value="${r.extra_leave_days||0}" style="width:70px;padding:4px 6px;border:0.5px solid var(--crd);border-radius:6px"/> 일
-        <button class="btn-cancel-sm" onclick="attSaveExtraLeave(${r.id})">저장</button>
-        <span style="color:var(--th)">※ 대휴 자동부여 없음 — 인사·운영 수동 반영</span></div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:10px">발생 대휴 부여(수동): <input type="number" step="0.5" id="att_extra_${r.id}" value="${r.extra_leave_days||0}" style="width:70px;padding:4px 6px;border:0.5px solid var(--crd);border-radius:6px"/> 일
+        <button class="btn-cancel-sm" onclick="attSaveExtraLeave(${r.id})">저장</button></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${!r.apology_required?`<button class="btn-cancel-sm" style="color:var(--brm);border-color:var(--brm)" onclick="attRequestApology(${r.id})"><i class="ti ti-file-text"></i> 사유서 요청</button>`:''}
+        <button class="btn-submit" style="background:var(--pu)" onclick="attLockDone(${r.id})"><i class="ti ti-lock"></i> 처리완료(잠금)</button>
+      </div>`}
     </div>`:''}
     <div id="att_cmts_${r.id}" style="border-top:0.5px solid var(--crd);margin-top:12px;padding-top:12px"></div>
   </div>`;
   document.body.appendChild(m);
   renderAttComments(id);
+}
+// [증축] 당사자 사유서 제출/수정 (잠금 시 차단)
+async function attSubmitApology(id){
+  if(isTestMode()){ alert('테스트 모드에서는 저장할 수 없습니다.'); return; }
+  const el=document.getElementById('att_apo_'+id); const t=(el?.value||'').trim();
+  if(!t){ alert('사유를 입력해주세요.'); return; }
+  const { data: cur } = await sb.from('attendance_issues').select('is_locked,user_id').eq('id',id).single();
+  if(cur && cur.is_locked){ alert('이미 처리완료로 잠긴 건입니다. 수정할 수 없습니다.'); return; }
+  if(cur && String(cur.user_id)!==String(currentUser.id)){ alert('본인 건만 작성할 수 있습니다.'); return; }
+  const { error } = await sb.from('attendance_issues').update({apology_text:t, apology_submitted_at:new Date().toISOString()}).eq('id',id);
+  if(error){ alert('오류: '+error.message); return; }
+  alert('사유서가 제출되었습니다.');
+  openAttIssueDetail(id);
+  try{ attRefreshApologyWidget(); }catch(e){}
+}
+// [증축] 인사·운영: 사유서 제출 요청 (대상자 대시보드 위젯 트리거 + 알림)
+async function attRequestApology(id){
+  if(!isAttAdmin()){ alert('인사·운영만 요청할 수 있습니다.'); return; }
+  const { data: cur } = await sb.from('attendance_issues').select('is_locked,user_id,issue_date').eq('id',id).single();
+  if(cur && cur.is_locked){ alert('잠긴 건입니다.'); return; }
+  const { error } = await sb.from('attendance_issues').update({apology_required:true}).eq('id',id);
+  if(error){ alert('오류: '+error.message); return; }
+  if(cur && cur.user_id){ try{ await createNotificationWithSlack(cur.user_id,'att_apology_req',id,'attendance',`[사유서 요청] ${cur.issue_date} 근태 건에 대한 사유서 제출이 요청되었습니다. 홈 화면 상단에서 작성해주세요.`); }catch(e){} }
+  openAttIssueDetail(id);
+}
+// [증축] 인사·운영: 처리완료(잠금) — 당사자·등록자 수정/삭제 영구 차단
+async function attLockDone(id){
+  if(!isAttAdmin()){ alert('인사·운영만 처리할 수 있습니다.'); return; }
+  if(!confirm('이 건을 처리완료로 확정하고 잠급니다.\n이후 당사자·등록자의 수정/삭제가 영구 차단됩니다. 계속할까요?')) return;
+  const { error } = await sb.from('attendance_issues').update({is_locked:true, status:'confirmed', reviewed_by:currentUser.id, reviewed_at:new Date().toISOString()}).eq('id',id);
+  if(error){ alert('오류: '+error.message); return; }
+  document.getElementById('attDetailModal')?.remove();
+  renderAttendanceIssue(document.getElementById('contentArea'));
 }
 async function attReview(id,status){
   const { error } = await sb.from('attendance_issues').update({status,reviewed_by:currentUser.id,reviewed_at:new Date().toISOString()}).eq('id',id);
