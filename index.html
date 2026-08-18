@@ -2034,7 +2034,11 @@ async function renderPostDetail(area) {
   const accLbl = p.access==='all'?'전 직원':'매니저 이상';
 
   let confirmHtml = '';
-  if (!isAdmin && p.require_read!==false) {
+  // 확인 강제(‘확인했습니다’)는 실제 확인 대상(현장 직원)에게만 노출.
+  // 관리자·총괄·부총괄·부서담당·본사 등은 위 targetUsers 필터에서 이미 제외되므로
+  // 대상이 아닌 계정에는 확인 UI를 띄우지 않는다 → 관리자 확인 강제 반복 노출 버그 수정.
+  const __iAmReadTarget = targetUsers.some(function(u){ return String(u.id) === String(currentUser.id); });
+  if (__iAmReadTarget && p.require_read!==false) {
     if (myRead) {
       confirmHtml = `<div class="confirm-section"><button class="btn-confirm done" disabled><i class="ti ti-check"></i> 확인 완료</button><div class="confirm-time">확인 일시: ${fmtDate(myRead.read_at)} ${myRead.read_at?.slice(11,16)||''}</div></div>`;
     } else {
@@ -5947,7 +5951,8 @@ async function saveRequestEdit(reqId) {
   if (!store) { alert('요청 매장을 선택해주세요.'); return; }
   const { data: vs } = await sb.from('store_options').select('name');
   const validStores = (vs||[]).map(function(x){ return x.name; });
-  if (!validStores.includes(store)) { alert('요청 매장 명이 등록된 매장 목록과 일치하지 않습니다.\n목록에서 선택해 주세요.'); return; }
+  const __editMyStores = (typeof myManagedStores==='function') ? myManagedStores() : [currentUser.store];
+  if (!validStores.includes(store) && !__editMyStores.includes(store)) { alert('요청 매장 명이 등록된 매장 목록과 일치하지 않습니다.\n목록에서 선택해 주세요.'); return; }
 
   const fields = reqFilterFields(r.request_types ? (r.request_types.form_fields || []) : []);
   const formData = {};
@@ -10503,7 +10508,9 @@ const guideHtml = t.guide ?
 var userObj = window.currentUser || window.user || {};
 var mainStore = userObj.store || '';
 var myPart = userObj.part || ''; // 본인 계정의 소속 파트 (예: 경영지원)
-var subStores = userObj.stores || userObj.managed_stores || [];
+// 겸직 매장: 실제 DB 필드는 sub_stores (기존 stores/managed_stores 는 존재하지 않아 항상 빈 배열이던 버그 수정)
+var subStores = Array.isArray(userObj.sub_stores) ? userObj.sub_stores.slice()
+              : (userObj.stores || userObj.managed_stores || []);
 var storeFieldHtml = '';
 
 // 본사 소속이거나 소속 매장이 없는 총괄/부총괄/부서담당 계정인 경우
@@ -10546,8 +10553,8 @@ if (isHeadquarters) {
       '<input class="form-input" id="rfStore" list="storeDatalist" value="' + defaultVal + '" placeholder="매장 선택 (목록에서 검색·선택)" autocomplete="off" style="border:1px solid var(--crd); height: 40px; width: 100%; padding: 0 10px;"/>' +
       '<datalist id="storeDatalist">' + datalistOpts + '</datalist></div>';
 
-} else if (subStores && subStores.length > 1) {
-  // 겸직 매장 총괄 매니저인 경우: 본인이 관리하는 매장 목록들만 드롭다운 제공
+} else if (subStores && subStores.length >= 1) {
+  // 겸직 매장 매니저인 경우(겸직 1곳 이상): 본인이 관리하는 매장 목록(주 소속+겸직) 드롭다운 제공
   var storeOpts = '';
   if (mainStore) {
     storeOpts += '<option value="' + mainStore + '" selected>' + mainStore + ' (본소속)</option>';
@@ -10633,7 +10640,9 @@ async function submitRequest() {
   if (!reqStore) { alert('요청 매장을 선택해주세요.'); if(__rfStoreEl) __rfStoreEl.focus(); return; }
   const { data: __validStoreRows } = await sb.from('store_options').select('name');
   const __validStores = (__validStoreRows||[]).map(function(s){ return s.name; });
-  if (!__validStores.includes(reqStore) && reqStore !== currentUser.store) {
+  // 주 소속 + 겸직(sub_stores) 매장은 모두 허용 (겸직 매니저 접수 오류 수정)
+  const __myStores = (typeof myManagedStores==='function') ? myManagedStores() : [currentUser.store];
+  if (!__validStores.includes(reqStore) && !__myStores.includes(reqStore)) {
     alert('요청 매장 명이 등록된 매장 목록과 일치하지 않습니다.\n목록에서 매장을 선택해 주세요.');
     if(__rfStoreEl) __rfStoreEl.focus();
     return;
