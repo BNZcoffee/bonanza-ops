@@ -6,7 +6,7 @@
 <title>보난자커피 — 운영 매뉴얼</title>
 <meta name="theme-color" content="#3B2314">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="보난자커피">
 <meta name="mobile-web-app-capable" content="yes">
 <!-- PWA 아이콘: 정적 기본값(상대경로=프로젝트 하위경로에서 정확히 해석). 로그인 전에도 '보' 글자 대신 로고 표시 -->
@@ -729,39 +729,13 @@ const SUPABASE_URL = 'https://fhwiihbtlspeckmgnlax.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZod2lpaGJ0bHNwZWNrbWdubGF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MzQxMjcsImV4cCI6MjA5NjMxMDEyN30.izRHlmKaKLBSY78eSNMpyt-mGw0Whlt6XIAoNjp5Aqo';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ── 홈화면 아이콘 자동반영: 로그인 전에도 app_settings.logo_url 을 읽어
-//    apple-touch-icon + manifest 를 '현재 등록된 로고'로 교체한다.
-//    → 관리자 설정에서 로고를 바꾸면, 이후 '홈 화면에 추가'하는 사람부터 자동 적용.
-//    (이미 추가된 아이콘은 OS 제약상 삭제 후 재추가해야 바뀜 — 웹앱 공통)
-(async function initDynamicPwaIcon(){
-  try{
-    const { data } = await sb.from('app_settings').select('value').eq('key','logo_url').maybeSingle();
-    const logo = data && data.value;
-    if (!logo) return;                       // 커스텀 로고 없으면 정적 기본 아이콘(파일) 유지
-    // iOS + 폴백용 정적 아이콘 링크까지 로고로 덮어써, manifest 미적용 시에도 로고가 뜨게 함
-    document.querySelectorAll('link[rel="apple-touch-icon"]').forEach(l=>{ l.href = logo; });
-    document.querySelectorAll('link[rel="icon"]').forEach(l=>{ l.href = logo; });
-    const theme = '#3B2314';
-    // ⚠ Android 홈아이콘 폴백(브라운 B) 방지:
-    //  1) blob manifest 에서 start_url/scope 는 반드시 '절대 URL' (상대경로는 blob 기준 무효)
-    //  2) 아이콘 sizes 는 'any' — 실제 픽셀과 불일치해도 거부되지 않도록
-    const baseUrl = location.href.split('#')[0].split('?')[0];   // 현재 파일 절대 URL
-    const scopeUrl = baseUrl.replace(/[^/]*$/, '');              // 디렉터리 절대 URL
-    const ext = (logo.split('?')[0].match(/\.(png|jpe?g|webp)$/i)||[])[1];
-    const mime = ext ? ('image/'+(/jpe?g/i.test(ext)?'jpeg':ext.toLowerCase())) : null;
-    const mkIcon = (purpose)=>{ const o={ src:logo, sizes:'any', purpose }; if(mime) o.type=mime; return o; };
-    const mani = {
-      name:'보난자커피 운영 매뉴얼', short_name:'보난자',
-      start_url: baseUrl, scope: scopeUrl, display:'standalone',
-      background_color:theme, theme_color:theme,
-      icons:[ mkIcon('any'), mkIcon('maskable') ]
-    };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(mani)], { type:'application/json' }));
-    let link = document.querySelector('link[rel="manifest"]');
-    if (!link){ link = document.createElement('link'); link.rel='manifest'; document.head.appendChild(link); }
-    link.href = url;                         // Android 홈화면 아이콘(manifest)
-  }catch(e){ /* 실패 시 정적 기본 아이콘 유지 */ }
-})();
+// ── PWA 홈화면 아이콘: 정적 파일(manifest.json + icon-192/512 + apple-touch-icon)로 일원화.
+//    과거에는 app_settings.logo_url 을 읽어 blob manifest 로 동적 교체했으나,
+//    blob manifest 는 브라우저별로 불안정해 안드로이드에서 기본 아이콘(브라운 B)으로 폴백되는
+//    문제가 있었다. → 이제 루트의 정적 manifest.json 과 정적 아이콘 파일이 단일 소스이며,
+//    동적 교체는 비활성화한다. (아이콘 변경 시 아이콘 파일만 교체·재배포)
+//    initDynamicPwaIcon 은 하위 호환용으로 남겨두되 아무 동작도 하지 않는다.
+(async function initDynamicPwaIcon(){ /* 정적 manifest 사용 — 동적 blob 교체 비활성화 */ return; })();
 
 // 직위(role) 라벨·색상 — 기본값(폴백). 실제로는 role_options 테이블에서 로드해 덮어씀
 let roleLbl = {ceo:'대표', executive_director:'이사', admin:'운영팀', dept:'부서담당', manager:'매니저', member:'팀원'};
@@ -9294,10 +9268,8 @@ function applyPwaIcon(logoUrl) {
   const theme = (typeof APP !== 'undefined' && APP.primary_color) ? APP.primary_color : '#3B2314';
   const tc = document.querySelector('meta[name="theme-color"]');
   if (tc) tc.content = theme;
-  if (logoUrl) {
-    const apple = document.getElementById('appleTouchIcon');
-    if (apple) apple.href = logoUrl;   // 커스텀 로고가 있을 때만 덮어씀(없으면 정적 기본 유지)
-  }
+  // PWA 아이콘은 정적 파일(apple-touch-icon.png / manifest.json)이 단일 소스.
+  // logo_url(원격 URL)로 아이콘을 덮어쓰지 않는다 → 기기별 홈아이콘 일관성 확보.
 }
 
 // 메뉴 표시를 권한에 따라 제어
@@ -9929,6 +9901,45 @@ function reqViewerReason(u, r, coPartNames){
   if(Array.isArray(r.extra_viewers) && r.extra_viewers.map(String).indexOf(String(u.id))>=0) return '추가';
   return '';
 }
+// ── 파트 열람권한 이중대조(ID OR Name) ─────────────────────────────
+//  신규 파트(예: HAGO)가 담당부서(part_id) 또는 공동진행파트(co_parts)로 지정돼도
+//  ID/이름 어느 쪽으로 저장돼 있든 유연하게 인식. co_parts 가 [숫자]/[문자]/CSV 여도 관용 처리.
+function __reqMyPartIdent(){
+  const nm = (currentUser && currentUser.part!=null) ? String(currentUser.part).trim() : '';
+  if(!nm) return null;
+  let id=null;
+  const p=(window.__parts||[]).find(x=>String(x.name).trim()===nm);
+  if(p) id=p.id;
+  else if(currentUser.part_id!=null) id=currentUser.part_id;
+  else if(currentUser.dept_id!=null) id=currentUser.dept_id;
+  return { name:nm, id:(id==null?null:String(id)) };
+}
+function reqPartAccess(r){
+  if(!r) return false;
+  const me=__reqMyPartIdent(); if(!me) return false;
+  const cache=window.__parts||[];
+  const idToName=id=>{ const p=cache.find(x=>String(x.id)===String(id)); return p?String(p.name).trim():null; };
+  const nameToId=nm=>{ const p=cache.find(x=>String(x.name).trim()===String(nm).trim()); return p?String(p.id):null; };
+  const cand=[];
+  const addId=v=>{ if(v!=null&&String(v).trim()!=='') cand.push({id:String(v).trim()}); };
+  const addName=v=>{ if(v!=null&&String(v).trim()!=='') cand.push({name:String(v).trim()}); };
+  const addCo=cps=>{
+    if(Array.isArray(cps)) cps.forEach(v=>{ if(v==null||v==='') return; (typeof v==='number'||/^\d+$/.test(String(v).trim()))?addId(v):addName(v); });
+    else if(typeof cps==='string'&&cps.trim()) cps.split(/[,;|]/).forEach(v=>{ v=v.trim(); if(!v) return; /^\d+$/.test(v)?addId(v):addName(v); });
+  };
+  // 담당부서 후보 (행 평탄화값/조인값/행 part_id/유형 part_id)
+  addName(r.part_name); if(r.parts&&r.parts.name) addName(r.parts.name); addId(r.part_id);
+  const rt=r.request_types; if(rt){ addId(rt.part_id); addCo(rt.co_parts); }
+  const types=window.__reqTypes||window.__reqTypesAdmin||[];
+  const ty=types.find(x=>String(x.id)===String(r.type_id));
+  if(ty){ addId(ty.part_id); addCo(ty.co_parts); }
+  if(r.co_parts) addCo(r.co_parts);
+  for(const c of cand){
+    if(c.name){ if(c.name===me.name) return true; const cid=nameToId(c.name); if(cid!=null&&me.id!=null&&cid===me.id) return true; }
+    if(c.id!=null){ if(me.id!=null&&c.id===me.id) return true; const cn=idToName(c.id); if(cn&&cn===me.name) return true; }
+  }
+  return false;
+}
 function canSeeReq(r) {
   if (!currentUser) return false;
   if (currentUser.is_master) return true;            // 마스터: 전체
@@ -9939,17 +9950,8 @@ function canSeeReq(r) {
   const __rStore = (r.store||'').trim();
   const __myStore = (currentUser.store||'').trim();
   if (isManagerRole(currentUser.role) && (__rStore === __myStore || (currentUser.sub_stores||[]).map(function(x){return (x||'').trim();}).includes(__rStore))) return true;
-  // 본사 담당자: 자기 파트 신청 전부
-  if (currentUser.part && r.part_name === currentUser.part) return true;
-  // 공동 진행 파트: 신청 유형에 공동 파트로 지정된 파트의 담당자도 열람·처리
-  if (currentUser.part) {
-    const types = window.__reqTypes || window.__reqTypesAdmin || [];
-    const ty = types.find(x => x.id === r.type_id);
-    if (ty && Array.isArray(ty.co_parts) && ty.co_parts.length) {
-      const myPart = (window.__parts || []).find(p => p.name === currentUser.part);
-      if (myPart && ty.co_parts.map(Number).includes(Number(myPart.id))) return true;
-    }
-  }
+  // 본사 담당자: 담당부서(part_id) 또는 공동 진행 파트(co_parts)에 내 파트 포함 시 열람 (ID/이름 이중대조)
+  if (currentUser.part && reqPartAccess(r)) return true;
   // 담당자 본인
   if (r.assignee_id === currentUser.id) return true;
   // 개별 열람 허용된 직원 (교육 등 목적)
@@ -10376,6 +10378,9 @@ async function renderRequests(area) {
 async function openReqById(id) {
   const data = await rqGet(id);
   if (!data) { alert('이 신청을 열람할 권한이 없습니다.'); return; }
+  // 파트 판정 캐시 보장(알림/딥링크로 목록을 거치지 않고 바로 열 때 co_parts 대조가 비는 것 방지)
+  try{ if(!window.__parts||!window.__parts.length){ const {data:__pp}=await sb.from('parts').select('id,name'); window.__parts=__pp||[]; } }catch(e){}
+  try{ if(!window.__reqTypes||!window.__reqTypes.length){ const {data:__tt}=await sb.from('request_types').select('id,name,part_id,co_parts'); window.__reqTypes=__tt||[]; } }catch(e){}
   if (!canSeeReq(data)) { alert('이 신청을 열람할 권한이 없습니다.'); return; }
   curReq = data;
   goPage('reqdetail');
