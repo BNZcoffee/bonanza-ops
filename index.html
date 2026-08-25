@@ -1536,10 +1536,11 @@ async function updateDraftBadge(){
   b.style.display = (data&&data.length) ? '' : 'none';
 }
 async function checkScheduled(){
-  if (!currentUser||currentUser.role!=='admin') return;
-  const now = new Date().toISOString();
-  await poPublishScheduled();
-  updateNotifDot();
+  if (!currentUser) return;
+  // 예약 발행 전환은 서버 RPC(po_publish_scheduled, SECURITY DEFINER)가 처리하므로
+  // 관리자뿐 아니라 로그인한 누구나 트리거해도 안전 → '관리자 미접속 시 예약글 미발행' 버그 수정.
+  try{ await poPublishScheduled(); }catch(e){}
+  try{ updateNotifDot(); }catch(e){}
 }
 
 function switchCat(id, name) {
@@ -1548,27 +1549,44 @@ function switchCat(id, name) {
   goPage('board');
 }
 
+// 전 직원(현장 포함) 열람 대상 access 값 판별 — all/member/pt/everyone/staff/전직원 등
+function postIsAllStaff(a){
+  if(a==null||a==='') return true;                 // 미지정은 전 직원 공개로 간주
+  const s=String(a).trim(); const sl=s.toLowerCase();
+  return ['all','member','pt','everyone','staff','전직원'].includes(sl) || s==='전직원' || s==='전 직원';
+}
+// 예약(미래 발행) 글 판별
+function postIsFutureScheduled(post){
+  const st=post.status||'published';
+  const sched=post.scheduled_at||post.reserved_at;
+  if(st==='scheduled') return (!sched) || (new Date(sched).getTime() > Date.now());
+  if(sched && new Date(sched).getTime() > Date.now()) return true;
+  return false;
+}
 function canSee(post) {
   if (!currentUser) return false;
-  if (post.status && post.status !== 'published') {
-    // 미발행은 작성자·총괄·부총괄만
-    if (currentUser.is_master || currentUser.is_vice_master || post.author_id === currentUser.id) {} else return false;
+  const st = post.status || 'published';
+  // 미발행(초안/예약/미래발행)은 작성자·총괄·부총괄만
+  if (st !== 'published' || postIsFutureScheduled(post)) {
+    if (!(currentUser.is_master || currentUser.is_vice_master || post.author_id === currentUser.id)) return false;
   }
   const grade = userGrade(currentUser);
   if (grade === 'master' || grade === 'vice') return true;  // 총괄·부총괄 전체 열람
+  const acc = (post.access!=null ? post.access : post.target_role);
+  const allStaff = postIsAllStaff(acc);
   const cat = allCats.find(c => c.id === post.category_id);
   if (cat) {
-    // 게시판 열람 권한(read_perm)
     const rp = cat.read_perm || 'all';
     if (rp === 'dept') {
-      // 해당 부서만: 부서담당의 part가 cat.dept와 일치해야
+      // 부서 전용 게시판은 유지(기밀). 해당 부서 담당만.
       if (!(currentUser.part && (currentUser.part === cat.dept))) return false;
     } else if (rp === 'manager') {
-      if (grade === 'staff') return false;  // 매니저 이상만
+      // 게시판이 매니저 전용이라도, 글 자체가 '전 직원'이면 현장직원도 열람 허용
+      if (grade === 'staff' && !allStaff) return false;
     }
   }
-  // 글 자체의 access (전직원/매니저이상)
-  if (post.access === 'manager' && grade === 'staff') return false;
+  // 글 access 가 '매니저 이상'일 때만 현장직원 차단. '전 직원' 계열이면 무조건 허용.
+  if (!allStaff && acc === 'manager' && grade === 'staff') return false;
   return true;
 }
 
@@ -4828,7 +4846,9 @@ async function checkAndSend3DayReminders() {
       const msg = (cnt===1)
         ? `[미확인 공지] '${first.title}' 공지를 아직 확인하지 않으셨습니다.`
         : `[미확인 공지] 아직 확인하지 않은 공지가 ${cnt}건 있습니다. (예: '${first.title}' 외 ${cnt-1}건)`;
-      await createNotification(u.id, 'notice', first.id, 'post', msg);
+      // 3일 미확인 리마인드 — 별도 type(notice_reminder_3d). 이미 보낸 미읽음 리마인드 있으면 중복 방지.
+      const __rd = await sendNotificationDedup({targetUserId:u.id, noticeId:first.id, type:'notice_reminder_3d', message:msg, refType:'post'});
+      if (!(__rd && __rd.ok)) continue;
       if (u.slack_member_id && typeof sendSlackDM === 'function') {
         const link = 'https://bnzcoffee.github.io/bonanza-ops/?post=' + first.id;
         await sendSlackDM(u.slack_member_id, '🔔 ' + msg + '\n' + link);
@@ -5485,8 +5505,10 @@ async function sendPostUpdateNotify(postId){
     if(__postAccess==='manager' && grade==='staff') continue; // 매니저 전용 공지는 매장직원 제외
     const shouldSend = roleCheck[grade]!==undefined ? roleCheck[grade] : !!(NOTIF_ROLE_DEFAULTS['new_post']?.[NOTIF_ROLES.findIndex(r=>r.key===grade)]);
     if(!shouldSend) continue;
-    await createNotification(u.id,'post_update',postId,'post',msg);
-    if(u.slack_member_id && notifEnabled('post_update')){ const link='https://bnzcoffee.github.io/bonanza-ops/?post='+postId; await sendSlackDM(u.slack_member_id, notifEmoji('post_update')+' '+msg+'\n'+link); }
+    // 공지 수정 알림 — 별도 type(notice_updated). 동일 미읽음 수정알림 있으면 중복 방지.
+    const __up = await sendNotificationDedup({targetUserId:u.id, noticeId:postId, type:'notice_updated', message:msg, refType:'post'});
+    if(!(__up && __up.ok)) continue;
+    if(u.slack_member_id && notifEnabled('notice_updated')){ const link='https://bnzcoffee.github.io/bonanza-ops/?post='+postId; await sendSlackDM(u.slack_member_id, notifEmoji('notice_updated')+' '+msg+'\n'+link); }
     sent++;
   }
   window.__notifBatchLog = false;
@@ -5512,6 +5534,7 @@ async function sendRoleBasedPostNotify(postId, title) {
 
   const msg = notifRender('new_post',{title:(title||'새 공지가 등록되었습니다')});
   let sent = 0;
+  window.__notifBatchLog = true;   // 개별 로그 억제(아래에서 총계 1건만 기록)
   for (const u of allUsers) {
     // 역할 판정
     let grade = 'staff';
@@ -5528,16 +5551,16 @@ async function sendRoleBasedPostNotify(postId, title) {
       : !!(NOTIF_ROLE_DEFAULTS['new_post']?.[NOTIF_ROLES.findIndex(r=>r.key===grade)]);
     if (!shouldSend) continue;
 
-    await sb.from('notifications').insert({
-      user_id: u.id, type: 'new_post', ref_id: postId, ref_type: 'post',
-      message: msg, is_read: false, created_at: new Date().toISOString()
-    });
+    // 최초 등록 알림(new_post) — 동일 미읽음 존재 시 재발송 차단(1회만)
+    const __d = await sendNotificationDedup({targetUserId:u.id, noticeId:postId, type:'new_post', message:msg, refType:'post'});
+    if (!(__d && __d.ok)) continue;   // 중복 차단 시 슬랙·카운트도 건너뜀
     if (u.slack_member_id && notifEnabled('new_post')) {
       const link = 'https://bnzcoffee.github.io/bonanza-ops/?post=' + postId;
       await sendSlackDM(u.slack_member_id, notifEmoji('new_post') + ' ' + msg + '\n' + link);
     }
     sent++;
   }
+  window.__notifBatchLog = false;
   console.log('[알림] 공지 ' + sent + '명 발송');
   try{ await logNotifSend('new_post','post',postId, "'"+(title||'공지')+"' 새 공지 발송", sent); }catch(e){}
 }
@@ -6272,6 +6295,36 @@ async function createNotification(userId, type, refId, refType, message) {
   });
   if (error) { console.warn('알림 생성 오류:', error.message); return; }
   if (!window.__notifBatchLog) { try{ await logNotifSend(type, refType, refId, message, 1); }catch(e){} }
+}
+
+// ── 알림 중복 방지 발송 헬퍼 ─────────────────────────────────────────
+//  같은 (user_id + ref_id + type) 의 '미읽음' 알림이 이미 있으면 신규 생성 차단(1회만).
+//  · 최초 등록 new_post, 3일 리마인드 notice_reminder_3d, 수정 notice_updated 처럼
+//    type 을 분리해 두면 각 성격별로 1건씩만 쌓이고 서로를 막지 않는다.
+//  · 반환 {ok:true} 실제 발송 / {deduped:true} 중복차단 / {skipped:true} 설정off·인자없음
+async function sendNotificationDedup(opts){
+  opts = opts || {};
+  const userId  = opts.targetUserId != null ? opts.targetUserId : opts.userId;
+  const type    = opts.type;
+  const refId   = (opts.noticeId != null ? opts.noticeId : (opts.refId != null ? opts.refId : null));
+  const refType = opts.refType || 'post';
+  const message = opts.message || '';
+  if (!userId || !type) return { skipped:true };
+  if (typeof notifEnabled==='function' && !notifEnabled(type)) return { skipped:true };
+  // 동일 미읽음 알림 존재 여부
+  try{
+    let q = sb.from('notifications').select('id').eq('user_id', userId).eq('type', type).eq('is_read', false).limit(1);
+    q = (refId==null) ? q.is('ref_id', null) : q.eq('ref_id', refId);
+    const { data: dup } = await q;
+    if (dup && dup.length) return { deduped:true };
+  }catch(e){ /* 조회 실패 시엔 그냥 발송 진행 */ }
+  const { error } = await sb.from('notifications').insert({
+    user_id: userId, type, ref_id: refId, ref_type: refType, message,
+    is_read: false, created_at: new Date().toISOString()
+  });
+  if (error) { console.warn('알림 생성 오류:', error.message); return { error }; }
+  if (!window.__notifBatchLog) { try{ await logNotifSend(type, refType, refId, message, 1); }catch(e){} }
+  return { ok:true };
 }
 
 // 겸직 포함 — 현재 사용자가 관리하는 매장 목록(주 소속 + 추가 관할 sub_stores)
@@ -10760,10 +10813,11 @@ async function renderReqDetail(area) {
   const fields = reqFilterFields(r.request_types ? (r.request_types.form_fields || []) : []);
   const fd = r.form_data || {};
 
-  // 담당자/마스터/관리자만 상태 변경 가능
+  // 담당자/마스터/관리자 + 담당부서(part_id) 및 '공동 진행 파트(co_parts)' 소속자도 상태 변경 가능
+  //  reqPartAccess(r): 내 파트가 담당부서 또는 공동진행파트에 (ID/이름) 포함되면 true
   const canManage = currentUser.is_master || currentUser.role === 'admin' ||
     r.assignee_id === currentUser.id ||
-    (currentUser.part && r.part_name === currentUser.part);
+    (currentUser.part && reqPartAccess(r));
 
   // 신청 내용 표시
   let contentHtml = '';
