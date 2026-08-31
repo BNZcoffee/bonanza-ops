@@ -1549,12 +1549,6 @@ function switchCat(id, name) {
   goPage('board');
 }
 
-// 전 직원(현장 포함) 열람 대상 access 값 판별 — all/member/pt/everyone/staff/전직원 등
-function postIsAllStaff(a){
-  if(a==null||a==='') return true;                 // 미지정은 전 직원 공개로 간주
-  const s=String(a).trim(); const sl=s.toLowerCase();
-  return ['all','member','pt','everyone','staff','전직원'].includes(sl) || s==='전직원' || s==='전 직원';
-}
 // 예약(미래 발행) 글 판별
 function postIsFutureScheduled(post){
   const st=post.status||'published';
@@ -1572,21 +1566,20 @@ function canSee(post) {
   }
   const grade = userGrade(currentUser);
   if (grade === 'master' || grade === 'vice') return true;  // 총괄·부총괄 전체 열람
-  const acc = (post.access!=null ? post.access : post.target_role);
-  const allStaff = postIsAllStaff(acc);
   const cat = allCats.find(c => c.id === post.category_id);
   if (cat) {
+    // 게시판 단위 열람권한(read_perm)이 '최우선' 보안 게이트.
+    //  게시판이 매니저/부서 전용이면 글 access 와 무관하게 현장직원 차단(설계된 질서 유지).
     const rp = cat.read_perm || 'all';
     if (rp === 'dept') {
-      // 부서 전용 게시판은 유지(기밀). 해당 부서 담당만.
-      if (!(currentUser.part && (currentUser.part === cat.dept))) return false;
+      if (!(currentUser.part && (currentUser.part === cat.dept))) return false;   // 해당 부서만
     } else if (rp === 'manager') {
-      // 게시판이 매니저 전용이라도, 글 자체가 '전 직원'이면 현장직원도 열람 허용
-      if (grade === 'staff' && !allStaff) return false;
+      if (grade === 'staff') return false;                                        // 매니저 전용 게시판 = 항상 매니저 이상
     }
   }
-  // 글 access 가 '매니저 이상'일 때만 현장직원 차단. '전 직원' 계열이면 무조건 허용.
-  if (!allStaff && acc === 'manager' && grade === 'staff') return false;
+  // 전 직원 게시판이라도 글 자체 access='manager' 면 현장직원 추가 차단(글 단위 세밀 제어).
+  const acc = (post.access!=null ? post.access : post.target_role);
+  if (acc === 'manager' && grade === 'staff') return false;
   return true;
 }
 
@@ -5531,6 +5524,10 @@ async function sendRoleBasedPostNotify(postId, title) {
 
   const __pa = await poGet(postId);
   const __postAccess = __pa ? __pa.access : 'all';
+  // 게시판 단위 열람권한 반영 — 열람 불가 대상에겐 알림도 보내지 않음(canSee 와 동일 규칙)
+  const __cat = (window.allCats||[]).find(c => c.id === (__pa && __pa.category_id));
+  const __boardPerm = __cat ? (__cat.read_perm||'all') : 'all';
+  const __boardDept = __cat ? __cat.dept : null;
 
   const msg = notifRender('new_post',{title:(title||'새 공지가 등록되었습니다')});
   let sent = 0;
@@ -5543,7 +5540,10 @@ async function sendRoleBasedPostNotify(postId, title) {
     else if (u.part) grade = 'dept';
     else if (isManagerRole(u.role)) grade = 'manager';
 
-    // 열람 권한 반영: '매니저 이상' 공지는 매장직원(staff)에게 알림 금지
+    // 게시판 열람권한 반영: 매니저/부서 전용 게시판은 열람 불가 대상에게 알림 금지
+    if (__boardPerm === 'manager' && grade === 'staff') continue;
+    if (__boardPerm === 'dept' && !(u.part && u.part === __boardDept)) continue;
+    // 글 단위 access='매니저 이상' 공지는 매장직원(staff)에게 알림 금지
     if (__postAccess === 'manager' && grade === 'staff') continue;
 
     // 권한별 알림 설정 체크
@@ -10813,11 +10813,16 @@ async function renderReqDetail(area) {
   const fields = reqFilterFields(r.request_types ? (r.request_types.form_fields || []) : []);
   const fd = r.form_data || {};
 
-  // 담당자/마스터/관리자 + 담당부서(part_id) 및 '공동 진행 파트(co_parts)' 소속자도 상태 변경 가능
-  //  reqPartAccess(r): 내 파트가 담당부서 또는 공동진행파트에 (ID/이름) 포함되면 true
+  // 담당자/마스터/관리자 + 담당부서(part_id) 및 '공동 진행 파트(co_parts)' 소속자도 상태 변경 가능.
+  //  · 이 화면에서 직접 조회한 __coPartNames(공동파트 이름 배열, 위 10809행)를 신뢰값으로 사용해
+  //    캐시 미로딩/조인누락과 무관하게 확실히 판정. 공백 trim 후 대조.
+  const __myPartTrim = (currentUser.part||'').trim();
+  const __mainPartName = (r.part_name || (r.parts&&r.parts.name) || '').trim();
+  const __coPartTrim = (__coPartNames||[]).map(function(x){ return (x||'').trim(); });
   const canManage = currentUser.is_master || currentUser.role === 'admin' ||
     r.assignee_id === currentUser.id ||
-    (currentUser.part && reqPartAccess(r));
+    (!!__myPartTrim && (__myPartTrim === __mainPartName || __coPartTrim.includes(__myPartTrim))) ||
+    (currentUser.part && typeof reqPartAccess==='function' && reqPartAccess(r));
 
   // 신청 내용 표시
   let contentHtml = '';
@@ -18392,7 +18397,10 @@ function editReqType(typeId) {
     '<label style="display:inline-flex;align-items:center;gap:5px;border:0.5px solid var(--crd);border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;background:'+(curCoParts.includes(String(p.id))?'var(--crm)':'#fff')+'">' +
     '<input type="checkbox" class="rt-copart" value="'+p.id+'"'+(curCoParts.includes(String(p.id))?' checked':'')+' style="margin:0"/> '+p.name+'</label>'
   ).join('');
-  const userOpts = '<option value="">미지정</option>' + users.map(u => '<option value="'+u.id+'"'+(t&&t.default_assignee_id===u.id?' selected':'')+'>'+u.name+(u.part?' ['+u.part+']':'')+'</option>').join('');
+  // 기본 담당자 후보: 부서담당/파트 보유자·관리자만 (현장 직원 제외). 단, 기존 지정자는 유지.
+  const __isHandler = u => !!(u && (u.is_master || u.is_vice_master || u.part || ['admin','dept','hr','ceo','executive_director'].includes(u.role)));
+  const __assignPool = users.filter(u => __isHandler(u) || (t && u.id===t.default_assignee_id));
+  const userOpts = '<option value="">미지정</option>' + __assignPool.map(u => '<option value="'+u.id+'"'+(t&&t.default_assignee_id===u.id?' selected':'')+'>'+u.name+(u.part?' ['+u.part+']':'')+'</option>').join('');
 
   document.querySelector('#catModal .modal-inner').classList.add('wide');
   document.getElementById('catModalTitle').textContent = typeId ? '신청 유형 수정' : '신청 유형 추가';
