@@ -2005,7 +2005,7 @@ async function renderPostDetail(area) {
     const isHQAdmin = u.role === 'admin' || u.role === 'dept' || u.part || u.store === '본사' || u.store === '미지정';
     if (isHQAdmin) return false;
 
-    if (p.access === 'manager') {
+    if (postIsManagerAccess(p.access)) {
       // 매니저 이상 대상 공지 → 매니저만
       return isManagerRole(u.role);
     }
@@ -3180,7 +3180,7 @@ async function submitPost(isDraft=false) {
   let refIds = [...nRefDocs];
   if (!isDraft && selectedAccess === 'all' && refIds.length) {
     const refPosts = await poByIds(refIds);
-    const restricted = (refPosts||[]).filter(p => p.access === 'manager');
+    const restricted = (refPosts||[]).filter(p => postIsManagerAccess(p.access));
     if (restricted.length) {
       const names = restricted.map(p => '· ' + p.title).join('\n');
       const ok = confirm(
@@ -4832,7 +4832,7 @@ async function checkAndSend3DayReminders() {
       const { data: reads } = await sb.from('post_reads').select('user_id').eq('post_id', notice.id);
       const readSet = new Set((reads||[]).map(r => r.user_id));
       // ① 매니저 전용 공지는 매니저에게만 (현장직원 제외)
-      const recips = (notice.access==='manager') ? fieldStaffs.filter(u => userGrade(u)==='manager') : fieldStaffs;
+      const recips = postIsManagerAccess(notice.access) ? fieldStaffs.filter(u => userGrade(u)==='manager') : fieldStaffs;
       recips.forEach(u => { if (!readSet.has(u.id)) { (userUnread[u.id]=userUnread[u.id]||[]).push(notice); } });
     }
 
