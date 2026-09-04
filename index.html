@@ -1557,6 +1557,8 @@ function postIsFutureScheduled(post){
   if(sched && new Date(sched).getTime() > Date.now()) return true;
   return false;
 }
+// 글 열람권한 판별: '매니저 이상'은 access 가 정확히 'manager' 일 때만. 그 외(all/member/pt/빈값/null/공백·대소문자)는 전 직원 공개.
+function postIsManagerAccess(a){ return String(a==null?'':a).trim().toLowerCase()==='manager'; }
 function canSee(post) {
   if (!currentUser) return false;
   const st = post.status || 'published';
@@ -1577,9 +1579,9 @@ function canSee(post) {
       if (grade === 'staff') return false;                                        // 매니저 전용 게시판 = 항상 매니저 이상
     }
   }
-  // 전 직원 게시판이라도 글 자체 access='manager' 면 현장직원 추가 차단(글 단위 세밀 제어).
+  // 글 자체 access='매니저 이상' 일 때만 현장직원 차단(글 단위 세밀 제어). null/빈값/all 등은 전 직원 공개.
   const acc = (post.access!=null ? post.access : post.target_role);
-  if (acc === 'manager' && grade === 'staff') return false;
+  if (postIsManagerAccess(acc) && grade === 'staff') return false;
   return true;
 }
 
@@ -1908,7 +1910,7 @@ async function renderBoard(area, opts) {
 
   const postHtml = filtered.length ? filtered.map(p => {
     const isNew = new Date(p.created_at) >= new Date(week);
-    const accLbl = p.access==='all'?'전 직원':'매니저 이상';
+    const accLbl = postIsManagerAccess(p.access)?'매니저 이상':'전 직원';
     const accCls = p.access==='all'?'all':'';
     const cc = cmtCounts[p.id]||0;
     return `<div class="post-card" onclick="openPostById(${p.id})">
@@ -2016,7 +2018,7 @@ async function renderPostDetail(area) {
 
   const myRead = reads.find(r => r.user_id === currentUser.id);
   const wmText = `${currentUser.code} ${currentUser.name} ${currentUser.store}`;
-  const accLbl = p.access==='all'?'전 직원':'매니저 이상';
+  const accLbl = postIsManagerAccess(p.access)?'매니저 이상':'전 직원';
 
   let confirmHtml = '';
   // 확인 강제(‘확인했습니다’)는 실제 확인 대상(현장 직원)에게만 노출.
@@ -3083,7 +3085,7 @@ function renderRefDocs() {
   poByIds(nRefDocs).then(results => {
     box.innerHTML = results.map((p) => {
       if (!p) return '';
-      const accLbl = p.access==='all' ? '전 직원' : '매니저 이상';
+      const accLbl = postIsManagerAccess(p.access) ? '매니저 이상' : '전 직원';
       return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:4px">
         <i class="ti ti-link" style="color:var(--bl)"></i>
         <span style="flex:1;font-size:13px">${esc(p.title)}</span>
@@ -3104,7 +3106,7 @@ async function openRefPicker() {
   const candidates = (posts||[]).filter(p => p.id !== selfId && !nRefDocs.includes(p.id));
   window.__refCandidates = candidates;
   const listHtml = candidates.length ? candidates.map(p => {
-    const accLbl = p.access==='all' ? '전 직원' : '매니저 이상';
+    const accLbl = postIsManagerAccess(p.access) ? '매니저 이상' : '전 직원';
     return `<div onclick="addRefDoc(${p.id})" style="padding:9px 12px;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:5px;cursor:pointer;display:flex;align-items:center;gap:8px">
       <span style="flex:1;font-size:13px">${esc(p.title)}</span>
       <span style="font-size:9px;color:var(--th)">${p.categories?.name||''}</span>
@@ -3124,7 +3126,7 @@ function filterRefList(q) {
   const filtered = (window.__refCandidates||[]).filter(p => p.title.toLowerCase().includes(ql));
   const box = document.getElementById('refCandList');
   box.innerHTML = filtered.length ? filtered.map(p => {
-    const accLbl = p.access==='all' ? '전 직원' : '매니저 이상';
+    const accLbl = postIsManagerAccess(p.access) ? '매니저 이상' : '전 직원';
     return `<div onclick="addRefDoc(${p.id})" style="padding:9px 12px;border:0.5px solid var(--crd);border-radius:8px;margin-bottom:5px;cursor:pointer;display:flex;align-items:center;gap:8px">
       <span style="flex:1;font-size:13px">${esc(p.title)}</span>
       <span style="font-size:9px;font-weight:700;border-radius:8px;padding:2px 6px;background:${p.access==='all'?'var(--gnb)':'var(--blb)'};color:${p.access==='all'?'var(--gn)':'var(--bl)'}">${accLbl}</span>
@@ -3201,7 +3203,10 @@ async function submitPost(isDraft=false) {
     }
   }
 
-  const payload = {category_id:catId, title, body, access:selectedAccess,
+  // 열람권한: 화면에서 실제 선택(하이라이트)된 값을 신뢰. '매니저 이상'을 명시 선택했을 때만 manager, 그 외엔 전 직원(all).
+  const __accMgrSelected = !!(document.getElementById('acc-manager') && document.getElementById('acc-manager').classList.contains('selected'));
+  const __accVal = (__accMgrSelected || postIsManagerAccess(selectedAccess)) ? 'manager' : 'all';
+  const payload = {category_id:catId, title, body, access:__accVal,
     comments_on:commentsOn, require_read:(document.getElementById('readToggle')?document.getElementById('readToggle').classList.contains('on'):true), author_id:currentUser.id, status,
     scheduled_at:scheduledAt, ref_post_ids:refIds, updated_at:new Date().toISOString()};
 
@@ -5495,7 +5500,7 @@ async function sendPostUpdateNotify(postId){
   window.__notifBatchLog = true;
   for(const u of allUsers){
     let grade='staff'; if(u.is_master)grade='master'; else if(u.is_vice_master)grade='vice'; else if(u.part)grade='dept'; else if(isManagerRole(u.role))grade='manager';
-    if(__postAccess==='manager' && grade==='staff') continue; // 매니저 전용 공지는 매장직원 제외
+    if(postIsManagerAccess(__postAccess) && grade==='staff') continue; // 매니저 전용 공지는 매장직원 제외
     const shouldSend = roleCheck[grade]!==undefined ? roleCheck[grade] : !!(NOTIF_ROLE_DEFAULTS['new_post']?.[NOTIF_ROLES.findIndex(r=>r.key===grade)]);
     if(!shouldSend) continue;
     // 공지 수정 알림 — 별도 type(notice_updated). 동일 미읽음 수정알림 있으면 중복 방지.
@@ -5544,7 +5549,7 @@ async function sendRoleBasedPostNotify(postId, title) {
     if (__boardPerm === 'manager' && grade === 'staff') continue;
     if (__boardPerm === 'dept' && !(u.part && u.part === __boardDept)) continue;
     // 글 단위 access='매니저 이상' 공지는 매장직원(staff)에게 알림 금지
-    if (__postAccess === 'manager' && grade === 'staff') continue;
+    if (postIsManagerAccess(__postAccess) && grade === 'staff') continue;
 
     // 권한별 알림 설정 체크
     const shouldSend = roleCheck[grade] !== undefined ? roleCheck[grade]
