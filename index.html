@@ -3175,31 +3175,30 @@ async function submitPost(isDraft=false) {
     status = 'scheduled'; scheduledAt = new Date(schedVal).toISOString();
   }
 
-  // ── 참조문서 권한충돌 검증 ──
-  // 작성 글이 '전 직원'(all)인데 참조문서 중 '매니저 이상'(manager)이 있으면 확인
+  // ── 참조문서 권한충돌 안내 (참조문서의 열람권한은 절대 변경하지 않음) ──
+  //   전 직원 글에 '매니저 이상' 참조문서를 붙여도, 그 참조문서의 권한은 그대로 유지한다.
+  //   (기존엔 poSetAccess(...,'all')로 강제 상향해 매니저 전용 문서가 전체공개되는 버그/보안구멍이 있었음)
   let refIds = [...nRefDocs];
-  if (!isDraft && selectedAccess === 'all' && refIds.length) {
+  if (!isDraft && !postIsManagerAccess(selectedAccess) && refIds.length) {
     const refPosts = await poByIds(refIds);
     const restricted = (refPosts||[]).filter(p => postIsManagerAccess(p.access));
     if (restricted.length) {
       const names = restricted.map(p => '· ' + p.title).join('\n');
       const ok = confirm(
-        '열람 권한이 다른 참조문서가 있습니다.\n\n' +
-        '아래 참조문서는 현재 "매니저 이상"만 볼 수 있습니다:\n' + names + '\n\n' +
-        '지금 작성하는 글은 "전 직원"이 볼 수 있어, 이 글에 참조로 첨부하면\n' +
-        '위 참조문서의 열람 권한도 "전 직원"으로 바뀌어 모두가 볼 수 있게 됩니다.\n\n' +
-        '확인: 참조문서 권한을 전 직원으로 변경하고 첨부합니다.\n' +
-        '취소: 작성하던 글은 그대로 두고, 참조문서만 첨부하지 않습니다.'
+        '이 글은 "전 직원" 공개인데, 아래 참조문서는 "매니저 이상" 전용입니다:\n' + names + '\n\n' +
+        '첨부해도 참조문서의 열람 권한은 그대로 유지됩니다.\n' +
+        '(일반 직원은 이 글은 보되, 위 참조문서는 열 수 없습니다.)\n\n' +
+        '확인: 권한 그대로 유지한 채 첨부합니다.\n' +
+        '취소: 위 참조문서만 첨부하지 않습니다.'
       );
-      if (ok) {
-        // 참조문서들의 권한을 all로 상향
-        await poSetAccess(restricted.map(p=>p.id), 'all');
-      } else {
-        // 참조문서만 제외하고 작성 계속
-        refIds = [];
-        nRefDocs = [];
+      if (!ok) {
+        // 매니저 전용 참조문서만 첨부에서 제외 (나머지 참조문서는 유지)
+        const __rmv = new Set(restricted.map(p=>String(p.id)));
+        refIds = refIds.filter(id=>!__rmv.has(String(id)));
+        nRefDocs = nRefDocs.filter(id=>!__rmv.has(String(id)));
         renderRefDocs();
       }
+      // 확인(ok) 시: 참조문서 권한을 바꾸지 않고 그대로 첨부 — poSetAccess 강제 상향 제거
     }
   }
 
