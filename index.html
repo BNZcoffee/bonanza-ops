@@ -1587,6 +1587,16 @@ function canSee(post) {
   return true;
 }
 
+// 내 파트가 게시판의 주 담당부서(dept) 또는 협력부서(co_depts)에 포함되는지
+function catDeptMatch(cat){
+  const p = (currentUser && currentUser.part) ? String(currentUser.part).trim() : '';
+  if (!p || !cat) return false;
+  if (cat.dept && String(cat.dept).trim()===p) return true;
+  let co = cat.co_depts;
+  if (typeof co === 'string') co = co.split(/[,;|]/);   // 혹시 문자열로 저장돼 있어도 관용 처리
+  if (Array.isArray(co)) return co.map(x=>String(x).trim()).includes(p);
+  return false;
+}
 function canWriteCatObj(cat) {
   if (!currentUser || !cat) return false;
   const grade = userGrade(currentUser);
@@ -1595,10 +1605,11 @@ function canWriteCatObj(cat) {
   const wp = cat.write_perm || 'dept_lead';
   if (wp === 'master') return grade === 'master';
   if (wp === 'all_admin') return ['vice','dept','master'].includes(grade);  // 모든 관리자
-  if (wp === 'dept_lead') return ['vice','master'].includes(grade) || (grade==='dept' && (!cat.dept || cat.dept==='공용' || currentUser.part===cat.dept));
+  // 주 담당부서 또는 협력부서(co_depts) 소속이면 글쓰기 허용
+  if (wp === 'dept_lead') return ['vice','master'].includes(grade) || (grade==='dept' && (!cat.dept || cat.dept==='공용' || catDeptMatch(cat)));
   if (wp === 'dept_only') {
     if (grade==='master'||grade==='vice') return true;
-    return grade==='dept' && currentUser.part && currentUser.part===cat.dept;
+    return grade==='dept' && catDeptMatch(cat);
   }
   return false;
 }
@@ -1893,7 +1904,9 @@ async function renderBoard(area, opts) {
   await poLoadSecure();
   const postsRaw = await poList(currentCatId, q||null, __limit);
   const __fetchedFull = (postsRaw || []).length >= __limit;   // 상한까지 꽉 찼으면 더 있을 수 있음
-  const filtered = postsRaw || [];   // po_list 가 서버단에서 이미 열람권 필터
+  // 임시저장(draft)·예약(scheduled) 글은 게시판에 노출하지 않음 → 게시완료(published)만.
+  //  (작성자·관리자 본인에게도 초안은 게시판에 안 뜨고, '임시저장함'에서만 관리)
+  const filtered = (postsRaw || []).filter(p => (p.status||'published')==='published');
   const week = new Date(Date.now() - 7*24*60*60*1000).toISOString();
 
   const catTabs = visibleCats().map(c =>
@@ -6455,7 +6468,7 @@ async function renderAll(area) {
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
   await poLoadSecure();
   const posts = await poList(null, null, 1000);
-  const filtered = (posts||[]).filter(p => currentUser.role==='admin' || p.status==='published');
+  const filtered = (posts||[]).filter(p => (p.status||'published')==='published');   // 게시판=게시완료만 (초안은 임시저장함)
   const week = new Date(Date.now()-7*864e5).toISOString();
   const tabs = visibleCats().map(c =>
     `<button class="tab-btn" onclick="switchCat(${c.id},'${c.name}')">${c.name}</button>`
@@ -6520,7 +6533,7 @@ async function doSearchAll(){
   const q = (document.getElementById('allSearch')?.value||'').trim().toLowerCase();
   if (!q) { renderAll(document.getElementById('contentArea')); return; }
   const posts = await poList(null, null, 1000);
-  const filtered = (posts||[]).filter(p=>(currentUser.role==='admin'||p.status==='published')&&(p.title?.toLowerCase().includes(q)||p.body?.toLowerCase().includes(q)));
+  const filtered = (posts||[]).filter(p=>((p.status||'published')==='published')&&(p.title?.toLowerCase().includes(q)||p.body?.toLowerCase().includes(q)));
   const week = new Date(Date.now()-7*864e5).toISOString();
   const pl = document.getElementById('allPostList');
   if (pl) pl.innerHTML = filtered.map(p => {
@@ -9580,8 +9593,9 @@ async function renderBoardSettings(area) {
   // 부서 옵션 (parts에서)
   const { data: parts } = await sb.from('parts').select('name').order('sort_order');
   const deptOpts = ['', '공용'].concat((parts||[]).map(p=>p.name));
+  const partNames = (parts||[]).map(p=>p.name).filter(Boolean);
 
-  const rows = (cats||[]).map((c,i) => boardSettingRow(c, i, cats.length, deptOpts)).join('');
+  const rows = (cats||[]).map((c,i) => boardSettingRow(c, i, cats.length, deptOpts, partNames)).join('');
   area.innerHTML = `
     <div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage('appsettings')"><i class="ti ti-arrow-left"></i> 앱 관리</button></div>
     <div class="page-header"><div class="page-title">게시판(카테고리) 설정</div><div class="page-sub">게시판별 이름·순서·권한·색상·숨김 관리</div></div>
@@ -9589,12 +9603,15 @@ async function renderBoardSettings(area) {
     <button class="btn-new" style="width:100%;margin-top:6px" onclick="addBoardSetting()"><i class="ti ti-plus"></i> 새 게시판 추가</button>`;
 }
 
-function boardSettingRow(c, i, total, deptOpts) {
+function boardSettingRow(c, i, total, deptOpts, partNames) {
   const dimStyle = c.hidden ? 'opacity:.6' : '';
   const hiddenTag = c.hidden ? '<span style="font-size:10px;font-weight:700;background:var(--crm);color:var(--ts);border-radius:8px;padding:2px 8px;margin-left:6px">숨김</span>' : '';
   const deptSel = deptOpts.map(d => `<option value="${d}"${(c.dept||'')===d?' selected':''}>${d||'-'}</option>`).join('');
   const writeSel = WRITE_PERM_OPTS.map(([v,l]) => `<option value="${v}"${(c.write_perm||'dept_lead')===v?' selected':''}>${l}</option>`).join('');
   const readSel = READ_PERM_OPTS.map(([v,l]) => `<option value="${v}"${(c.read_perm||'all')===v?' selected':''}>${l}</option>`).join('');
+  const curCo = Array.isArray(c.co_depts) ? c.co_depts.map(String) : (typeof c.co_depts==='string'&&c.co_depts ? c.co_depts.split(/[,;|]/).map(x=>x.trim()) : []);
+  const coChips = (partNames||[]).filter(n=>n && n!=='공용').map(n=>`<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;border:0.5px solid var(--crd);border-radius:8px;padding:4px 9px;cursor:pointer;background:${curCo.includes(n)?'var(--crm)':'#fff'}"><input type="checkbox" class="bcodept-${c.id}" value="${(n||'').replace(/"/g,'&quot;')}"${curCo.includes(n)?' checked':''} style="margin:0;width:auto"> ${n}</label>`).join('');
+  const coBlock = `<div style="margin-top:10px"><label style="font-size:11px;font-weight:600;color:var(--ts);display:block;margin-bottom:4px">협력 부서 <span style="font-weight:400;color:var(--th)">(주 담당부서 외 글쓰기 허용 파트)</span></label><div style="display:flex;flex-wrap:wrap;gap:6px">${coChips||'<span style="font-size:12px;color:var(--th)">등록된 파트가 없습니다.</span>'}</div></div>`;
   const colorChips = BOARD_COLORS.map(col => `<span onclick="setBoardColor(${c.id},'${col}')" data-cat="${c.id}" class="bcolor-${c.id}" style="width:22px;height:22px;border-radius:5px;background:${col};cursor:pointer;border:${(c.color||'#3B2314')===col?'2px solid var(--tm)':'0.5px solid #ccc'};display:inline-block"></span>`).join('');
   const hToggle = boardHideToggle(c.id, c.hidden);
   return `<div class="notif-card" id="bset-${c.id}" style="margin-bottom:10px;${dimStyle}">
@@ -9618,6 +9635,7 @@ function boardSettingRow(c, i, total, deptOpts) {
       <div><label style="font-size:11px;font-weight:600;color:var(--ts);display:block;margin-bottom:3px">색상</label>
         <div style="display:flex;gap:5px;align-items:center;padding-top:3px">${colorChips}</div></div>
     </div>
+    ${coBlock}
     <div style="display:flex;align-items:center;gap:10px;margin-top:12px;padding-top:10px;border-top:0.5px solid var(--crm)">
       ${hToggle}
       <div style="flex:1"><div style="font-size:13px;color:var(--tm);font-weight:500">게시판 표시</div><div style="font-size:11px;color:var(--th)">끄면 직원에게 숨겨집니다 (자료 보존·준비중 게시판)</div></div>
@@ -9664,10 +9682,11 @@ async function saveBoardSetting(id) {
   const dept = document.getElementById('bdept-'+id).value;
   const write_perm = document.getElementById('bwrite-'+id).value;
   const read_perm = document.getElementById('bread-'+id).value;
+  const co_depts = [...document.querySelectorAll('.bcodept-'+id+':checked')].map(el=>el.value).filter(Boolean);
   const hideEl = document.querySelector('[data-id="'+id+'"][data-on]');
   const hidden = hideEl ? hideEl.dataset.on === '0' : false;
   const color = boardColorPick[id] || undefined;
-  const payload = { name, dept, write_perm, read_perm, hidden };
+  const payload = { name, dept, write_perm, read_perm, hidden, co_depts };
   if (color) payload.color = color;
   const { error } = await sb.from('categories').update(payload).eq('id', id);
   if (error) { alert('저장 오류: ' + error.message); return; }
