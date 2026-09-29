@@ -4615,7 +4615,6 @@ async function renderNotifSettings(area) {
       </div>
     </div>
     ${opsNotifConfigCardHtml()}
-    ${currentUser.is_master ? interviewNotifyCardHtml(__ivAllParts, __ivSelParts) : ''}
     <div style="text-align:right">
       <button class="btn-submit" onclick="saveNotifSettings()">설정 저장</button>
     </div>`;
@@ -4641,17 +4640,6 @@ async function saveNotifSettings() {
     slack_webhook_url: document.getElementById('slackUrl').value.trim(),
     updated_at: new Date().toISOString()
   }).eq('id', ns.id);
-
-  // 면담 알림 대상 파트 저장 (총괄만)
-  if (currentUser.is_master) {
-    const chips = document.querySelectorAll('#ivNotifyPartChips .ivnp-chip.on');
-    const sel = Array.from(chips).map(c => c.dataset.part);
-    const val = JSON.stringify(sel);
-    const { data: exp } = await sb.from('app_settings').select('key').eq('key','interview_notify_parts').maybeSingle();
-    if (exp) await sb.from('app_settings').update({ value: val }).eq('key','interview_notify_parts');
-    else     await sb.from('app_settings').insert({ key:'interview_notify_parts', value: val });
-    window.__ivNotifyParts = sel;
-  }
 
   alert('설정이 저장되었습니다.');
   try{ renderNotifSettings(document.getElementById('contentArea')); }catch(e){}
@@ -11400,6 +11388,8 @@ async function renderInterviews(area) {
   const opts       = optsRes.data || [];
   const typeOpts   = opts.filter(o => o.category === 'type');
   const methodOpts = opts.filter(o => o.category === 'method');
+  window.__ivTemplates = {}; typeOpts.forEach(o => { if (o.template) window.__ivTemplates[o.label] = o.template; });
+  window.__ivLastTpl = ex ? null : '';
   let rows = (__ivRows).filter(r => !r.staff || r.staff.active !== false);
   const __scope = window.__ivScope || 'manager';
   if (__scope === 'ops') rows = rows.filter(r => r.author_id && ivAuthorIsFull(r));            // 운영 메뉴: 운영파트 작성분만
@@ -11538,7 +11528,8 @@ async function openIvOptModal() {
       <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:8px">
         ${list.map(o=>`
           <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--cr);border-radius:7px">
-            <span style="flex:1;font-size:13px">${o.label}</span>
+            <span style="flex:1;font-size:13px">${o.label}${(cat==='type'&&o.template)?' <span style=\'font-size:10px;color:var(--gn)\'>· 양식 있음</span>':''}</span>
+            ${cat==='type'?`<button onclick="editIvTemplate(${o.id},'${(o.label||'').replace(/'/g,'')}')" style="background:none;border:none;cursor:pointer;color:var(--bl);font-size:12px" title="양식 편집"><i class="ti ti-template"></i> 양식</button>`:''}
             <button onclick="deleteIvOpt(${o.id},'${o.label}')" style="background:none;border:none;cursor:pointer;color:var(--rd);font-size:13px"><i class="ti ti-trash"></i></button>
           </div>`).join('')}
         ${!list.length ? '<div style="color:var(--th);font-size:13px;padding:4px 0">항목 없음</div>' : ''}
@@ -11569,6 +11560,53 @@ async function deleteIvOpt(id, label) {
   if (!ok) return;
   await sb.from('interview_options').delete().eq('id', id);
   openIvOptModal();
+}
+
+// ── 면담 양식(템플릿) 편집 ──────────────────────────────
+async function editIvTemplate(id, label) {
+  const { data: opt } = await sb.from('interview_options').select('template').eq('id', id).single();
+  const cur = (opt && opt.template) || '';
+  const old = document.getElementById('ivTplModal'); if (old) old.remove();
+  const m = document.createElement('div');
+  m.id = 'ivTplModal'; m.className = 'modal-overlay'; m.style.zIndex = '350';
+  m.innerHTML = `<div class="modal-box" style="max-width:560px;width:94vw">
+    <div class="modal-head"><b><i class="ti ti-template"></i> '${esc(label)}' 면담 양식</b>
+      <button onclick="document.getElementById('ivTplModal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+    <div class="modal-body">
+      <p style="font-size:12px;color:var(--th);margin-bottom:8px;line-height:1.6">이 유형을 선택하면 작성 화면의 <b>면담 내용</b>에 아래 양식이 자동으로 채워집니다. 항목 제목만 적어두면 작성자가 빈칸을 채워 넣습니다.</p>
+      <textarea id="ivTplInput" class="form-input" rows="12" placeholder="예)&#10;■ 면담 사유:&#10;■ 현재 업무 만족도:&#10;■ 어려운 점 / 건의사항:&#10;■ 향후 계획:&#10;■ 기타 특이사항:">${esc(cur)}</textarea>
+    </div>
+    <div class="modal-foot" style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn-cancel-sm" onclick="document.getElementById('ivTplModal').remove()">취소</button>
+      <button class="btn-submit" onclick="saveIvTemplate(${id})"><i class="ti ti-device-floppy"></i> 저장</button>
+    </div></div>`;
+  document.body.appendChild(m);
+}
+
+async function saveIvTemplate(id) {
+  const val = document.getElementById('ivTplInput')?.value || '';
+  const { error } = await sb.from('interview_options').update({ template: val || null }).eq('id', id);
+  if (error) { alert('저장 오류: ' + error.message); return; }
+  const m = document.getElementById('ivTplModal'); if (m) m.remove();
+  alert('양식이 저장되었습니다.');
+  openIvOptModal();
+}
+
+// 작성 폼: 유형 선택 시 양식 자동 반영
+function ivApplyTemplate() {
+  const sel = document.getElementById('ivType');
+  const ta  = document.getElementById('ivContent');
+  if (!sel || !ta) return;
+  const tpl = (window.__ivTemplates || {})[sel.value] || '';
+  if (!tpl) return;
+  const cur = ta.value.trim();
+  // 내용이 비었거나 이전 양식 그대로면 교체, 아니면 확인
+  if (!cur || window.__ivLastTpl && cur === window.__ivLastTpl.trim()) {
+    ta.value = tpl; window.__ivLastTpl = tpl; return;
+  }
+  if (confirm('선택한 유형의 양식을 불러올까요?\n현재 작성 중인 내용은 대체됩니다.')) {
+    ta.value = tpl; window.__ivLastTpl = tpl;
+  }
 }
 // ── 상세 ──────────────────────────────────────────────────
 async function openInterviewById(id) {
@@ -11664,7 +11702,119 @@ async function renderInterviewDetail(area) {
             : `<div style="font-size:13px;color:var(--th);padding:12px 0">운영팀 피드백 대기 중입니다.</div>`
         }
       </div>
+      <div id="ivCmtSection" style="margin-top:20px"><div style="font-size:12px;color:var(--th)">댓글 불러오는 중...</div></div>
     </div>`;
+  loadIvComments(r.id);
+}
+
+// ── 면담 댓글 (다른 게시판처럼 멘션 태그 지원) ──────────────
+async function loadIvComments(ivId) {
+  const box = document.getElementById('ivCmtSection');
+  if (!box) return;
+  const [cRes, uRes] = await Promise.all([
+    sb.from('interview_comments').select('*').eq('interview_id', ivId).order('created_at'),
+    sb.from('users').select('id,name,store,is_master,is_vice_master,role,part').eq('active', true).order('name')
+  ]);
+  const comments = cRes.data || [];
+  // 멘션 후보 = 면담 열람 권한자 (열람 불가자에게 태그 방지)
+  try { await ivLoadAllowed(); } catch(e){}
+  window.__ivCmtCand = (uRes.data || []).filter(u => isInterviewFull(u));
+  const nameById = {}; (uRes.data||[]).forEach(u => nameById[String(u.id)] = u.name);
+
+  const one = (cm) => {
+    const isMine = String(cm.author_id) === String(currentUser.id);
+    const canDel = isMine || currentUser.is_master || currentUser.is_vice_master;
+    let tags = [];
+    try { tags = cm.tagged_users ? (typeof cm.tagged_users==='string'?JSON.parse(cm.tagged_users):cm.tagged_users) : []; } catch(e){}
+    const tagHtml = (tags && tags.length)
+      ? `<div style="margin-top:4px">${tags.map(t=>`<span style="font-size:11px;background:var(--blb);color:var(--bl);border-radius:10px;padding:1px 8px;margin-right:4px">@${esc(t.name||nameById[String(t.id)]||'')}</span>`).join('')}</div>` : '';
+    return `<div class="comment-item" style="padding:10px 0;border-bottom:0.5px solid var(--crm)">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <span style="font-size:12px;font-weight:600;color:var(--tm)">${esc(nameById[String(cm.author_id)]||'?')}</span>
+        <span style="font-size:11px;color:var(--th);margin-left:auto">${fmtDateTime(cm.created_at)}</span>
+        ${canDel ? `<button onclick="delIvComment(${cm.id},${ivId})" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px"><i class="ti ti-trash"></i></button>` : ''}
+      </div>
+      <div style="font-size:14px;line-height:1.7;color:var(--tm);white-space:pre-wrap">${esc(cm.body||'')}</div>
+      ${tagHtml}
+    </div>`;
+  };
+
+  const candOpts = '<option value="">+ 멘션 추가</option>' +
+    window.__ivCmtCand.filter(u=>String(u.id)!==String(currentUser.id))
+      .map(u=>`<option value="${u.id}">${esc(u.name)}${u.store?' ('+esc(u.store)+')':(u.part?' ['+esc(u.part)+']':'')}</option>`).join('');
+
+  window.__ivCmtTags = window.__ivCmtTags || {};
+  window.__ivCmtTags[ivId] = [];
+
+  box.innerHTML = `
+    <div class="section-label" style="margin-bottom:8px">댓글 ${comments.length}개</div>
+    <div id="ivCmtList">${comments.map(one).join('') || '<div style="font-size:13px;color:var(--th);padding:8px 0">첫 댓글을 남겨보세요.</div>'}</div>
+    <div style="margin-top:12px">
+      <textarea id="ivCmtInput" class="form-input" rows="3" placeholder="의견이나 추가 확인할 내용을 남겨주세요. 멘션하면 알림이 갑니다."></textarea>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px">
+        <select class="form-input" style="width:auto;min-width:180px;padding:6px 10px;font-size:12px" onchange="ivCmtAddTag(${ivId}, this)">${candOpts}</select>
+        <div id="ivCmtTagChips" style="display:flex;flex-wrap:wrap;gap:5px"></div>
+        <button class="btn-submit" style="margin-left:auto" onclick="submitIvComment(${ivId})"><i class="ti ti-send"></i> 등록</button>
+      </div>
+    </div>`;
+}
+
+function ivCmtAddTag(ivId, sel) {
+  const id = sel.value; if (!id) return;
+  const u = (window.__ivCmtCand||[]).find(x=>String(x.id)===String(id));
+  if (!u) { sel.value=''; return; }
+  window.__ivCmtTags = window.__ivCmtTags || {}; window.__ivCmtTags[ivId] = window.__ivCmtTags[ivId] || [];
+  if (!window.__ivCmtTags[ivId].some(t=>String(t.id)===String(id))) {
+    window.__ivCmtTags[ivId].push({id:u.id, name:u.name});
+  }
+  sel.value='';
+  ivRenderCmtChips(ivId);
+}
+function ivRemoveCmtTag(ivId, id) {
+  if (window.__ivCmtTags && window.__ivCmtTags[ivId])
+    window.__ivCmtTags[ivId] = window.__ivCmtTags[ivId].filter(t=>String(t.id)!==String(id));
+  ivRenderCmtChips(ivId);
+}
+function ivRenderCmtChips(ivId) {
+  const box = document.getElementById('ivCmtTagChips'); if (!box) return;
+  const tags = (window.__ivCmtTags && window.__ivCmtTags[ivId]) || [];
+  box.innerHTML = tags.map(t=>`<span style="font-size:11px;background:var(--blb);color:var(--bl);border-radius:10px;padding:2px 8px;display:inline-flex;align-items:center;gap:4px">@${esc(t.name)} <span style="cursor:pointer" onclick="ivRemoveCmtTag(${ivId},'${t.id}')">✕</span></span>`).join('');
+}
+
+async function submitIvComment(ivId) {
+  if (isTestMode && isTestMode()) { alert('⚠ 테스트 모드에서는 댓글을 작성할 수 없습니다.'); return; }
+  const inp = document.getElementById('ivCmtInput');
+  const body = (inp?.value.trim()) || '';
+  if (!body) { alert('내용을 입력해주세요.'); return; }
+  const tags = (window.__ivCmtTags && window.__ivCmtTags[ivId]) || [];
+  const { error } = await sb.from('interview_comments').insert({
+    interview_id: ivId, author_id: currentUser.id, body,
+    tagged_users: tags.length ? JSON.stringify(tags) : null,
+    created_at: new Date().toISOString()
+  });
+  if (error) { alert('등록 오류: ' + error.message); return; }
+
+  const staffNm = (curInterview && curInterview.staff) ? curInterview.staff.name : '';
+  const msg = `[면담 댓글] ${(curInterview&&curInterview.store)||''} ${staffNm} 면담에 ${currentUser.name}님이 댓글을 남겼습니다.`;
+  // 멘션 대상 우선 알림
+  const tagged = new Set();
+  for (const t of tags) {
+    if (String(t.id)===String(currentUser.id)) continue;
+    try { await createNotificationWithSlack(t.id, 'interview_new', ivId, 'interview', msg); } catch(e){}
+    tagged.add(String(t.id));
+  }
+  // 열람 권한자 전체 알림 (멘션·본인 중복 제외)
+  await notifyInterviewViewers(ivId, msg, [...tagged]);
+  updateNotifDot();
+  if (window.__ivCmtTags) window.__ivCmtTags[ivId] = [];
+  loadIvComments(ivId);
+}
+
+async function delIvComment(cmId, ivId) {
+  if (!confirm('이 댓글을 삭제하시겠습니까?')) return;
+  const { error } = await sb.from('interview_comments').delete().eq('id', cmId);
+  if (error) { alert('삭제 오류: ' + error.message); return; }
+  loadIvComments(ivId);
 }
 
 async function submitFeedback(id) {
@@ -11752,8 +11902,8 @@ async function renderInterviewNew(area, ex) {
           <input type="date" class="form-input" id="ivDate" value="${ex ? (ex.interview_date||today) : today}" max="${today}" />
         </div>
         <div class="form-row">
-          <label class="form-label">면담 유형</label>
-          <select class="form-input" id="ivType">${typeOptHtml}</select>
+          <label class="form-label">면담 유형 <span style="font-size:10px;color:var(--th)">(선택 시 양식 자동 반영)</span></label>
+          <select class="form-input" id="ivType" onchange="ivApplyTemplate()">${typeOptHtml}</select>
         </div>
         <div class="form-row">
           <label class="form-label">면담 방식</label>
@@ -11821,8 +11971,7 @@ async function submitInterview() {
     const saved = (typeof __d==='string') ? JSON.parse(__d) : __d;
     if (!editingInterviewId && saved && saved.id) {
       const __ivMsg1 = `[면담 등록] ${finalStore} · ${(await sb.from('users').select('name').eq('id',staffId).single()).data?.name||''} 면담 기록이 등록되었습니다.`;
-      await notifyCoaches(finalStore, 'interview_new', saved.id, 'interview', __ivMsg1);
-      await notifyInterviewParts(saved.id, __ivMsg1);
+      await notifyInterviewViewers(saved.id, __ivMsg1, [staffId]);
     }
   } else if (editingInterviewId) {
     const { error } = await sb.from('interviews').update({
@@ -11840,8 +11989,7 @@ async function submitInterview() {
     if (error) { alert('등록 오류: ' + error.message); return; }
     if (newIv) {
       const __ivMsg2 = `[면담 등록] ${finalStore} · ${(await sb.from('users').select('name').eq('id',staffId).single()).data?.name||''} 면담 기록이 등록되었습니다.`;
-      await notifyCoaches(finalStore, 'interview_new', newIv.id, 'interview', __ivMsg2);
-      await notifyInterviewParts(newIv.id, __ivMsg2);
+      await notifyInterviewViewers(newIv.id, __ivMsg2, [staffId]);
     }
   }
   window.__ivFilterStore = ''; window.__ivFilterStaff = '';
@@ -16852,6 +17000,26 @@ async function triggerSheetSync(scheduleId) {
 // 코치 알림 발송 헬퍼 (면담/업무신청 등록 시 호출)
 
 // ── 면담 등록 시 지정 파트 소속 직원 전체 알림 (겸직·공동 관리) ──
+
+// ── 면담 열람 권한자 전체 알림 (새 글/댓글 시) — 운영면담 포함 공용 ──
+async function notifyInterviewViewers(refId, message, excludeIds) {
+  const excl = new Set((excludeIds||[]).map(String));
+  excl.add(String(currentUser.id)); // 본인 제외
+  try { await ivLoadAllowed(); } catch(e){}
+  const { data: users } = await sb.from('users')
+    .select('id,name,is_master,is_vice_master,role,part,active').eq('active', true);
+  if (!users || !users.length) return;
+  window.__notifBatchLog = true;
+  let n = 0;
+  for (const u of users) {
+    if (excl.has(String(u.id))) continue;
+    if (!isInterviewFull(u)) continue;   // 면담 열람 권한자에게만
+    try { await createNotificationWithSlack(u.id, 'interview_new', refId, 'interview', message); n++; } catch(e){}
+  }
+  window.__notifBatchLog = false;
+  try { await logNotifSend('iv_viewer_ref', 'interview', refId, message, n); } catch(e){}
+}
+
 async function notifyInterviewParts(refId, message) {
   let parts = [];
   try {
