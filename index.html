@@ -11729,6 +11729,12 @@ async function loadIvComments(ivId) {
   // 멘션 후보 = 면담 열람 권한자 (열람 불가자에게 태그 방지)
   try { await ivLoadAllowed(); } catch(e){}
   window.__ivCmtCand = (uRes.data || []).filter(u => isInterviewFull(u));
+  // 면담 작성자도 멘션 대상에 포함 (열람 권한자가 아니어도 대화 가능하도록)
+  const __authorId = curInterview && curInterview.author_id;
+  if (__authorId) {
+    const au = (uRes.data||[]).find(u => String(u.id)===String(__authorId));
+    if (au && !window.__ivCmtCand.some(u=>String(u.id)===String(au.id))) window.__ivCmtCand.push(au);
+  }
   const nameById = {}; (uRes.data||[]).forEach(u => nameById[String(u.id)] = u.name);
 
   const one = (cm) => {
