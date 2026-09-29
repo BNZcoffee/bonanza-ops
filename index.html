@@ -4526,10 +4526,40 @@ function notifSummaryHtml(ns){
   const trs=rows.map(function(r){ return '<tr><td style="padding:8px 10px;border-top:0.5px solid var(--crd);font-size:12.5px;color:var(--tm);font-weight:600">'+r[0]+'</td><td style="padding:8px 10px;border-top:0.5px solid var(--crd);font-size:12px;color:var(--ts)">'+esc(r[1])+'</td><td style="padding:8px 10px;border-top:0.5px solid var(--crd);font-size:11px;color:var(--th)">'+esc(r[2]||'-')+'</td><td style="padding:8px 10px;border-top:0.5px solid var(--crd);white-space:nowrap">'+chip(r[3], r[4])+'</td></tr>'; }).join('');
   return '<div class="notif-card"><div class="section-label" style="margin-bottom:6px"><i class="ti ti-list-check"></i> 발송 항목 전수 목록 <span style="font-size:10px;background:var(--br);color:#fff;border-radius:4px;padding:1px 7px">저장된 설정 반영</span></div><p style="font-size:11px;color:var(--th);margin-bottom:8px">아래 <b>알림 문구·이모지 관리</b>에서 발송 여부를 바꾸고 <b>저장</b>하면 이 표가 자동으로 갱신됩니다. (모든 알림은 개인 슬랙 DM + 앱 알림)</p><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:#fff"><thead><tr style="background:var(--crm)"><th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--ts)">알림 종류</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--ts)">받는 사람</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--ts)">비고</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--ts)">상태</th></tr></thead><tbody>'+trs+'</tbody></table></div></div>';
 }
+
+// ── 직원 면담 알림 대상 파트 카드 (겸직·공동 관리 = 다중 파트 지정) ──
+function interviewNotifyCardHtml(allParts, selParts) {
+  selParts = selParts || [];
+  const chips = (allParts||[]).map(p => {
+    const on = selParts.includes(p);
+    return `<span class="ivnp-chip${on?' on':''}" data-part="${esc(p)}" onclick="this.classList.toggle('on')"
+      style="display:inline-block;cursor:pointer;user-select:none;border-radius:14px;padding:6px 14px;font-size:13px;margin:3px;border:1.5px solid ${on?'#2D6A4F':'var(--crd)'};background:${on?'#2D6A4F':'#fff'};color:${on?'#fff':'var(--ts)'}">${esc(p)}</span>`;
+  }).join('');
+  return `<div class="notif-card">
+    <div class="section-label" style="margin-bottom:6px"><i class="ti ti-message-report"></i> 직원 면담 알림 대상 파트 <span style="font-size:10px;background:var(--br);color:#fff;border-radius:4px;padding:1px 7px">총괄 전용</span></div>
+    <p style="font-size:12px;color:var(--th);margin-bottom:10px;line-height:1.6">
+      <b>직원 면담</b>이 새로 등록되면 아래에서 선택한 <b>파트 소속 직원 전체</b>에게 알림(앱+Slack DM)이 발송됩니다.<br>
+      여러 파트를 동시에 선택하면 <b>겸직·공동 관리</b>가 됩니다. (기존 매장 담당 코치 알림은 그대로 유지)
+    </p>
+    <div id="ivNotifyPartChips">${chips || '<span style="font-size:12px;color:var(--th)">등록된 파트가 없습니다. 인원 현황 → 파트 관리에서 추가하세요.</span>'}</div>
+  </div>`;
+}
+
 async function renderNotifSettings(area) {
   await loadNotifConfig();
   const { data: ns } = await sb.from('notification_settings').select('*').single();
   window.__remindTarget = ns?.remind_target || 'unread';
+  // 면담 알림 대상 파트 로드
+  let __ivAllParts = [], __ivSelParts = [];
+  try {
+    const { data: pl } = await sb.from('parts').select('name').order('sort_order');
+    __ivAllParts = (pl||[]).map(p=>p.name).filter(Boolean);
+  } catch(e){}
+  try {
+    const { data: sv } = await sb.from('app_settings').select('value').eq('key','interview_notify_parts').maybeSingle();
+    if (sv?.value) __ivSelParts = JSON.parse(sv.value);
+  } catch(e){}
+  window.__ivNotifyParts = __ivSelParts;
   area.innerHTML = `
     <div class="page-header"><div class="page-title">알림 설정</div><div class="page-sub">발송 항목·대상·상태를 한눈에 확인하고 종류별로 제어합니다</div></div>
     ${notifSummaryHtml(ns)}
@@ -4585,6 +4615,7 @@ async function renderNotifSettings(area) {
       </div>
     </div>
     ${opsNotifConfigCardHtml()}
+    ${currentUser.is_master ? interviewNotifyCardHtml(__ivAllParts, __ivSelParts) : ''}
     <div style="text-align:right">
       <button class="btn-submit" onclick="saveNotifSettings()">설정 저장</button>
     </div>`;
@@ -4610,6 +4641,17 @@ async function saveNotifSettings() {
     slack_webhook_url: document.getElementById('slackUrl').value.trim(),
     updated_at: new Date().toISOString()
   }).eq('id', ns.id);
+
+  // 면담 알림 대상 파트 저장 (총괄만)
+  if (currentUser.is_master) {
+    const chips = document.querySelectorAll('#ivNotifyPartChips .ivnp-chip.on');
+    const sel = Array.from(chips).map(c => c.dataset.part);
+    const val = JSON.stringify(sel);
+    const { data: exp } = await sb.from('app_settings').select('key').eq('key','interview_notify_parts').maybeSingle();
+    if (exp) await sb.from('app_settings').update({ value: val }).eq('key','interview_notify_parts');
+    else     await sb.from('app_settings').insert({ key:'interview_notify_parts', value: val });
+    window.__ivNotifyParts = sel;
+  }
 
   alert('설정이 저장되었습니다.');
   try{ renderNotifSettings(document.getElementById('contentArea')); }catch(e){}
@@ -6621,7 +6663,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-08-06';   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-09-29';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -11778,8 +11820,9 @@ async function submitInterview() {
     if (error) { alert((editingInterviewId?'수정':'등록')+' 오류: ' + error.message); return; }
     const saved = (typeof __d==='string') ? JSON.parse(__d) : __d;
     if (!editingInterviewId && saved && saved.id) {
-      await notifyCoaches(finalStore, 'interview_new', saved.id, 'interview',
-        `[면담 등록] ${finalStore} · ${(await sb.from('users').select('name').eq('id',staffId).single()).data?.name||''} 면담 기록이 등록되었습니다.`);
+      const __ivMsg1 = `[면담 등록] ${finalStore} · ${(await sb.from('users').select('name').eq('id',staffId).single()).data?.name||''} 면담 기록이 등록되었습니다.`;
+      await notifyCoaches(finalStore, 'interview_new', saved.id, 'interview', __ivMsg1);
+      await notifyInterviewParts(saved.id, __ivMsg1);
     }
   } else if (editingInterviewId) {
     const { error } = await sb.from('interviews').update({
@@ -11796,8 +11839,9 @@ async function submitInterview() {
     }).select().single();
     if (error) { alert('등록 오류: ' + error.message); return; }
     if (newIv) {
-      await notifyCoaches(finalStore, 'interview_new', newIv.id, 'interview',
-        `[면담 등록] ${finalStore} · ${(await sb.from('users').select('name').eq('id',staffId).single()).data?.name||''} 면담 기록이 등록되었습니다.`);
+      const __ivMsg2 = `[면담 등록] ${finalStore} · ${(await sb.from('users').select('name').eq('id',staffId).single()).data?.name||''} 면담 기록이 등록되었습니다.`;
+      await notifyCoaches(finalStore, 'interview_new', newIv.id, 'interview', __ivMsg2);
+      await notifyInterviewParts(newIv.id, __ivMsg2);
     }
   }
   window.__ivFilterStore = ''; window.__ivFilterStaff = '';
@@ -16806,6 +16850,27 @@ async function triggerSheetSync(scheduleId) {
 // ══════════════════════════════════════════════════════════
 
 // 코치 알림 발송 헬퍼 (면담/업무신청 등록 시 호출)
+
+// ── 면담 등록 시 지정 파트 소속 직원 전체 알림 (겸직·공동 관리) ──
+async function notifyInterviewParts(refId, message) {
+  let parts = [];
+  try {
+    const { data } = await sb.from('app_settings').select('value').eq('key','interview_notify_parts').maybeSingle();
+    if (data?.value) parts = JSON.parse(data.value);
+  } catch(e){}
+  if (!parts || !parts.length) return;
+  const { data: users } = await sb.from('users').select('id').eq('active', true).in('part', parts);
+  if (!users || !users.length) return;
+  window.__notifBatchLog = true;
+  let n = 0;
+  for (const u of users) {
+    if (u.id === currentUser.id) continue; // 본인 제외
+    try { await createNotificationWithSlack(u.id, 'interview_new', refId, 'interview', message); n++; } catch(e){}
+  }
+  window.__notifBatchLog = false;
+  try { await logNotifSend('iv_part_ref', 'interview', refId, message, n); } catch(e){}
+}
+
 async function notifyCoaches(store, type, refId, refType, message) {
   if (!store) return;
   const { data: cs } = await sb.from('coach_stores')
