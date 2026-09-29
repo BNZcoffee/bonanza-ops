@@ -11388,8 +11388,6 @@ async function renderInterviews(area) {
   const opts       = optsRes.data || [];
   const typeOpts   = opts.filter(o => o.category === 'type');
   const methodOpts = opts.filter(o => o.category === 'method');
-  window.__ivTemplates = {}; typeOpts.forEach(o => { if (o.template) window.__ivTemplates[o.label] = o.template; });
-  window.__ivLastTpl = ex ? null : '';
   let rows = (__ivRows).filter(r => !r.staff || r.staff.active !== false);
   const __scope = window.__ivScope || 'manager';
   if (__scope === 'ops') rows = rows.filter(r => r.author_id && ivAuthorIsFull(r));            // 운영 메뉴: 운영파트 작성분만
@@ -11711,11 +11709,23 @@ async function renderInterviewDetail(area) {
 async function loadIvComments(ivId) {
   const box = document.getElementById('ivCmtSection');
   if (!box) return;
-  const [cRes, uRes] = await Promise.all([
-    sb.from('interview_comments').select('*').eq('interview_id', ivId).order('created_at'),
-    sb.from('users').select('id,name,store,is_master,is_vice_master,role,part').eq('active', true).order('name')
-  ]);
-  const comments = cRes.data || [];
+  const uRes = await sb.from('users').select('id,name,store,is_master,is_vice_master,role,part').eq('active', true).order('name');
+  let comments = [];
+  if (window.__ivCmtSecure !== false) {
+    const { data, error } = await sb.rpc('iv_comments', { p_token: getSessionToken(), p_interview_id: ivId });
+    if (error && /does not exist|could not find|schema cache|function/i.test(error.message||'')) {
+      window.__ivCmtSecure = false;   // RPC 미배포 → 직접 조회 폴백
+    } else if (error) {
+      comments = [];
+    } else {
+      window.__ivCmtSecure = true;
+      comments = (typeof data==='string' ? JSON.parse(data||'[]') : (data||[]));
+    }
+  }
+  if (window.__ivCmtSecure === false) {
+    const cRes = await sb.from('interview_comments').select('*').eq('interview_id', ivId).order('created_at');
+    comments = cRes.data || [];
+  }
   // 멘션 후보 = 면담 열람 권한자 (열람 불가자에게 태그 방지)
   try { await ivLoadAllowed(); } catch(e){}
   window.__ivCmtCand = (uRes.data || []).filter(u => isInterviewFull(u));
@@ -11787,12 +11797,22 @@ async function submitIvComment(ivId) {
   const body = (inp?.value.trim()) || '';
   if (!body) { alert('내용을 입력해주세요.'); return; }
   const tags = (window.__ivCmtTags && window.__ivCmtTags[ivId]) || [];
-  const { error } = await sb.from('interview_comments').insert({
-    interview_id: ivId, author_id: currentUser.id, body,
-    tagged_users: tags.length ? JSON.stringify(tags) : null,
-    created_at: new Date().toISOString()
-  });
-  if (error) { alert('등록 오류: ' + error.message); return; }
+  let done = false;
+  if (window.__ivCmtSecure !== false) {
+    const { error } = await sb.rpc('iv_comment_add', { p_token: getSessionToken(), p_interview_id: ivId, p_body: body, p_tagged: tags.length ? tags : null });
+    if (error && /does not exist|could not find|schema cache|function/i.test(error.message||'')) {
+      window.__ivCmtSecure = false;
+    } else if (error) { alert('등록 오류: ' + error.message); return; }
+    else { done = true; }
+  }
+  if (!done && window.__ivCmtSecure === false) {
+    const { error } = await sb.from('interview_comments').insert({
+      interview_id: ivId, author_id: currentUser.id, body,
+      tagged_users: tags.length ? JSON.stringify(tags) : null,
+      created_at: new Date().toISOString()
+    });
+    if (error) { alert('등록 오류: ' + error.message); return; }
+  }
 
   const staffNm = (curInterview && curInterview.staff) ? curInterview.staff.name : '';
   const msg = `[면담 댓글] ${(curInterview&&curInterview.store)||''} ${staffNm} 면담에 ${currentUser.name}님이 댓글을 남겼습니다.`;
@@ -11812,8 +11832,17 @@ async function submitIvComment(ivId) {
 
 async function delIvComment(cmId, ivId) {
   if (!confirm('이 댓글을 삭제하시겠습니까?')) return;
-  const { error } = await sb.from('interview_comments').delete().eq('id', cmId);
-  if (error) { alert('삭제 오류: ' + error.message); return; }
+  if (window.__ivCmtSecure !== false) {
+    const { error } = await sb.rpc('iv_comment_del', { p_token: getSessionToken(), p_id: cmId });
+    if (error && /does not exist|could not find|schema cache|function/i.test(error.message||'')) {
+      window.__ivCmtSecure = false;
+      const r = await sb.from('interview_comments').delete().eq('id', cmId);
+      if (r.error) { alert('삭제 오류: ' + r.error.message); return; }
+    } else if (error) { alert('삭제 오류: ' + error.message); return; }
+  } else {
+    const { error } = await sb.from('interview_comments').delete().eq('id', cmId);
+    if (error) { alert('삭제 오류: ' + error.message); return; }
+  }
   loadIvComments(ivId);
 }
 
@@ -11861,6 +11890,8 @@ async function renderInterviewNew(area, ex) {
   const opts       = optsRes.data   || [];
   const typeOpts   = opts.filter(o => o.category === 'type');
   const methodOpts = opts.filter(o => o.category === 'method');
+  window.__ivTemplates = {}; typeOpts.forEach(o => { if (o.template) window.__ivTemplates[o.label] = o.template; });
+  window.__ivLastTpl = ex ? null : '';
   const stores     = [...new Set((storeRes.data||[]).map(u=>u.store).filter(Boolean))].sort();
 
   // 수정 시 기존 매장 선택
