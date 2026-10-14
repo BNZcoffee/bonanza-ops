@@ -17101,6 +17101,15 @@ async function sendTransferToSheet(rows){
 const SP_WAIT = '__WAIT__', SP_HIRE = '__HIRE__', SP_RESIGN = '__RESIGN__';
 const SP_POS_ORDER = ['코치','매니저','매니저B','바리스타','파티쉐','PT'];
 const SP_STATE_COLOR_DEFAULT = { hire:{bg:'#DBEAFE',fg:'#1E40AF'}, resign:{bg:'#FEE2E2',fg:'#B91C1C'} };
+// 직책별 기본 색상(코치·매니저·매니저B=노랑, 바리스타=흰색, 파티쉐=초록, PT=보라 텍스트. 코치는 파란 텍스트)
+const SP_POS_COLOR_DEFAULT = {
+  '코치':   { bg:'#FFF9C4', fg:'#1E40AF' },
+  '매니저': { bg:'#FFF9C4', fg:'#1F2937' },
+  '매니저B':{ bg:'#FFF9C4', fg:'#1F2937' },
+  '바리스타':{ bg:'#FFFFFF', fg:'#1F2937' },
+  '파티쉐': { bg:'#DCFCE7', fg:'#1F2937' },
+  'PT':     { bg:'#FFFFFF', fg:'#7C3AED' }
+};
 const SP_REASON_TEMPLATES = ['정기 인사이동','신규 매장 오픈 지원','퇴사 예정','직책 승진 발령','매장 간 인력 재배치','파트 지원 근무'];
 
 // 직책(position) 전용 표기 — 시스템 role 라벨('부서담당','팀원' 등)은 배제
@@ -17116,7 +17125,7 @@ function spPosRank(p){
   if (/매니저\s*b/i.test(pos)) return 2;
   const i = SP_POS_ORDER.indexOf(pos);
   if (i >= 0) return i;
-  return 98;   // 직책 미지정은 뒤로
+  return 3;   // 직책 미지정 = 바리스타(일반 실무) 서열로 간주 → PT보다 앞, 입사일순 정렬
 }
 function fmtHireShort(d){ if(!d) return ''; const s=String(d).slice(0,10).replace(/-/g,'.'); return s.length>=10 ? s.slice(2) : s; }
 
@@ -17140,6 +17149,19 @@ async function spLoadStateColors(){
     if(data && data.value){ const v=JSON.parse(data.value); if(v.hire) sc.hire=v.hire; if(v.resign) sc.resign=v.resign; } }catch(e){}
   window.__spStateColors = sc; return sc;
 }
+// 직책별 색상 로드 (app_settings.staffing_pos_colors) — 카드·범례·편집이 모두 이 값을 사용
+async function spLoadPosColors(){
+  let pc = JSON.parse(JSON.stringify(SP_POS_COLOR_DEFAULT));
+  try{ const { data } = await sb.from('app_settings').select('value').eq('key','staffing_pos_colors').maybeSingle();
+    if(data && data.value){ const v=JSON.parse(data.value); if(v && typeof v==='object'){ Object.keys(v).forEach(k=>{ if(v[k]&&v[k].bg&&v[k].fg) pc[k]=v[k]; }); } } }catch(e){}
+  window.__spPosColors = pc; return pc;
+}
+function spPosColor(pos){
+  const pc = window.__spPosColors || SP_POS_COLOR_DEFAULT;
+  if (pos && pc[pos]) return pc[pos];
+  if (pos && SP_POS_COLOR_DEFAULT[pos]) return SP_POS_COLOR_DEFAULT[pos];
+  return { bg:'#FFFFFF', fg:'#1F2937' };   // 직책 미지정 기본
+}
 
 async function renderStaffingPlan(area){
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
@@ -17147,6 +17169,7 @@ async function renderStaffingPlan(area){
   if (!eff) { area.innerHTML = '<div style="text-align:center;padding:50px;color:var(--th)">접근 권한이 없습니다. (관리자·지정 계정 전용)</div>'; return; }
   if (!roleOptions || !roleOptions.length) { try { await loadRoleOptions(); } catch(e){} }
   await spLoadStateColors();
+  await spLoadPosColors();
   const tab = (window.__spTab) || 'sim';
   const gear = (currentUser && currentUser.is_master)
     ? '<button class="btn-cancel-sm" style="font-size:11px;padding:3px 9px" onclick="spOpenPermModal()" title="열람 권한 예외 관리"><i class="ti ti-settings"></i> 권한 설정</button>' : '';
@@ -17168,19 +17191,59 @@ async function renderStaffingPlan(area){
 }
 function spSwitchTab(t){ window.__spTab = t; renderStaffingPlan(document.getElementById('contentArea')); }
 
-// 상단 색상 범례 (직위 + 상태) + [색상 편집]
+// 상단 색상 범례 (직책 + 상태) + [색상 편집] — 카드 색상과 동일한 직책 기준
 function renderStaffingLegend(){
   const sc = window.__spStateColors || SP_STATE_COLOR_DEFAULT;
-  const items = (Array.isArray(roleOptions)?roleOptions:[]).filter(r=>r&&r.label);
+  const pc = window.__spPosColors || SP_POS_COLOR_DEFAULT;
   const chip = (bg,fg,txt)=>'<span style="display:inline-flex;align-items:center;font-size:11px;font-weight:600;background:'+bg+';color:'+fg+';border:0.5px solid var(--crd);border-radius:12px;padding:2px 10px;margin:2px">'+esc(txt)+'</span>';
-  const roleChips = items.map(r=>chip(r.bg_color||'#FFFFFF', r.text_color||'#1F2937', r.label)).join('');
-  const stateChips = chip(sc.hire.bg, sc.hire.fg, '당월 입사') + chip(sc.resign.bg, sc.resign.fg, '퇴사 예정')
-    + chip('#FFF9C4', '#1E40AF', '코치');
+  const posChips = SP_POS_ORDER.map(p=>{ const c = pc[p] || SP_POS_COLOR_DEFAULT[p] || {bg:'#FFFFFF',fg:'#1F2937'}; return chip(c.bg, c.fg, p); }).join('');
+  const stateChips = chip(sc.hire.bg, sc.hire.fg, '당월 입사') + chip(sc.resign.bg, sc.resign.fg, '퇴사 예정');
   const editBtn = (currentUser && (currentUser.is_master || (typeof isAdminGroup==='function'&&isAdminGroup())))
-    ? '<button class="btn-cancel-sm" style="font-size:11px;padding:2px 9px;margin-left:6px" onclick="openRoleManager()"><i class="ti ti-palette"></i> 색상 편집</button>' : '';
+    ? '<button class="btn-cancel-sm" style="font-size:11px;padding:2px 9px;margin-left:6px" onclick="spOpenColorEdit()"><i class="ti ti-palette"></i> 색상 편집</button>' : '';
   return '<div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:8px 12px;margin-bottom:12px;display:flex;flex-wrap:wrap;align-items:center;gap:2px">'
     + '<span style="font-size:11px;color:var(--th);margin-right:6px"><i class="ti ti-palette"></i> 색상 범례</span>'
-    + roleChips + stateChips + editBtn + '</div>';
+    + posChips + stateChips + editBtn + '</div>';
+}
+// 직책/상태 색상 편집 모달 (직책 기준 — 카드·범례가 즉시 동일하게 반영)
+function spOpenColorEdit(){
+  const pc = window.__spPosColors || SP_POS_COLOR_DEFAULT;
+  const sc = window.__spStateColors || SP_STATE_COLOR_DEFAULT;
+  const ci = 'width:28px;height:24px;border:none;background:none;cursor:pointer;padding:0';
+  const posRows = SP_POS_ORDER.map((p,i)=>{ const c = pc[p] || SP_POS_COLOR_DEFAULT[p] || {bg:'#FFFFFF',fg:'#1F2937'};
+    return '<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:0.5px solid var(--crd)">'
+      + '<span style="flex:1;font-size:13px;font-weight:700;background:'+c.bg+';color:'+c.fg+';border:0.5px solid var(--crd);border-radius:6px;padding:3px 10px">'+esc(p)+'</span>'
+      + '<label style="font-size:11px;color:var(--th);display:inline-flex;align-items:center;gap:3px">배경<input type="color" id="spc-bg-'+i+'" value="'+c.bg+'" style="'+ci+'"></label>'
+      + '<label style="font-size:11px;color:var(--th);display:inline-flex;align-items:center;gap:3px">글자<input type="color" id="spc-fg-'+i+'" value="'+c.fg+'" style="'+ci+'"></label>'
+      + '</div>'; }).join('');
+  const stateRow = (lbl,id,c)=>'<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:0.5px solid var(--crd)">'
+      + '<span style="flex:1;font-size:13px;font-weight:700;background:'+c.bg+';color:'+c.fg+';border:0.5px solid var(--crd);border-radius:6px;padding:3px 10px">'+lbl+'</span>'
+      + '<label style="font-size:11px;color:var(--th);display:inline-flex;align-items:center;gap:3px">배경<input type="color" id="spc-'+id+'-bg" value="'+c.bg+'" style="'+ci+'"></label>'
+      + '<label style="font-size:11px;color:var(--th);display:inline-flex;align-items:center;gap:3px">글자<input type="color" id="spc-'+id+'-fg" value="'+c.fg+'" style="'+ci+'"></label>'
+      + '</div>';
+  const old = document.getElementById('spColorModal'); if (old) old.remove();
+  const m = document.createElement('div'); m.id='spColorModal'; m.className='modal-bg open';
+  m.innerHTML = '<div class="modal-inner" style="width:460px;max-width:95vw"><div class="modal-title"><i class="ti ti-palette"></i> 직책/상태 색상 편집</div>'
+    + '<div style="font-size:12px;color:var(--ts);margin-bottom:8px">직책·상태별 배경/글자 색을 지정하면 카드와 범례에 즉시 반영됩니다.</div>'
+    + '<div style="font-size:12px;font-weight:700;margin:6px 0">직책</div>' + posRows
+    + '<div style="font-size:12px;font-weight:700;margin:10px 0 2px">상태</div>' + stateRow('당월 입사','hire',sc.hire) + stateRow('퇴사 예정','res',sc.resign)
+    + '<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end"><button class="btn-cancel-sm" onclick="document.getElementById(\'spColorModal\').remove()">취소</button><button class="btn-submit" onclick="spSaveColors()"><i class="ti ti-device-floppy"></i> 저장</button></div></div>';
+  document.body.appendChild(m);
+}
+async function spSaveColors(){
+  const gv = (id)=>{ const el=document.getElementById(id); return el?el.value:null; };
+  const pc = {};
+  SP_POS_ORDER.forEach((p,i)=>{ pc[p] = { bg: gv('spc-bg-'+i)||'#FFFFFF', fg: gv('spc-fg-'+i)||'#1F2937' }; });
+  const sc = { hire:{ bg: gv('spc-hire-bg')||'#DBEAFE', fg: gv('spc-hire-fg')||'#1E40AF' },
+               resign:{ bg: gv('spc-res-bg')||'#FEE2E2', fg: gv('spc-res-fg')||'#B91C1C' } };
+  try{
+    await sb.from('app_settings').upsert({ key:'staffing_pos_colors', value: JSON.stringify(pc) }, { onConflict:'key' });
+    await sb.from('app_settings').upsert({ key:'staffing_state_colors', value: JSON.stringify(sc) }, { onConflict:'key' });
+    window.__spPosColors = pc; window.__spStateColors = sc;
+    const mm = document.getElementById('spColorModal'); if (mm) mm.remove();
+    const lg = document.getElementById('spLegend'); if (lg) lg.innerHTML = renderStaffingLegend();
+    if (window.__spTab !== 'coach' && window.__sp) spRenderSim();
+    alert('색상이 저장되었습니다.');
+  }catch(e){ alert('저장 오류: '+(e.message||e)); }
 }
 
 // ── 시뮬레이션 상태 초기화 ──
@@ -17241,14 +17304,13 @@ function spPerson(key){
   return null;
 }
 function spCardColor(p){
-  const base = roleColorFor(p);
+  const base = spPosColor(spPos(p));   // 직책(position) 기준 색상 — 범례/편집과 완전 일치
   let bg = base.bg, fg = base.fg;
-  if (spPos(p) === '코치') { bg = '#FFF9C4'; fg = '#1E40AF'; }   // 코치: 매니저 배경 + 파란 텍스트
   const sc = window.__spStateColors || SP_STATE_COLOR_DEFAULT;
   const ym = ((window.__sp && window.__sp.planDate) || todayKST()).slice(0,7);
   const hy = (p && p.hire_date ? String(p.hire_date) : '').slice(0,7);
-  if (p && p.retire_date) { bg = sc.resign.bg; fg = sc.resign.fg; }
-  else if (hy && hy === ym) { bg = sc.hire.bg; fg = sc.hire.fg; }
+  if (p && p.retire_date) { bg = sc.resign.bg; fg = sc.resign.fg; }   // 퇴사예정 우선
+  else if (hy && hy === ym) { bg = sc.hire.bg; fg = sc.hire.fg; }     // 당월 입사
   return { bg, fg };
 }
 function spCardHtml(key, opts){
