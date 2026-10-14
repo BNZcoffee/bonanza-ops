@@ -838,8 +838,19 @@ function renderRoleManagerModal() {
     </div>`;
   }).join('');
 
+  const __sc = (typeof window.__spStateColors!=='undefined' && window.__spStateColors) ? window.__spStateColors : { hire:{bg:'#DBEAFE',fg:'#1E40AF'}, resign:{bg:'#FEE2E2',fg:'#B91C1C'} };
   document.getElementById('roleMgrBody').innerHTML = `
     <div class="tag-list">${rows}</div>
+    <div style="border-top:0.5px solid var(--crd);margin-top:12px;padding-top:12px">
+      <div style="font-size:12px;font-weight:600;color:var(--ts);margin-bottom:7px">상태 색상 (인원 배치 카드)</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+        <label style="font-size:11px;color:var(--th);display:inline-flex;align-items:center;gap:3px">당월입사 배경<input type="color" id="sc-hire-bg" value="${__sc.hire.bg}" style="width:26px;height:22px;border:none;background:none;cursor:pointer"></label>
+        <label style="font-size:11px;color:var(--th);display:inline-flex;align-items:center;gap:3px">글자<input type="color" id="sc-hire-fg" value="${__sc.hire.fg}" style="width:26px;height:22px;border:none;background:none;cursor:pointer"></label>
+        <label style="font-size:11px;color:var(--th);display:inline-flex;align-items:center;gap:3px">퇴사예정 배경<input type="color" id="sc-res-bg" value="${__sc.resign.bg}" style="width:26px;height:22px;border:none;background:none;cursor:pointer"></label>
+        <label style="font-size:11px;color:var(--th);display:inline-flex;align-items:center;gap:3px">글자<input type="color" id="sc-res-fg" value="${__sc.resign.fg}" style="width:26px;height:22px;border:none;background:none;cursor:pointer"></label>
+        <button class="btn-cancel-sm" style="font-size:11px" onclick="saveStateColors()"><i class="ti ti-check"></i> 상태색 저장</button>
+      </div>
+    </div>
     <div style="border-top:0.5px solid var(--crd);margin-top:12px;padding-top:12px">
       <div style="font-size:12px;font-weight:600;color:var(--ts);margin-bottom:7px">새 직위 추가</div>
       <input class="form-input" id="newRoleLabel" placeholder="직위 이름 (예: 슈퍼바이저)" style="margin-bottom:6px"/>
@@ -1899,7 +1910,9 @@ function goPage(page) {
   } else if (page === 'handoverDetail') {
     renderHandoverDetail(area);
   } else if (page === 'staffingPlan') {
-    if (!(typeof isAdminGroup==='function' && isAdminGroup())) { area.innerHTML = '<div style="text-align:center;padding:50px;color:var(--th)">접근 권한이 없습니다. (관리자 전용)</div>'; return; }
+    // 1차 게이트: 관리자이거나 지정(추가 허용) 계정. 세부 예외는 renderStaffingPlan(spLoadPerm) 에서 재검증.
+    const __base = (typeof isAdminGroup==='function') && isAdminGroup();
+    if (!(__base || window.__spCanSee)) { area.innerHTML = '<div style="text-align:center;padding:50px;color:var(--th)">접근 권한이 없습니다. (관리자·지정 계정 전용)</div>'; return; }
     const nb = document.getElementById('nav-staffingPlan'); if (nb) nb.classList.add('active');
     renderStaffingPlan(area);
   }
@@ -9429,6 +9442,8 @@ function applyMenuPermissions() {
     show('nav-staffingPlan', (typeof isAdminGroup==='function') && isAdminGroup());  // 인원 배치 관리: 관리자(총괄·부총괄·운영·인사)만
   };
   __applyOpsIv();
+  // 인원 배치 관리: 지정 계정(추가 허용)·제외 계정 반영 (비동기)
+  if(typeof spLoadPerm==='function'){ spLoadPerm().then(function(eff){ const el=document.getElementById('nav-staffingPlan'); if(el) el.style.display=eff?'':'none'; }); }
   if(window.__ops && !window.__ops.__allowedLoaded && typeof opsLoadAllowed==='function'){ opsLoadAllowed().then(function(){ window.__ops.__allowedLoaded=true; __applyOpsIv(); }); }
   if(typeof ivLoadAllowed==='function'){ ivLoadAllowed().then(function(){ __applyOpsIv(); const el=document.getElementById('nav-interviews'); if(el){ const __f=(typeof isInterviewFull==='function')&&isInterviewFull(); el.style.display=(hasPerm('interview_read') || __f)?'':'none'; } }); }
   // 업무 신청 섹션
@@ -16959,6 +16974,18 @@ async function saveRoleColor(roleKey){
   renderRoleManagerModal();
   if (currentPage === 'staff') renderStaff(document.getElementById('contentArea'));
 }
+async function saveStateColors(){
+  const sc = {
+    hire:   { bg: document.getElementById('sc-hire-bg')?.value || '#DBEAFE', fg: document.getElementById('sc-hire-fg')?.value || '#1E40AF' },
+    resign: { bg: document.getElementById('sc-res-bg')?.value  || '#FEE2E2', fg: document.getElementById('sc-res-fg')?.value  || '#B91C1C' }
+  };
+  try{
+    await sb.from('app_settings').upsert({ key:'staffing_state_colors', value: JSON.stringify(sc) }, { onConflict:'key' });
+    window.__spStateColors = sc;
+    alert('상태 색상이 저장되었습니다.');
+    const lg = document.getElementById('spLegend'); if (lg && typeof renderStaffingLegend==='function') lg.innerHTML = renderStaffingLegend();
+  }catch(e){ alert('저장 오류: '+(e.message||e)); }
+}
 
 // ── 공통: 매장 목록 로드 ──
 async function spLoadStores(){
@@ -17037,27 +17064,20 @@ async function confirmTransfer(){
   }
   if (!changes.length) { alert('변경된 항목이 없습니다.'); return; }
   const btn = document.getElementById('tfConfirmBtn'); if (btn){ btn.disabled = true; btn.innerHTML = '처리 중...'; }
-  // 1) users 갱신
-  let okCnt = 0;
-  for (const c of changes){
-    const upd = {};
-    if (c.newStore) upd.store = c.newStore;
-    if (c.newPos)   upd.position = c.newPos;
-    if (!Object.keys(upd).length) continue;
-    const { error } = await sb.from('users').update(upd).eq('id', c.u.id);
-    if (!error) okCnt++;
-  }
-  // 2) personnel_transfers 기록 (RPC) + 3) 구글시트 웹훅 일괄 발송
+  // ⚠ 안전장치: 인사이동 발령은 '기록 전용'. users 테이블의 role(권한)·position(직책)·store(매장)는
+  //   절대 자동으로 변경하지 않는다. 실제 변경은 [직원 정보 수정]에서 수동으로만 진행.
+  //   모달에서 고른 '변경 후 매장/직위' 값은 personnel_transfers 기록 + 구글시트 log_transfer 전송용으로만 사용.
   const rows = changes.map(c => ({
     user_id: String(c.u.id), user_name: c.u.name || '',
     old_store: c.oldStore, new_store: c.effStore,
     old_role: c.oldPos, new_role: c.effPos,
     transfer_date: c.tDate
   }));
-  try { await sb.rpc('pt_log', { p_token: getSessionToken(), p_rows: rows }); } catch(e){ console.warn('[pt_log]', e); }
+  let logged = false;
+  try { const { data } = await sb.rpc('pt_log', { p_token: getSessionToken(), p_rows: rows }); logged = !!(data && data.ok); } catch(e){ console.warn('[pt_log]', e); }
   try { await sendTransferToSheet(rows); } catch(e){ console.warn('[sheet]', e); }
   const mm = document.getElementById('transferModal'); if (mm) mm.remove();
-  alert('발령 처리 완료: '+okCnt+'명\n이동발령 히스토리(DB·구글시트)에 기록되었습니다.');
+  alert('발령 기록이 저장되었습니다. ('+rows.length+'건)\n(실제 직책/권한 변경은 계정 정보 수정에서 별도로 진행해 주세요)');
   window.__selStaff = new Set();
   renderStaff(document.getElementById('contentArea'));
 }
@@ -17076,20 +17096,63 @@ async function sendTransferToSheet(rows){
 }
 
 // ══════════════════════════════════════════════════════════
-// [섹션 5] 인원 배치 관리 (Staffing Plan)
+// [섹션 5 / v2] 인원 배치 관리 (Staffing Plan) — 9대 고도화
 // ══════════════════════════════════════════════════════════
 const SP_WAIT = '__WAIT__', SP_HIRE = '__HIRE__', SP_RESIGN = '__RESIGN__';
+const SP_POS_ORDER = ['매니저','매니저B','바리스타','파티쉐','팀원','PT'];
+const SP_STATE_COLOR_DEFAULT = { hire:{bg:'#DBEAFE',fg:'#1E40AF'}, resign:{bg:'#FEE2E2',fg:'#B91C1C'} };
+
+function spPosRank(p){
+  const pos = (typeof userPosition==='function'?userPosition(p):'') || '';
+  const i = SP_POS_ORDER.indexOf(pos);
+  if (i >= 0) return i;
+  if (/매니저\s*b/i.test(pos)) return 1;
+  if (p && p.employment_type === 'parttime') return SP_POS_ORDER.indexOf('PT');
+  return 4;
+}
+function fmtHireShort(d){ if(!d) return ''; const s=String(d).slice(0,10).replace(/-/g,'.'); return s.length>=10 ? s.slice(2) : s; }
+
+// 열람 권한 로드(총괄·부총괄·운영·인사 + 지정계정 − 제외계정)
+async function spLoadPerm(){
+  let allowed=[], excluded=[];
+  try{
+    const { data } = await sb.from('app_settings').select('key,value').in('key',['staffing_allowed_users','staffing_excluded_users']);
+    (data||[]).forEach(r=>{ try{ const v=JSON.parse(r.value||'[]'); if(r.key==='staffing_allowed_users') allowed=Array.isArray(v)?v:[]; else excluded=Array.isArray(v)?v:[]; }catch(e){} });
+  }catch(e){}
+  window.__spAllowed=allowed.map(String); window.__spExcluded=excluded.map(String);
+  const me = currentUser?String(currentUser.id):'';
+  const base = (typeof isAdminGroup==='function') && isAdminGroup();
+  const eff = (base || window.__spAllowed.includes(me)) && !window.__spExcluded.includes(me);
+  window.__spCanSee = !!eff;
+  return eff;
+}
+async function spLoadStateColors(){
+  let sc = JSON.parse(JSON.stringify(SP_STATE_COLOR_DEFAULT));
+  try{ const { data } = await sb.from('app_settings').select('value').eq('key','staffing_state_colors').maybeSingle();
+    if(data && data.value){ const v=JSON.parse(data.value); if(v.hire) sc.hire=v.hire; if(v.resign) sc.resign=v.resign; } }catch(e){}
+  window.__spStateColors = sc; return sc;
+}
 
 async function renderStaffingPlan(area){
   area.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
+  const eff = await spLoadPerm();
+  if (!eff) { area.innerHTML = '<div style="text-align:center;padding:50px;color:var(--th)">접근 권한이 없습니다. (관리자·지정 계정 전용)</div>'; return; }
   if (!roleOptions || !roleOptions.length) { try { await loadRoleOptions(); } catch(e){} }
+  await spLoadStateColors();
   const tab = (window.__spTab) || 'sim';
+  const gear = (currentUser && currentUser.is_master)
+    ? '<button class="btn-cancel-sm" style="font-size:11px;padding:3px 9px" onclick="spOpenPermModal()" title="열람 권한 예외 관리"><i class="ti ti-settings"></i> 권한 설정</button>' : '';
   area.innerHTML = ''
     + '<div class="page-header"><div class="page-title">인원 배치 관리</div>'
-    + '<div class="page-sub">직원 배치 시뮬레이션 · 발령 공지 생성 · 코치 관할 관리 (관리자 전용)</div></div>'
+    +   '<div class="page-sub">직원 배치 시뮬레이션 · 발령 공지 생성 · 코치 관할 관리</div></div>'
+    + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#F5F7FA;border:0.5px solid var(--crd);border-radius:8px;padding:7px 12px;margin-bottom:10px">'
+    +   '<span style="font-size:12px;color:var(--ts)"><i class="ti ti-eye"></i> 열람 권한: <b>총괄 · 부총괄 · 운영팀 · 인사팀</b> (+ 지정 계정)</span>'
+    +   '<span style="margin-left:auto">'+gear+'</span>'
+    + '</div>'
+    + '<div id="spLegend">'+renderStaffingLegend()+'</div>'
     + '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">'
-    + '<button class="staff-tab'+(tab==='sim'?' active':'')+'" onclick="spSwitchTab(\'sim\')"><i class="ti ti-layout-grid"></i> 직원 배치 시뮬레이션</button>'
-    + '<button class="staff-tab'+(tab==='coach'?' active':'')+'" onclick="spSwitchTab(\'coach\')"><i class="ti ti-map-pin"></i> 코치 관할 관리</button>'
+    +   '<button class="staff-tab'+(tab==='sim'?' active':'')+'" onclick="spSwitchTab(\'sim\')"><i class="ti ti-layout-grid"></i> 직원 배치 시뮬레이션</button>'
+    +   '<button class="staff-tab'+(tab==='coach'?' active':'')+'" onclick="spSwitchTab(\'coach\')"><i class="ti ti-map-pin"></i> 코치 관할 관리</button>'
     + '</div>'
     + '<div id="spBody"></div>';
   if (tab === 'coach') { renderCoachVisual(document.getElementById('spBody')); }
@@ -17097,28 +17160,50 @@ async function renderStaffingPlan(area){
 }
 function spSwitchTab(t){ window.__spTab = t; renderStaffingPlan(document.getElementById('contentArea')); }
 
+// 상단 색상 범례 (직위 + 상태) + [색상 편집]
+function renderStaffingLegend(){
+  const sc = window.__spStateColors || SP_STATE_COLOR_DEFAULT;
+  const items = (Array.isArray(roleOptions)?roleOptions:[]).filter(r=>r&&r.label);
+  const chip = (bg,fg,txt)=>'<span style="display:inline-flex;align-items:center;font-size:11px;font-weight:600;background:'+bg+';color:'+fg+';border:0.5px solid var(--crd);border-radius:12px;padding:2px 10px;margin:2px">'+esc(txt)+'</span>';
+  const roleChips = items.map(r=>chip(r.bg_color||'#FFFFFF', r.text_color||'#1F2937', r.label)).join('');
+  const stateChips = chip(sc.hire.bg, sc.hire.fg, '당월 입사') + chip(sc.resign.bg, sc.resign.fg, '퇴사 예정')
+    + chip('#FFF9C4', '#1E40AF', '코치');
+  const editBtn = (currentUser && (currentUser.is_master || (typeof isAdminGroup==='function'&&isAdminGroup())))
+    ? '<button class="btn-cancel-sm" style="font-size:11px;padding:2px 9px;margin-left:6px" onclick="openRoleManager()"><i class="ti ti-palette"></i> 색상 편집</button>' : '';
+  return '<div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:8px 12px;margin-bottom:12px;display:flex;flex-wrap:wrap;align-items:center;gap:2px">'
+    + '<span style="font-size:11px;color:var(--th);margin-right:6px"><i class="ti ti-palette"></i> 색상 범례</span>'
+    + roleChips + stateChips + editBtn + '</div>';
+}
+
 // ── 시뮬레이션 상태 초기화 ──
 async function spInit(){
   const body = document.getElementById('spBody');
   if (body) body.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 배치 불러오는 중...</div>';
   const planDate = (window.__sp && window.__sp.planDate) || todayKST();
-  const [uRes, stores] = await Promise.all([
+  const [uRes, soRes, txRes] = await Promise.all([
     sb.from('users').select('id,name,store,role,position,employment_type,hire_date,retire_date,active').eq('active', true).neq('role','admin').order('store'),
-    spLoadStores()
+    sb.from('store_options').select('name,sort_order').order('sort_order'),
+    (async()=>{ try{ return await sb.rpc('pt_list',{p_token:getSessionToken(),p_limit:2000}); }catch(e){ return {data:[]}; } })()
   ]);
-  const users = uRes.data || [];
+  // 본사 제외
+  const users = (uRes.data||[]).filter(u => (u.store||'') !== '본사');
+  let stores = (soRes.data||[]).map(s=>s.name).filter(n=>n && n!=='본사');
   const today = todayKST();
-  // 기본 배치: 재직자는 소속 매장 / 퇴사예정(retire_date 존재&미래)은 퇴사예정 섹션
+  // 이동 이력 카운트
+  const txCount = {};
+  (txRes && txRes.data ? txRes.data : []).forEach(t=>{ if(t && t.user_id!=null){ const k=String(t.user_id); txCount[k]=(txCount[k]||0)+1; } });
+  // 기본 배치
   const place = {};
   users.forEach(u => {
     if (u.retire_date && String(u.retire_date) >= today) place[u.id] = SP_RESIGN;
-    else place[u.id] = u.store || SP_WAIT;
+    else place[u.id] = (stores.includes(u.store) ? u.store : (u.store ? u.store : SP_WAIT));
   });
-  // 기본 T.O = 현재 매장별 재직 인원수
+  // 매장 목록에 없는(직원 소속) 매장도 행으로 추가 (본사 제외)
+  users.forEach(u=>{ if(u.store && u.store!=='본사' && !stores.includes(u.store)) stores.push(u.store); });
   const storeTo = {};
   stores.forEach(s => { storeTo[s] = users.filter(u => (u.store||'') === s).length; });
-  window.__sp = { planDate, users, stores, place, storeTo, dummies: [], planId: null, toEdit: false, title: '' };
-  // 저장된 계획 불러오기
+  window.__sp = { planDate, users, stores, place, storeTo, dummies: [], planId: null, toEdit: false, txCount, title: '' };
+  // 저장된 계획 로드
   try {
     const { data } = await sb.rpc('sp_get', { p_token: getSessionToken(), p_plan_date: planDate });
     if (data && (data.placements || data.store_to)) {
@@ -17126,57 +17211,71 @@ async function spInit(){
       window.__sp.title = data.title || '';
       const pl = data.placements || {};
       const assign = pl.assign || {};
+      if (Array.isArray(pl.rows) && pl.rows.length) window.__sp.stores = pl.rows.filter(s=>s!=='본사');
       Object.keys(assign).forEach(k => { window.__sp.place[k] = assign[k]; });
       window.__sp.dummies = Array.isArray(pl.dummies) ? pl.dummies : [];
-      if (data.store_to && typeof data.store_to === 'object') {
-        Object.keys(data.store_to).forEach(s => { window.__sp.storeTo[s] = data.store_to[s]; });
-      }
+      if (data.store_to && typeof data.store_to === 'object') { window.__sp.storeTo = {}; Object.keys(data.store_to).forEach(s => { window.__sp.storeTo[s] = data.store_to[s]; }); }
+      // 저장 당시 없던 매장행 보강
+      window.__sp.stores.forEach(s=>{ if(window.__sp.storeTo[s]==null) window.__sp.storeTo[s]=0; });
     }
   } catch(e){ console.warn('[sp_get]', e); }
   spRenderSim();
 }
 
-// ── 사람(실제/더미) 조회 ──
 function spPerson(key){
   const sp = window.__sp;
   const u = sp.users.find(x => String(x.id) === String(key));
   if (u) return u;
   const d = (sp.dummies||[]).find(x => String(x.id) === String(key));
-  if (d) return { id:d.id, name:d.name, role:'', position:d.position, employment_type:(d.position==='PT'?'parttime':''), hire_date:(d.kind==='hire'?sp.planDate:''), retire_date:'', __dummy:true, __kind:d.kind };
+  if (d) return { id:d.id, name:d.name, role:'', position:d.position, employment_type:(d.position==='PT'?'parttime':''),
+    hire_date:(d.kind==='hire'?(d.date||sp.planDate):''), retire_date:(d.kind==='resign'?(d.date||sp.planDate):''),
+    __dummy:true, __kind:d.kind, __status:d.status||'' };
   return null;
 }
 function spCardColor(p){
   const base = roleColorFor(p);
   let bg = base.bg, fg = base.fg;
+  const sc = window.__spStateColors || SP_STATE_COLOR_DEFAULT;
   const ym = ((window.__sp && window.__sp.planDate) || todayKST()).slice(0,7);
   const hy = (p && p.hire_date ? String(p.hire_date) : '').slice(0,7);
-  if (p && p.retire_date) { bg = '#FEE2E2'; fg = '#B91C1C'; }
-  else if (hy && hy === ym) { bg = '#DBEAFE'; fg = '#1E40AF'; }
+  if (p && p.retire_date) { bg = sc.resign.bg; fg = sc.resign.fg; }
+  else if (hy && hy === ym) { bg = sc.hire.bg; fg = sc.hire.fg; }
   return { bg, fg };
 }
 function spCardHtml(key){
   const p = spPerson(key); if (!p) return '';
   const c = spCardColor(p);
   const pos = (typeof userPosition==='function'?userPosition(p):'') || p.role || '';
+  const hire = fmtHireShort(p.hire_date);
   const dummyTag = p.__dummy ? '<i class="ti ti-user-question" style="font-size:11px;opacity:.7"></i> ' : '';
-  const delBtn = p.__dummy ? '<span onclick="event.stopPropagation();spDelDummy(\''+p.id+'\')" style="cursor:pointer;color:#B91C1C;font-weight:700;margin-left:4px" title="삭제">✕</span>' : '';
+  const delBtn = p.__dummy ? '<span onclick="event.stopPropagation();spDelDummy(\''+p.id+'\')" style="cursor:pointer;color:#B91C1C;font-weight:700;margin-left:2px" title="삭제">✕</span>' : '';
+  const hist = (!p.__dummy && window.__sp.txCount[String(p.id)]>0)
+    ? '<span onclick="event.stopPropagation();spOpenStaffHistory(\''+p.id+'\')" title="이동 이력 '+window.__sp.txCount[String(p.id)]+'건" style="cursor:pointer;color:#B45309;font-size:11px;margin-left:2px">↔</span>' : '';
+  const sub = hire ? '<span style="font-size:9px;opacity:.7;font-weight:500">'+hire+'</span>' : '';
   return '<div class="sp-card" draggable="true" ondragstart="spDragStart(event,\''+p.id+'\')" '
-    + 'style="display:inline-flex;align-items:center;gap:4px;background:'+c.bg+';color:'+c.fg+';border:0.5px solid rgba(0,0,0,.12);border-radius:8px;padding:5px 9px;margin:3px;font-size:12px;font-weight:600;cursor:grab;white-space:nowrap">'
-    + dummyTag + esc(p.name) + '<span style="font-size:10px;opacity:.75;font-weight:500">'+esc(pos)+'</span>' + delBtn + '</div>';
+    + 'style="display:inline-flex;flex-direction:column;align-items:flex-start;background:'+c.bg+';color:'+c.fg+';border:0.5px solid rgba(0,0,0,.12);border-radius:8px;padding:4px 8px;margin:3px;font-size:12px;font-weight:600;cursor:grab;white-space:nowrap">'
+    + '<span style="display:inline-flex;align-items:center;gap:3px">'+dummyTag+esc(p.name)+'<span style="font-size:10px;opacity:.75;font-weight:500">'+esc(pos)+'</span>'+hist+delBtn+'</span>'
+    + sub + '</div>';
 }
 
 function spKeysIn(bucket){
   const sp = window.__sp; const keys = [];
   Object.keys(sp.place).forEach(k => { if (sp.place[k] === bucket) keys.push(k); });
-  // 정렬: 직책 순서(positionRank)
-  keys.sort((a,b)=>{ const pa=spPerson(a), pb=spPerson(b); const ra=(typeof positionRank==='function'&&pa)?positionRank(pa):5; const rb=(typeof positionRank==='function'&&pb)?positionRank(pb):5; if(ra!==rb) return ra-rb; return String((pa&&pa.name)||'').localeCompare(String((pb&&pb.name)||'')); });
+  keys.sort((a,b)=>{
+    const pa=spPerson(a), pb=spPerson(b);
+    const ra=spPosRank(pa||{}), rb=spPosRank(pb||{});
+    if (ra!==rb) return ra-rb;
+    const ha=(pa&&pa.hire_date)?String(pa.hire_date):'9999', hb=(pb&&pb.hire_date)?String(pb.hire_date):'9999';
+    if (ha!==hb) return ha<hb?-1:1;   // 입사일 빠른 순(오래된 직원 좌측)
+    return String((pa&&pa.name)||'').localeCompare(String((pb&&pb.name)||''));
+  });
   return keys;
 }
 
 function spRenderSim(){
   const sp = window.__sp; if (!sp) return;
   const body = document.getElementById('spBody'); if (!body) return;
-  // 매장 행
+  const q = (s)=>String(s).replace(/'/g,"\\'");
   const rowsHtml = sp.stores.map(store => {
     const keys = spKeysIn(store);
     const actual = keys.length;
@@ -17185,105 +17284,130 @@ function spRenderSim(){
     const diffStr = diff === 0 ? '0' : (diff > 0 ? '+'+diff : String(diff));
     const diffColor = diff > 0 ? '#1E40AF' : (diff < 0 ? '#B91C1C' : 'var(--th)');
     const cards = keys.map(spCardHtml).join('');
-    // 빈 슬롯 (actual < to 일 때 나머지 표시)
     let empties = '';
-    if (actual < to) { for (let i=0;i<(to-actual);i++) empties += '<span style="display:inline-flex;align-items:center;justify-content:center;width:62px;height:30px;margin:3px;border:1px dashed var(--crd);border-radius:8px;color:var(--th);font-size:10px">빈자리</span>'; }
+    if (actual < to) { for (let i=0;i<(to-actual);i++) empties += '<span style="display:inline-flex;align-items:center;justify-content:center;width:62px;height:34px;margin:3px;border:1px dashed var(--crd);border-radius:8px;color:var(--th);font-size:10px">빈자리</span>'; }
     const toCtrl = sp.toEdit
-      ? '<span style="display:inline-flex;align-items:center;gap:3px;margin-left:6px"><button onclick="spSetTO(\''+esc(store).replace(/'/g,"\\'")+'\',-1)" style="width:20px;height:20px;border:0.5px solid var(--crd);border-radius:5px;background:#fff;cursor:pointer">−</button><span style="min-width:16px;text-align:center;font-weight:700">'+to+'</span><button onclick="spSetTO(\''+esc(store).replace(/'/g,"\\'")+'\',1)" style="width:20px;height:20px;border:0.5px solid var(--crd);border-radius:5px;background:#fff;cursor:pointer">+</button></span>'
+      ? '<span style="display:inline-flex;align-items:center;gap:3px;margin-left:6px"><button onclick="spSetTO(\''+q(store)+'\',-1)" style="width:20px;height:20px;border:0.5px solid var(--crd);border-radius:5px;background:#fff;cursor:pointer">−</button><span style="min-width:16px;text-align:center;font-weight:700">'+to+'</span><button onclick="spSetTO(\''+q(store)+'\',1)" style="width:20px;height:20px;border:0.5px solid var(--crd);border-radius:5px;background:#fff;cursor:pointer">+</button></span>'
       : '';
-    return '<div class="sp-row" ondragover="event.preventDefault()" ondrop="spDrop(event,\''+esc(store).replace(/'/g,"\\'")+'\')" '
-      + 'style="display:flex;align-items:flex-start;gap:10px;border:0.5px solid var(--crd);border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#fff">'
+    const delRow = sp.toEdit ? '<button onclick="spDelStore(\''+q(store)+'\')" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:12px;margin-left:4px" title="매장 행 삭제"><i class="ti ti-trash"></i></button>' : '';
+    return '<div class="sp-row" ondragover="event.preventDefault()" ondrop="spDrop(event,\''+q(store)+'\')" '
+      + 'style="display:flex;align-items:flex-start;gap:8px;border:0.5px solid var(--crd);border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#fff">'
+      + '<span draggable="true" ondragstart="spRowDragStart(event,\''+q(store)+'\')" title="드래그로 순서 변경" style="cursor:grab;color:var(--th);font-size:14px;padding-top:2px">⠿</span>'
       + '<div style="min-width:120px;flex-shrink:0">'
-      +   '<div style="font-size:13px;font-weight:700">'+esc(store)+'</div>'
+      +   '<div style="font-size:13px;font-weight:700">'+esc(store)+delRow+'</div>'
       +   '<div style="font-size:11px;color:var(--th);white-space:nowrap">'+actual+' / '+to+' <span style="color:'+diffColor+';font-weight:600">('+diffStr+')</span>'+toCtrl+'</div>'
       + '</div>'
-      + '<div style="flex:1;display:flex;flex-wrap:wrap;align-items:center;min-height:38px">'+cards+empties+'</div>'
+      + '<div style="flex:1;display:flex;flex-wrap:wrap;align-items:center;min-height:40px">'+cards+empties+'</div>'
       + '</div>';
   }).join('');
 
-  // 대기 패널
-  const panelSection = (title, bucket, icon, hint) => {
+  const panelSection = (title, bucket, icon, addBtn) => {
     const keys = spKeysIn(bucket);
-    const cards = keys.map(spCardHtml).join('') || '<span style="font-size:11px;color:var(--th)">'+hint+'</span>';
+    const cards = keys.map(spCardHtml).join('') || '<span style="font-size:11px;color:var(--th)">여기로 드래그</span>';
     return '<div class="sp-row" ondragover="event.preventDefault()" ondrop="spDrop(event,\''+bucket+'\')" style="border:0.5px solid var(--crd);border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#fff">'
-      + '<div style="font-size:12px;font-weight:700;margin-bottom:6px"><i class="ti '+icon+'"></i> '+title+' ('+keys.length+')</div>'
+      + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:12px;font-weight:700"><i class="ti '+icon+'"></i> '+title+' ('+keys.length+')</span>'+addBtn+'</div>'
       + '<div style="display:flex;flex-wrap:wrap;align-items:center;min-height:32px">'+cards+'</div></div>';
   };
+  const addResign = '<button class="btn-cancel-sm" style="font-size:10px;padding:2px 7px" onclick="spAddDummyTo(\''+SP_RESIGN+'\')"><i class="ti ti-plus"></i> 대상자 추가</button>';
+  const addHire   = '<button class="btn-cancel-sm" style="font-size:10px;padding:2px 7px" onclick="spAddDummyTo(\''+SP_HIRE+'\')"><i class="ti ti-plus"></i> 대상자 추가</button>';
 
   body.innerHTML = ''
-    + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
     +   '<label style="font-size:12px;color:var(--ts)">작성 기준일 <input type="date" id="spPlanDate" value="'+sp.planDate+'" onchange="spChangeDate(this.value)" style="border:0.5px solid var(--crd);border-radius:7px;padding:5px 8px;font-size:12px"></label>'
     +   '<button class="btn-cancel-sm" style="font-size:12px'+(sp.toEdit?';background:var(--brm);color:#fff;border-color:var(--brm)':'')+'" onclick="spToggleTOEdit()"><i class="ti ti-adjustments"></i> T.O 편집</button>'
+    +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spAddEmptyRow()"><i class="ti ti-row-insert-bottom"></i> 빈 매장 행</button>'
     +   '<button class="btn-cancel-sm" style="font-size:12px;color:var(--gn);border-color:var(--gn)" onclick="spSave()"><i class="ti ti-device-floppy"></i> 저장</button>'
+    +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spOpenPlanList()"><i class="ti ti-history"></i> 저장된 계획</button>'
     +   '<button class="btn-new" style="background:var(--brm);font-size:12px" onclick="spOpenAnnounce()"><i class="ti ti-file-text"></i> 발령 공지 생성</button>'
-    +   '<span style="font-size:11px;color:var(--th);margin-left:auto"><i class="ti ti-shield-check"></i> 드래그 이동은 시뮬레이션일 뿐 실제 직원정보를 바꾸지 않습니다. (저장 시 계획만 기록)</span>'
+    +   '<span style="font-size:11px;color:var(--th);margin-left:auto"><i class="ti ti-shield-check"></i> 드래그는 시뮬레이션일 뿐 실제 직원정보를 바꾸지 않습니다.</span>'
     + '</div>'
     + '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">'
     +   '<div style="flex:1;min-width:320px">'+rowsHtml+'</div>'
     +   '<div style="width:300px;flex-shrink:0">'
-    +     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:13px;font-weight:700">대기 패널</span>'
-    +       '<button class="btn-cancel-sm" style="font-size:11px" onclick="spAddDummy()"><i class="ti ti-plus"></i> 가상 인원</button></div>'
-    +     panelSection('미배치 인원', SP_WAIT, 'ti-user-off', '여기로 드래그')
-    +     panelSection('퇴사 예정', SP_RESIGN, 'ti-user-minus', '없음')
-    +     panelSection('채용 예정', SP_HIRE, 'ti-user-plus', '가상 인원 추가')
+    +     '<div style="font-size:13px;font-weight:700;margin-bottom:6px">대기 패널</div>'
+    +     panelSection('미배치 인원', SP_WAIT, 'ti-user-off', '')
+    +     panelSection('퇴사 예정', SP_RESIGN, 'ti-user-minus', addResign)
+    +     panelSection('채용 예정', SP_HIRE, 'ti-user-plus', addHire)
     +   '</div>'
     + '</div>';
 }
 
-function spDragStart(e, key){ window.__spDrag = key; try{ e.dataTransfer.setData('text/plain', key); e.dataTransfer.effectAllowed='move'; }catch(_){} }
-function spDrop(e, bucket){ e.preventDefault(); const key = window.__spDrag || (e.dataTransfer && e.dataTransfer.getData('text/plain')); if (!key) return; window.__sp.place[key] = bucket; window.__spDrag = null; spRenderSim(); }
+function spDragStart(e, key){ window.__spDrag = key; window.__spRowDrag = null; try{ e.dataTransfer.setData('text/plain', key); e.dataTransfer.effectAllowed='move'; }catch(_){} }
+function spRowDragStart(e, store){ window.__spRowDrag = store; window.__spDrag = null; try{ e.dataTransfer.setData('text/plain', store); e.dataTransfer.effectAllowed='move'; }catch(_){} e.stopPropagation(); }
+function spDrop(e, bucket){
+  e.preventDefault();
+  if (window.__spRowDrag){ spReorderStore(window.__spRowDrag, bucket); window.__spRowDrag = null; return; }
+  const key = window.__spDrag || (e.dataTransfer && e.dataTransfer.getData('text/plain')); if (!key) return;
+  window.__sp.place[key] = bucket; window.__spDrag = null; spRenderSim();
+}
+function spReorderStore(src, dest){
+  const sp = window.__sp;
+  if (![SP_WAIT,SP_HIRE,SP_RESIGN].includes(dest) && src !== dest){
+    const arr = sp.stores.filter(s=>s!==src);
+    const di = arr.indexOf(dest);
+    if (di < 0) { arr.push(src); } else { arr.splice(di, 0, src); }
+    sp.stores = arr;
+    spRenderSim();
+  }
+}
 function spSetTO(store, delta){ const sp = window.__sp; sp.storeTo[store] = Math.max(0, (sp.storeTo[store]||0) + delta); spRenderSim(); }
 function spToggleTOEdit(){ window.__sp.toEdit = !window.__sp.toEdit; spRenderSim(); }
 function spChangeDate(v){ if (!v) return; window.__sp.planDate = v; spInit(); }
-function spAddDummy(){
-  const name = prompt('가상 인원 이름을 입력하세요 (시뮬레이션 전용):', '신규');
-  if (name === null) return;
-  const nm = name.trim() || '신규';
-  const pos = prompt('직책 (매니저/매니저B/바리스타/파티쉐/팀원/PT 중 입력, 생략 가능):', '바리스타') || '';
+function spAddEmptyRow(){
+  const name = prompt('추가할 매장(행) 이름을 입력하세요:'); if (name === null) return;
+  const nm = name.trim(); if (!nm) return;
+  if (nm === '본사') { alert('본사는 추가할 수 없습니다.'); return; }
+  if (window.__sp.stores.includes(nm)) { alert('이미 있는 매장입니다.'); return; }
+  window.__sp.stores.push(nm); if (window.__sp.storeTo[nm]==null) window.__sp.storeTo[nm]=0; spRenderSim();
+}
+function spDelStore(store){
+  const sp = window.__sp;
+  const occupied = spKeysIn(store).length;
+  if (occupied > 0 && !confirm("'"+store+"' 행에 배치된 "+occupied+"명은 미배치로 이동됩니다. 행을 삭제할까요?")) return;
+  Object.keys(sp.place).forEach(k => { if (sp.place[k] === store) sp.place[k] = SP_WAIT; });
+  sp.stores = sp.stores.filter(s => s !== store); delete sp.storeTo[store];
+  spRenderSim();
+}
+function spAddDummyTo(bucket){
+  const kind = (bucket === SP_RESIGN) ? 'resign' : (bucket === SP_HIRE ? 'hire' : 'dummy');
+  const name = prompt('이름을 입력하세요 (시뮬레이션 전용):', kind==='resign'?'퇴사예정자':'신규'); if (name === null) return;
+  const nm = name.trim() || (kind==='resign'?'퇴사예정자':'신규');
+  const status = prompt('상태/직책 (예: 바리스타, 자진퇴사 등 — 생략 가능):', '') || '';
+  const date = prompt((kind==='resign'?'퇴사':'입사')+' 예정 일자 (YYYY-MM-DD, 생략 가능):', window.__sp.planDate) || '';
   const id = 'dummy_' + Date.now() + '_' + Math.floor(Math.random()*1000);
-  window.__sp.dummies.push({ id, name:nm, position:pos.trim(), kind:'hire' });
-  window.__sp.place[id] = SP_HIRE;
+  window.__sp.dummies.push({ id, name:nm, position:status.trim(), kind, date:date.trim(), status:status.trim() });
+  window.__sp.place[id] = bucket;
   spRenderSim();
 }
-function spDelDummy(id){
-  window.__sp.dummies = (window.__sp.dummies||[]).filter(d => d.id !== id);
-  delete window.__sp.place[id];
-  spRenderSim();
-}
+function spDelDummy(id){ window.__sp.dummies = (window.__sp.dummies||[]).filter(d => d.id !== id); delete window.__sp.place[id]; spRenderSim(); }
+
 async function spSave(){
   const sp = window.__sp; if (!sp) return;
-  const assign = {};
-  Object.keys(sp.place).forEach(k => { assign[k] = sp.place[k]; });
+  const assign = {}; Object.keys(sp.place).forEach(k => { assign[k] = sp.place[k]; });
   const payload = { plan_date: sp.planDate, title: sp.title || ('배치계획 '+sp.planDate),
-    store_to: sp.storeTo, placements: { assign, dummies: sp.dummies } };
+    store_to: sp.storeTo, placements: { assign, dummies: sp.dummies, rows: sp.stores } };
   const { data, error } = await sb.rpc('sp_save', { p_token: getSessionToken(), p_id: sp.planId || null, p_payload: payload });
   if (error) { alert('저장 오류: ' + error.message); return; }
   if (data && data.ok) { sp.planId = data.id || sp.planId; alert('배치 계획이 저장되었습니다. ('+sp.planDate+')'); }
   else { alert('저장 실패: ' + ((data&&data.error)||'알 수 없음')); }
 }
 
-// ── 발령 공지 (HTML 표) 자동 생성기 ──
+// ── 발령 공지 (HTML 표) ──
 function spBucketLabel(b){ if (b===SP_WAIT) return '미배치'; if (b===SP_RESIGN) return '퇴사'; if (b===SP_HIRE) return '채용예정'; return b; }
 function spOpenAnnounce(){
   const sp = window.__sp; if (!sp) return;
   const changed = [];
-  // 실제 직원: As-Is(DB store) vs To-Be(배치 bucket)
   sp.users.forEach(u => {
     const toBucket = sp.place[u.id];
     const asStore = u.store || '';
-    const toStore = spBucketLabel(toBucket);
     const pos = (typeof userPosition==='function'?userPosition(u):'') || u.role || '';
-    const storeChanged = (toBucket && toBucket !== asStore && !(toBucket===SP_RESIGN && u.retire_date));
-    // 퇴사예정 기본배치는 변동으로 보지 않음(이미 DB 상태). 그 외 매장변경만 포함.
     if (toBucket && toBucket !== asStore) {
       let remark = '';
       if (toBucket === SP_RESIGN) remark = '퇴사 예정';
       else if (toBucket === SP_WAIT) remark = '미배치';
-      else remark = '';
-      changed.push({ no:0, name:u.name, posFrom:pos, posTo:pos, storeFrom:asStore, storeTo:toStore, remark });
+      changed.push({ no:0, name:u.name, posFrom:pos, posTo:pos, storeFrom:asStore, storeTo:spBucketLabel(toBucket), remark });
     }
   });
-  // 더미(채용예정)가 매장에 배치된 경우
   (sp.dummies||[]).forEach(d => {
     const b = sp.place[d.id];
     if (b && b !== SP_HIRE && b !== SP_WAIT && b !== SP_RESIGN) {
@@ -17291,12 +17415,10 @@ function spOpenAnnounce(){
     }
   });
   changed.forEach((c,i)=>c.no=i+1);
-
   const esc2 = (s)=> esc(s==null?'':s);
   let tableHtml;
-  if (!changed.length) {
-    tableHtml = '<div style="padding:24px;text-align:center;color:var(--th)">변동 인원이 없습니다. (매장 이동을 먼저 드래그로 반영하세요)</div>';
-  } else {
+  if (!changed.length) { tableHtml = '<div style="padding:24px;text-align:center;color:var(--th)">변동 인원이 없습니다. (매장 이동을 먼저 드래그로 반영하세요)</div>'; }
+  else {
     const trs = changed.map(c => {
       const posCell = (c.posFrom===c.posTo) ? esc2(c.posTo) : (esc2(c.posFrom)+' → '+esc2(c.posTo));
       const storeCell = (c.storeFrom===c.storeTo) ? esc2(c.storeTo) : (esc2(c.storeFrom)+' → '+esc2(c.storeTo));
@@ -17318,11 +17440,10 @@ function spOpenAnnounce(){
       + '</tr></thead><tbody>'+trs+'</tbody></table>';
   }
   const old = document.getElementById('spAnnounceModal'); if (old) old.remove();
-  const m = document.createElement('div');
-  m.id = 'spAnnounceModal'; m.className = 'modal-bg open';
+  const m = document.createElement('div'); m.id='spAnnounceModal'; m.className='modal-bg open';
   m.innerHTML = '<div class="modal-inner" style="width:760px;max-width:96vw">'
     + '<div class="modal-title"><i class="ti ti-file-text"></i> 발령 공지 (기준일 '+sp.planDate+')</div>'
-    + '<div style="font-size:12px;color:var(--ts);margin-bottom:10px">아래 표를 복사해 공지 본문/결재선에 붙여넣으세요. (모든 서식 인라인 CSS 적용 — 붙여넣어도 깨지지 않음)</div>'
+    + '<div style="font-size:12px;color:var(--ts);margin-bottom:10px">아래 표를 복사해 공지 본문/결재선에 붙여넣으세요. (서식 인라인 CSS — 붙여넣어도 안 깨짐)</div>'
     + '<div id="spAnnBox" style="border:0.5px solid var(--crd);border-radius:8px;padding:12px;max-height:50vh;overflow:auto;background:#fff">'+tableHtml+'</div>'
     + '<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">'
     +   '<button class="btn-cancel-sm" onclick="document.getElementById(\'spAnnounceModal\').remove()">닫기</button>'
@@ -17345,84 +17466,274 @@ function spCopyFallback(tbl){
   catch(e){ alert('복사에 실패했습니다. 표를 직접 선택해 복사해주세요.'); }
 }
 
-// ── 코치 관할 관리 (Visual, 드래그) ──
+// ── 저장된 계획 목록 (불러오기 / 삭제[reauth]) ──
+async function spOpenPlanList(){
+  const old = document.getElementById('spPlanListModal'); if (old) old.remove();
+  const m = document.createElement('div'); m.id='spPlanListModal'; m.className='modal-bg open';
+  m.innerHTML = '<div class="modal-inner" style="width:560px;max-width:95vw"><div class="modal-title"><i class="ti ti-history"></i> 저장된 계획 불러오기</div><div id="spPlanListBody"><div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div></div><div style="text-align:right;margin-top:12px"><button class="btn-cancel-sm" onclick="document.getElementById(\'spPlanListModal\').remove()">닫기</button></div></div>';
+  document.body.appendChild(m);
+  let list = [];
+  try{ const { data } = await sb.rpc('sp_list', { p_token: getSessionToken() }); list = Array.isArray(data)?data:[]; }catch(e){}
+  const box = document.getElementById('spPlanListBody'); if (!box) return;
+  if (!list.length) { box.innerHTML = '<div style="text-align:center;padding:30px;color:var(--th)">저장된 계획이 없습니다.</div>'; return; }
+  box.innerHTML = list.map(p => {
+    const dt = p.updated_at ? fmtDateTime(p.updated_at) : '';
+    return '<div style="display:flex;align-items:center;gap:8px;border-bottom:0.5px solid var(--crd);padding:9px 2px">'
+      + '<div style="flex:1;cursor:pointer" onclick="spLoadPlan(\''+esc(p.plan_date)+'\')">'
+      +   '<div style="font-size:13px;font-weight:600">'+esc(p.plan_date)+' · '+esc(p.title||'(제목없음)')+'</div>'
+      +   '<div style="font-size:11px;color:var(--th)">작성자 '+esc(p.created_by_name||'-')+' · '+esc(dt)+'</div>'
+      + '</div>'
+      + '<button class="btn-cancel-sm" style="font-size:11px" onclick="spLoadPlan(\''+esc(p.plan_date)+'\')"><i class="ti ti-edit"></i> 수정</button>'
+      + '<button class="btn-cancel-sm" style="font-size:11px;color:var(--rd);border-color:var(--rd)" onclick="spDeletePlan(\''+esc(p.plan_date)+'\',\''+esc(p.id)+'\')"><i class="ti ti-trash"></i> 삭제</button>'
+      + '</div>';
+  }).join('');
+}
+function spLoadPlan(planDate){
+  const mm = document.getElementById('spPlanListModal'); if (mm) mm.remove();
+  window.__sp = window.__sp || {}; window.__sp.planDate = planDate; window.__spTab='sim';
+  renderStaffingPlan(document.getElementById('contentArea'));
+}
+async function spDeletePlan(planDate, id){
+  if (!currentUser || !currentUser.is_master) { alert('계획 삭제는 총괄(마스터)만 가능합니다.'); return; }
+  const pw = prompt('총괄 비밀번호를 입력하세요. (계획 삭제 재인증)'); if (!pw) return;
+  if (!(await reauth(pw))) { alert('비밀번호가 일치하지 않습니다.'); return; }
+  if (!confirm("'"+planDate+"' 계획을 삭제할까요? 되돌릴 수 없습니다.")) return;
+  try{ const { data } = await sb.rpc('sp_delete', { p_token: getSessionToken(), p_id: id }); if (data && data.ok===false) { alert('삭제 실패: '+(data.error||'')); return; } }catch(e){ alert('삭제 오류: '+(e.message||e)); return; }
+  alert('삭제되었습니다.');
+  spOpenPlanList();
+}
+
+// ── 열람 권한 예외 관리 (총괄 전용) ──
+async function spOpenPermModal(){
+  if (!currentUser || !currentUser.is_master) { alert('권한 설정은 총괄(마스터)만 가능합니다.'); return; }
+  await spLoadPerm();
+  const old = document.getElementById('spPermModal'); if (old) old.remove();
+  const m = document.createElement('div'); m.id='spPermModal'; m.className='modal-bg open';
+  m.innerHTML = '<div class="modal-inner" style="width:520px;max-width:95vw"><div class="modal-title"><i class="ti ti-shield-lock"></i> 인원 배치 열람 권한</div>'
+    + '<div style="font-size:12px;color:var(--ts);margin-bottom:10px">기본 권한(총괄·부총괄·운영·인사) 외에 <b>추가 허용</b>하거나, 기본 권한자라도 <b>제외</b>할 계정을 지정합니다.</div>'
+    + '<div class="search-box" style="margin-bottom:8px"><i class="ti ti-search" style="color:var(--th)"></i><input id="spPermSearch" placeholder="이름 검색..." oninput="spPermFilter()"></div>'
+    + '<div id="spPermList" style="max-height:46vh;overflow:auto"><div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div></div>'
+    + '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button class="btn-cancel-sm" onclick="document.getElementById(\'spPermModal\').remove()">취소</button><button class="btn-submit" onclick="spSavePerm()"><i class="ti ti-check"></i> 저장</button></div></div>';
+  document.body.appendChild(m);
+  const { data } = await sb.from('users').select('id,name,store,part,role,is_master,is_vice_master').eq('active',true).order('name');
+  window.__spPermUsers = data||[];
+  window.__spPermAllowed = new Set((window.__spAllowed||[]).map(String));
+  window.__spPermExcluded = new Set((window.__spExcluded||[]).map(String));
+  spPermRenderList();
+}
+function spPermIsBase(u){ return !!(u.is_master||u.is_vice_master||u.role==='admin'||u.role==='hr'||['운영','운영팀','인사팀'].includes(u.part||'')); }
+function spPermRenderList(){
+  const box = document.getElementById('spPermList'); if (!box) return;
+  const q = (document.getElementById('spPermSearch')?.value||'').trim().toLowerCase();
+  const list = (window.__spPermUsers||[]).filter(u=>!q || (u.name||'').toLowerCase().includes(q) || (u.store||'').toLowerCase().includes(q));
+  box.innerHTML = list.map(u=>{
+    const id=String(u.id); const base=spPermIsBase(u);
+    const allowed=window.__spPermAllowed.has(id); const excluded=window.__spPermExcluded.has(id);
+    const eff = (base||allowed)&&!excluded;
+    return '<div style="display:flex;align-items:center;gap:8px;border-bottom:0.5px solid var(--crd);padding:7px 2px">'
+      + '<div style="flex:1"><span style="font-size:13px;font-weight:600">'+esc(u.name)+'</span> <span style="font-size:11px;color:var(--th)">('+esc(u.store||u.part||'')+')</span>'
+      +   (base?' <span style="font-size:10px;color:#1E40AF">기본권한</span>':'')+' '+(eff?'<span style="font-size:10px;color:var(--gn)">열람✓</span>':'<span style="font-size:10px;color:var(--rd)">열람✕</span>')+'</div>'
+      + '<label style="font-size:11px;display:inline-flex;align-items:center;gap:3px"><input type="checkbox" '+(allowed?'checked':'')+' onchange="spPermToggle(\''+id+'\',\'allow\',this.checked)">추가허용</label>'
+      + '<label style="font-size:11px;display:inline-flex;align-items:center;gap:3px;color:var(--rd)"><input type="checkbox" '+(excluded?'checked':'')+' onchange="spPermToggle(\''+id+'\',\'exclude\',this.checked)">제외</label>'
+      + '</div>';
+  }).join('') || '<div style="text-align:center;padding:20px;color:var(--th)">결과 없음</div>';
+}
+function spPermFilter(){ spPermRenderList(); }
+function spPermToggle(id, type, on){
+  if (type==='allow'){ if(on) window.__spPermAllowed.add(id); else window.__spPermAllowed.delete(id); }
+  else { if(on) window.__spPermExcluded.add(id); else window.__spPermExcluded.delete(id); }
+  spPermRenderList();
+}
+async function spSavePerm(){
+  const allowed = Array.from(window.__spPermAllowed||[]); const excluded = Array.from(window.__spPermExcluded||[]);
+  try{
+    await sb.from('app_settings').upsert({ key:'staffing_allowed_users', value: JSON.stringify(allowed) }, { onConflict:'key' });
+    await sb.from('app_settings').upsert({ key:'staffing_excluded_users', value: JSON.stringify(excluded) }, { onConflict:'key' });
+    const mm=document.getElementById('spPermModal'); if(mm) mm.remove();
+    alert('열람 권한이 저장되었습니다.');
+    await spLoadPerm();
+  }catch(e){ alert('저장 오류: '+(e.message||e)); }
+}
+
+// ── 개인 이동 히스토리 + 특이사항 메모 ──
+async function spOpenStaffHistory(userId){
+  const u = (window.__sp && window.__sp.users || []).find(x=>String(x.id)===String(userId));
+  const name = u ? u.name : '';
+  const old = document.getElementById('spHistModal'); if (old) old.remove();
+  const m = document.createElement('div'); m.id='spHistModal'; m.className='modal-bg open';
+  m.innerHTML = '<div class="modal-inner" style="width:540px;max-width:95vw"><div class="modal-title"><i class="ti ti-timeline"></i> '+esc(name)+' — 이동 이력 · 특이사항</div>'
+    + '<div id="spHistBody"><div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div></div>'
+    + '<div style="text-align:right;margin-top:12px"><button class="btn-cancel-sm" onclick="document.getElementById(\'spHistModal\').remove()">닫기</button></div></div>';
+  document.body.appendChild(m);
+  let hist = [], note = '';
+  try{ const r = await sb.rpc('pt_user', { p_token:getSessionToken(), p_user_id:String(userId) }); hist = Array.isArray(r.data)?r.data:[]; }catch(e){}
+  try{ const r = await sb.rpc('sn_get', { p_token:getSessionToken(), p_user_id:String(userId) }); if (r.data && r.data.note) note = r.data.note; }catch(e){}
+  const body = document.getElementById('spHistBody'); if (!body) return;
+  const rows = hist.length ? hist.map(h=>
+    '<div style="border-bottom:0.5px solid var(--crd);padding:7px 2px;font-size:12px">'
+    + '<span style="font-weight:600">'+esc(h.transfer_date||(h.created_at||'').slice(0,10))+'</span> · '
+    + esc(h.old_store||'-')+'→'+esc(h.new_store||'-')
+    + (h.old_role||h.new_role ? ' <span style="color:var(--th)">('+esc(h.old_role||'-')+'→'+esc(h.new_role||'-')+')</span>':'')
+    + '</div>').join('') : '<div style="color:var(--th);font-size:12px;padding:8px 2px">이동 이력이 없습니다.</div>';
+  const canEdit = currentUser && (currentUser.is_master || (typeof isAdminGroup==='function'&&isAdminGroup()));
+  body.innerHTML = '<div style="max-height:34vh;overflow:auto;margin-bottom:12px">'+rows+'</div>'
+    + '<div style="font-size:12px;font-weight:600;margin-bottom:5px">개인 특이사항 / 메모</div>'
+    + '<textarea id="spNoteInput" class="form-input" style="min-height:90px;font-size:13px" '+(canEdit?'':'readonly')+' placeholder="참고 사항을 입력하세요...">'+esc(note)+'</textarea>'
+    + (canEdit ? '<div style="text-align:right;margin-top:8px"><button class="btn-submit" style="font-size:12px" onclick="spSaveStaffNote(\''+esc(String(userId))+'\')"><i class="ti ti-device-floppy"></i> 메모 저장</button></div>' : '');
+}
+async function spSaveStaffNote(userId){
+  const note = document.getElementById('spNoteInput')?.value || '';
+  try{ const { data } = await sb.rpc('sn_save', { p_token:getSessionToken(), p_user_id:String(userId), p_note:note });
+    if (data && data.ok) alert('메모가 저장되었습니다.'); else alert('저장 실패: '+((data&&data.error)||'')); }
+  catch(e){ alert('저장 오류: '+(e.message||e)); }
+}
+
+// ══════════════════════════════════════════════════════════
+// [코치 관할 관리 Visual] — 순서변경 · 추가/삭제 · 검색(동명이인 구분)
+// ══════════════════════════════════════════════════════════
 async function renderCoachVisual(container){
   if (!container) return;
   container.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>';
-  const [coachRes, storeRes, csRes] = await Promise.all([
-    sb.from('users').select('id,name,store,role,part').eq('active', true).or('is_master.eq.true,is_vice_master.eq.true,part.not.is.null').order('name'),
+  const [userRes, storeRes, csRes, orderRes] = await Promise.all([
+    sb.from('users').select('id,name,store,role,part,is_master,is_vice_master').eq('active', true).order('name'),
     sb.from('users').select('store').eq('active', true).neq('role','admin'),
-    sb.from('coach_stores').select('*')
+    sb.from('coach_stores').select('*'),
+    sb.from('app_settings').select('value').eq('key','staffing_coach_ids').maybeSingle()
   ]);
-  const coaches = coachRes.data || [];
-  const allStores = [...new Set((storeRes.data||[]).map(u=>u.store).filter(Boolean))].sort();
-  const assign = {};   // coachId -> [store]
-  coaches.forEach(c => assign[c.id] = []);
+  const allUsers = userRes.data || [];
+  const allStores = [...new Set((storeRes.data||[]).map(u=>u.store).filter(s=>s && s!=='본사'))].sort();
+  const assign = {};
   (csRes.data||[]).forEach(c => { if (!assign[c.coach_id]) assign[c.coach_id] = []; assign[c.coach_id].push(c.store); });
-  // 원본 저장(확정 저장 diff 용)
-  window.__cv = { coaches, allStores, assign, orig: JSON.parse(JSON.stringify(assign)) };
+  // 코치 순서/목록
+  let coachIds = [];
+  try{ if (orderRes.data && orderRes.data.value) coachIds = JSON.parse(orderRes.data.value); }catch(e){}
+  coachIds = (coachIds||[]).map(String).filter(id => allUsers.some(u=>String(u.id)===id));
+  if (!coachIds.length) {
+    coachIds = allUsers.filter(u=>u.is_master||u.is_vice_master||u.part).map(u=>String(u.id));
+  }
+  // coach_stores 에 있으나 목록에 없는 코치 보강
+  Object.keys(assign).forEach(cid=>{ if(!coachIds.includes(String(cid)) && allUsers.some(u=>String(u.id)===String(cid))) coachIds.push(String(cid)); });
+  const coaches = coachIds.map(id => allUsers.find(u=>String(u.id)===id)).filter(Boolean);
+  coaches.forEach(c=>{ if(!assign[c.id]) assign[c.id]=[]; });
+  window.__cv = { coaches, coachIds, allUsers, allStores, assign, orig: JSON.parse(JSON.stringify(assign)) };
   cvRender(container);
 }
 function cvRender(container){
   const cv = window.__cv; if (!cv) return;
   const cont = container || document.getElementById('spBody'); if (!cont) return;
-  const assignedAll = new Set();
-  Object.keys(cv.assign).forEach(cid => (cv.assign[cid]||[]).forEach(s => assignedAll.add(s)));
+  const q = (s)=>String(s).replace(/'/g,"\\'");
+  const assignedAll = new Set(); Object.keys(cv.assign).forEach(cid => (cv.assign[cid]||[]).forEach(s => assignedAll.add(s)));
   const unassigned = cv.allStores.filter(s => !assignedAll.has(s));
   const coachCols = cv.coaches.map(coach => {
     const stores = cv.assign[coach.id] || [];
     const chips = stores.map(s =>
-      '<div class="cv-chip" draggable="true" ondragstart="cvDragStart(event,\''+esc(s).replace(/'/g,"\\'")+'\')" style="display:flex;align-items:center;justify-content:space-between;gap:6px;background:var(--crm);border-radius:8px;padding:5px 9px;margin:3px 0;font-size:12px;cursor:grab">'
-      + '<span>'+esc(s)+'</span><span onclick="cvUnassign(\''+coach.id+'\',\''+esc(s).replace(/'/g,"\\'")+'\')" style="cursor:pointer;color:#B91C1C;font-weight:700">✕</span></div>'
+      '<div class="cv-chip" draggable="true" ondragstart="cvDragStart(event,\''+q(s)+'\')" style="display:flex;align-items:center;justify-content:space-between;gap:6px;background:var(--crm);border-radius:8px;padding:5px 9px;margin:3px 0;font-size:12px;cursor:grab">'
+      + '<span>'+esc(s)+'</span><span onclick="cvUnassign(\''+coach.id+'\',\''+q(s)+'\')" style="cursor:pointer;color:#B91C1C;font-weight:700">✕</span></div>'
     ).join('') || '<div style="font-size:11px;color:var(--th);padding:6px 0">여기로 매장 드래그</div>';
+    // 코치 카드: 매니저 배경(노랑) + 파란 텍스트
     return '<div class="cv-col" ondragover="event.preventDefault()" ondrop="cvDrop(event,\''+coach.id+'\')" style="width:180px;flex-shrink:0;border:0.5px solid var(--crd);border-radius:10px;padding:8px;background:#fff">'
-      + '<div style="display:flex;align-items:center;gap:7px;margin-bottom:8px"><div class="staff-avatar" style="width:28px;height:28px;font-size:11px">'+esc((coach.name||'').slice(0,2))+'</div>'
-      + '<div><div style="font-size:12px;font-weight:700">'+esc(coach.name)+'</div><div style="font-size:10px;color:var(--th)">'+esc(coach.part||coach.store||'')+'</div></div></div>'
+      + '<div draggable="true" ondragstart="cvColDragStart(event,\''+coach.id+'\')" style="display:flex;align-items:center;gap:7px;margin-bottom:8px;background:#FFF9C4;border-radius:8px;padding:5px 7px;cursor:grab">'
+      +   '<div class="staff-avatar" style="width:26px;height:26px;font-size:10px;background:#FDE68A;color:#1E40AF">'+esc((coach.name||'').slice(0,2))+'</div>'
+      +   '<div style="flex:1"><div style="font-size:12px;font-weight:700;color:#1E40AF">'+esc(coach.name)+'</div><div style="font-size:10px;color:#2563EB">'+esc(coach.part||coach.store||'')+'</div></div>'
+      +   '<span onclick="cvDelCoach(\''+coach.id+'\')" style="cursor:pointer;color:#B91C1C;font-weight:700" title="코치 컬럼 삭제">✕</span>'
+      + '</div>'
       + '<div style="min-height:40px">'+chips+'</div></div>';
   }).join('');
   const poolChips = unassigned.map(s =>
-    '<span class="cv-chip" draggable="true" ondragstart="cvDragStart(event,\''+esc(s).replace(/'/g,"\\'")+'\')" style="display:inline-flex;background:#fff;border:0.5px solid var(--crd);border-radius:8px;padding:5px 10px;margin:3px;font-size:12px;cursor:grab">'+esc(s)+'</span>'
+    '<span class="cv-chip" draggable="true" ondragstart="cvDragStart(event,\''+q(s)+'\')" style="display:inline-flex;background:#fff;border:0.5px solid var(--crd);border-radius:8px;padding:5px 10px;margin:3px;font-size:12px;cursor:grab">'+esc(s)+'</span>'
   ).join('') || '<span style="font-size:12px;color:var(--th)">모든 매장이 코치에 배정됨</span>';
-
   cont.innerHTML = ''
     + '<div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">'
     +   '<button class="btn-new" style="background:var(--gn);font-size:12px" onclick="cvSave()"><i class="ti ti-device-floppy"></i> 확정 저장</button>'
-    +   '<span style="font-size:11px;color:var(--th)">매장 블록을 코치 컬럼으로 드래그 → [확정 저장] 시 coach_stores 에 반영됩니다.</span>'
+    +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="cvOpenAddCoach()"><i class="ti ti-user-plus"></i> 코치 추가</button>'
+    +   '<span style="font-size:11px;color:var(--th)">코치 헤더를 좌우로 드래그해 순서 변경 · 매장을 코치로 드래그 · [확정 저장] 시 반영</span>'
     + '</div>'
-    + '<div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:10px;align-items:flex-start">'+coachCols+'</div>'
+    + '<div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:10px;align-items:flex-start">'+(coachCols||'<div style="color:var(--th);font-size:12px;padding:20px">코치가 없습니다. [코치 추가]로 등록하세요.</div>')+'</div>'
     + '<div ondragover="event.preventDefault()" ondrop="cvDrop(event,\'__POOL__\')" style="margin-top:14px;border:0.5px dashed var(--crd);border-radius:10px;padding:10px;background:#fafafa">'
     +   '<div style="font-size:12px;font-weight:700;margin-bottom:6px"><i class="ti ti-building-store"></i> 미배정 매장 (풀)</div>'
     +   '<div style="display:flex;flex-wrap:wrap;align-items:center">'+poolChips+'</div></div>';
 }
-function cvDragStart(e, store){ window.__cvDrag = store; try{ e.dataTransfer.setData('text/plain', store); e.dataTransfer.effectAllowed='move'; }catch(_){} }
+function cvDragStart(e, store){ window.__cvDrag = store; window.__cvColDrag = null; try{ e.dataTransfer.setData('text/plain', store); e.dataTransfer.effectAllowed='move'; }catch(_){} }
+function cvColDragStart(e, coachId){ window.__cvColDrag = coachId; window.__cvDrag = null; try{ e.dataTransfer.setData('text/plain', coachId); e.dataTransfer.effectAllowed='move'; }catch(_){} e.stopPropagation(); }
 function cvDrop(e, coachId){
   e.preventDefault();
+  if (window.__cvColDrag){ cvReorderCoach(window.__cvColDrag, coachId); window.__cvColDrag = null; return; }
   const store = window.__cvDrag || (e.dataTransfer && e.dataTransfer.getData('text/plain')); if (!store) return;
   const cv = window.__cv;
-  // 모든 코치에서 제거 후 대상에 추가(한 매장=한 코치 기본)
   Object.keys(cv.assign).forEach(cid => { cv.assign[cid] = (cv.assign[cid]||[]).filter(s => s !== store); });
   if (coachId !== '__POOL__') { if (!cv.assign[coachId]) cv.assign[coachId] = []; if (!cv.assign[coachId].includes(store)) cv.assign[coachId].push(store); }
-  window.__cvDrag = null;
+  window.__cvDrag = null; cvRender();
+}
+function cvReorderCoach(src, destCoach){
+  const cv = window.__cv; if (destCoach==='__POOL__' || src===destCoach) return;
+  const ids = cv.coaches.map(c=>String(c.id)).filter(id=>id!==String(src));
+  const di = ids.indexOf(String(destCoach));
+  if (di<0) ids.push(String(src)); else ids.splice(di,0,String(src));
+  cv.coaches = ids.map(id=>cv.allUsers.find(u=>String(u.id)===id)).filter(Boolean);
+  cv.coachIds = ids;
+  cvPersistOrder();
   cvRender();
 }
+async function cvPersistOrder(){
+  try{ await sb.from('app_settings').upsert({ key:'staffing_coach_ids', value: JSON.stringify((window.__cv.coaches||[]).map(c=>String(c.id))) }, { onConflict:'key' }); }catch(e){}
+}
 function cvUnassign(coachId, store){ const cv = window.__cv; cv.assign[coachId] = (cv.assign[coachId]||[]).filter(s => s !== store); cvRender(); }
+async function cvDelCoach(coachId){
+  const cv = window.__cv; const c = cv.coaches.find(x=>String(x.id)===String(coachId));
+  if (!confirm("'"+((c&&c.name)||'')+"' 코치 컬럼을 삭제할까요? (관할 매장 배정도 해제됩니다)")) return;
+  cv.coaches = cv.coaches.filter(x=>String(x.id)!==String(coachId));
+  delete cv.assign[coachId];
+  try{ await sb.from('coach_stores').delete().eq('coach_id', coachId); }catch(e){}
+  cvPersistOrder();
+  cvRender();
+}
+function cvOpenAddCoach(){
+  const old = document.getElementById('cvAddModal'); if (old) old.remove();
+  const m = document.createElement('div'); m.id='cvAddModal'; m.className='modal-bg open';
+  m.innerHTML = '<div class="modal-inner" style="width:440px;max-width:94vw"><div class="modal-title"><i class="ti ti-user-plus"></i> 코치 추가</div>'
+    + '<div class="search-box" style="margin-bottom:8px"><i class="ti ti-search" style="color:var(--th)"></i><input id="cvAddSearch" placeholder="이름 검색..." oninput="cvAddFilter()" autofocus></div>'
+    + '<div id="cvAddList" style="max-height:48vh;overflow:auto"></div>'
+    + '<div style="text-align:right;margin-top:10px"><button class="btn-cancel-sm" onclick="document.getElementById(\'cvAddModal\').remove()">닫기</button></div></div>';
+  document.body.appendChild(m);
+  cvAddFilter();
+}
+function cvAddFilter(){
+  const cv = window.__cv; const box = document.getElementById('cvAddList'); if (!cv || !box) return;
+  const q = (document.getElementById('cvAddSearch')?.value||'').trim().toLowerCase();
+  const already = new Set(cv.coaches.map(c=>String(c.id)));
+  const list = (cv.allUsers||[]).filter(u=>!already.has(String(u.id)) && (!q || (u.name||'').toLowerCase().includes(q)));
+  box.innerHTML = list.slice(0,60).map(u=>
+    '<div style="display:flex;align-items:center;gap:8px;border-bottom:0.5px solid var(--crd);padding:7px 2px;cursor:pointer" onclick="cvAddCoach(\''+esc(String(u.id))+'\')">'
+    + '<div style="flex:1;font-size:13px"><b>'+esc(u.name)+'</b><span style="color:var(--th)">('+esc(u.store||u.part||'-')+')</span></div>'
+    + '<i class="ti ti-plus" style="color:var(--brm)"></i></div>'
+  ).join('') || '<div style="text-align:center;padding:18px;color:var(--th)">결과 없음</div>';
+}
+function cvAddCoach(userId){
+  const cv = window.__cv; const u = cv.allUsers.find(x=>String(x.id)===String(userId)); if (!u) return;
+  if (!cv.coaches.some(c=>String(c.id)===String(userId))) { cv.coaches.push(u); if(!cv.assign[u.id]) cv.assign[u.id]=[]; }
+  cv.coachIds = cv.coaches.map(c=>String(c.id));
+  cvPersistOrder();
+  const mm = document.getElementById('cvAddModal'); if (mm) mm.remove();
+  cvRender();
+}
 async function cvSave(){
   const cv = window.__cv; if (!cv) return;
   const inserts = [], deletes = [];
-  // diff 계산
   Object.keys(cv.assign).forEach(cid => {
     const now = cv.assign[cid]||[], was = cv.orig[cid]||[];
     now.forEach(s => { if (!was.includes(s)) inserts.push({ coach_id:cid, store:s }); });
     was.forEach(s => { if (!now.includes(s)) deletes.push({ coach_id:cid, store:s }); });
   });
-  if (!inserts.length && !deletes.length) { alert('변경사항이 없습니다.'); return; }
+  if (!inserts.length && !deletes.length) { alert('변경사항이 없습니다.'); await cvPersistOrder(); return; }
   try{
     for (const d of deletes) { await sb.from('coach_stores').delete().eq('coach_id', d.coach_id).eq('store', d.store); }
     for (const i of inserts) { const { error } = await sb.from('coach_stores').insert(i); if (error && error.code !== '23505') throw error; }
+    await cvPersistOrder();
     alert('코치 관할이 저장되었습니다. (추가 '+inserts.length+' · 제거 '+deletes.length+')');
     renderCoachVisual(document.getElementById('spBody'));
   }catch(e){ alert('저장 오류: ' + (e.message||e)); }
 }
+
 
 // ══════════════════════════════════════════════════════════
 // C) 매장 인수인계
