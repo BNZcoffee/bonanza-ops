@@ -283,6 +283,8 @@ textarea.form-input{min-height:120px;resize:vertical}
 .modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:0.5px solid var(--crd);font-size:15px}
 .modal-body{padding:16px 20px;overflow-y:auto}
 .modal-foot{padding:14px 20px;border-top:0.5px solid var(--crd)}
+.sp-store-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
+@media(max-width:760px){.sp-store-grid{grid-template-columns:1fr}}
 .ops-viewtoggle{display:inline-flex;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden}
 .ops-vt{background:#fff;border:none;padding:7px 12px;font-size:12px;font-weight:600;color:var(--ts);cursor:pointer}
 .ops-vt.active{background:var(--br);color:#fff}
@@ -17436,14 +17438,16 @@ function spRenderSim(){
       ? '<span style="display:inline-flex;align-items:center;gap:3px;margin-left:6px"><button onclick="spSetTO(\''+q(store)+'\',-1)" style="width:20px;height:20px;border:0.5px solid var(--crd);border-radius:5px;background:#fff;cursor:pointer">−</button><span style="min-width:16px;text-align:center;font-weight:700">'+to+'</span><button onclick="spSetTO(\''+q(store)+'\',1)" style="width:20px;height:20px;border:0.5px solid var(--crd);border-radius:5px;background:#fff;cursor:pointer">+</button></span>'
       : '';
     const delRow = sp.toEdit ? '<button onclick="spDelStore(\''+q(store)+'\')" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:12px;margin-left:4px" title="매장 행 삭제"><i class="ti ti-trash"></i></button>' : '';
+    // 세로형: 매장명(상단 1행) → 바로 아래 카드 가로 정렬(폭 초과 시 다음 줄로 wrap)
     return '<div class="sp-row" id="sprow-'+idx+'" ondragover="event.preventDefault()" ondrop="spDrop(event,\''+q(store)+'\')" '
-      + 'style="display:flex;align-items:flex-start;gap:8px;border:0.5px solid var(--crd);border-radius:10px;padding:8px 10px;background:#fff">'
-      + '<span draggable="true" ondragstart="spRowDragStart(event,\''+q(store)+'\')" title="드래그로 순서 변경" style="cursor:grab;color:var(--th);font-size:14px;padding-top:2px">⠿</span>'
-      + '<div style="min-width:110px;flex-shrink:0">'
-      +   '<div style="font-size:13px;font-weight:700">'+esc(store)+delRow+'</div>'
-      +   '<div style="font-size:11px;color:var(--th);white-space:nowrap">'+actual+' / '+to+' <span style="color:'+diffColor+';font-weight:600">('+diffStr+')</span>'+toCtrl+'</div>'
+      + 'style="border:0.5px solid var(--crd);border-radius:10px;padding:8px 10px;background:#fff">'
+      + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;white-space:nowrap">'
+      +   '<span draggable="true" ondragstart="spRowDragStart(event,\''+q(store)+'\')" title="드래그로 순서 변경" style="cursor:grab;color:var(--th);font-size:14px">⠿</span>'
+      +   '<span style="font-size:13px;font-weight:700">'+esc(store)+'</span>'
+      +   '<span style="font-size:11px;color:var(--th)">'+actual+' / '+to+' <span style="color:'+diffColor+';font-weight:600">('+diffStr+')</span></span>'
+      +   toCtrl + delRow
       + '</div>'
-      + '<div style="flex:1;display:flex;flex-wrap:wrap;align-items:center;min-height:40px">'+cards+empties+'</div>'
+      + '<div style="display:flex;flex-wrap:wrap;align-items:center;min-height:40px">'+cards+empties+'</div>'
       + '</div>';
   }).join('');
 
@@ -17479,7 +17483,7 @@ function spRenderSim(){
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
     +   '<label style="font-size:12px;color:var(--ts)">작성 기준일 <input type="date" id="spPlanDate" value="'+sp.planDate+'" onchange="spChangeDate(this.value)" style="border:0.5px solid var(--crd);border-radius:7px;padding:5px 8px;font-size:12px"></label>'
     +   '<button class="btn-cancel-sm" style="font-size:12px'+(sp.toEdit?';background:var(--brm);color:#fff;border-color:var(--brm)':'')+'" onclick="spToggleTOEdit()"><i class="ti ti-adjustments"></i> T.O 편집</button>'
-    +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spOpenStoreMgr()"><i class="ti ti-building-store"></i> 매장 배치 관리</button>'
+    +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spOpenStoreMgr()"><i class="ti ti-building-store"></i> 배치 매장 관리</button>'
     +   '<button class="btn-cancel-sm" style="font-size:12px;color:var(--bl);border-color:var(--bl)" onclick="spResetToLive()"><i class="ti ti-refresh"></i> 최신 계정 정보로 복구</button>'
     +   '<button class="btn-cancel-sm" style="font-size:12px;color:var(--gn);border-color:var(--gn)" onclick="spSave()"><i class="ti ti-device-floppy"></i> 저장</button>'
     +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spOpenPlanList()"><i class="ti ti-history"></i> 저장된 계획</button>'
@@ -17488,16 +17492,17 @@ function spRenderSim(){
     + '</div>'
     + dashHtml
     + waitPanel
-    + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;align-items:start">'+rowsHtml+'</div>';
+    + '<div class="sp-store-grid">'+rowsHtml+'</div>';
 }
-// 매장 배치 관리 모달 (순서 ↑↓ · 삭제 · 빈 매장 추가)
+// 배치 매장 관리 모달 (핸들 드래그 순서변경 · 매장명/T.O 편집 · 삭제 · 빈 매장 추가)
 function spOpenStoreMgr(){
   const old = document.getElementById('spStoreMgrModal'); if (old) old.remove();
   const m = document.createElement('div'); m.id='spStoreMgrModal'; m.className='modal-bg open';
-  m.innerHTML = '<div class="modal-inner" style="width:420px;max-width:94vw;display:flex;flex-direction:column;max-height:88vh;padding:0;overflow:hidden">'
-    + '<div class="modal-title" style="display:flex;align-items:center;gap:8px;margin:0;padding:15px 20px;border-bottom:0.5px solid var(--crd)"><span style="flex:1"><i class="ti ti-building-store"></i> 매장 배치 관리</span><button class="btn-sm primary" onclick="document.getElementById(\'spStoreMgrModal\').remove()">완료</button></div>'
+  m.innerHTML = '<div class="modal-inner" style="width:460px;max-width:95vw;display:flex;flex-direction:column;max-height:88vh;padding:0;overflow:hidden">'
+    + '<div class="modal-title" style="display:flex;align-items:center;gap:8px;margin:0;padding:15px 20px;border-bottom:0.5px solid var(--crd)"><span style="flex:1"><i class="ti ti-building-store"></i> 배치 매장 관리</span><button class="btn-sm primary" onclick="document.getElementById(\'spStoreMgrModal\').remove()">완료</button></div>'
     + '<div style="padding:12px 16px;overflow-y:auto">'
-    +   '<div style="display:flex;gap:6px;margin-bottom:10px"><input class="form-input" id="spStoreMgrNew" placeholder="빈 매장(행) 이름 추가" style="flex:1;font-size:13px" onkeydown="if(event.key===\'Enter\')spStoreMgrAdd()"><button class="btn-submit" style="padding:7px 12px;font-size:13px" onclick="spStoreMgrAdd()">추가</button></div>'
+    +   '<div style="display:flex;gap:6px;margin-bottom:8px"><input class="form-input" id="spStoreMgrNew" placeholder="빈 매장(행) 이름 추가" style="flex:1;font-size:13px" onkeydown="if(event.key===\'Enter\')spStoreMgrAdd()"><button class="btn-submit" style="padding:7px 12px;font-size:13px" onclick="spStoreMgrAdd()">추가</button></div>'
+    +   '<div style="display:flex;gap:6px;font-size:10px;color:var(--th);padding:0 2px 4px 26px"><span style="flex:1">매장명</span><span style="width:52px;text-align:center">T.O</span><span style="width:28px"></span></div>'
     +   '<div id="spStoreMgrList"></div>'
     + '</div></div>';
   document.body.appendChild(m);
@@ -17508,19 +17513,43 @@ function spStoreMgrRenderList(){
   const sp = window.__sp;
   box.innerHTML = sp.stores.map((s,i)=>{
     const cnt = spKeysIn(s).length;
-    return '<div style="display:flex;align-items:center;gap:6px;padding:7px 2px;border-bottom:0.5px solid var(--crd)">'
-      + '<span style="flex:1;font-size:13px;font-weight:600">'+esc(s)+' <span style="font-size:11px;color:var(--th);font-weight:400">('+cnt+'명)</span></span>'
-      + '<button class="btn-cancel-sm" style="padding:3px 7px;font-size:12px" onclick="spStoreMgrMove('+i+',-1)" '+(i===0?'disabled':'')+'>↑</button>'
-      + '<button class="btn-cancel-sm" style="padding:3px 7px;font-size:12px" onclick="spStoreMgrMove('+i+',1)" '+(i===sp.stores.length-1?'disabled':'')+'>↓</button>'
-      + '<button class="btn-cancel-sm" style="padding:3px 7px;font-size:12px;color:var(--rd);border-color:var(--rd)" onclick="spStoreMgrDel(\''+String(s).replace(/'/g,"\\'")+'\')"><i class="ti ti-trash"></i></button>'
+    const to = (sp.storeTo[s]!=null)?sp.storeTo[s]:0;
+    const sq = String(s).replace(/'/g,"\\'");
+    return '<div class="spsm-row" data-idx="'+i+'" ondragover="event.preventDefault()" ondrop="spStoreMgrDrop(event,'+i+')" style="display:flex;align-items:center;gap:6px;padding:6px 2px;border-bottom:0.5px solid var(--crd)">'
+      + '<span draggable="true" ondragstart="spStoreMgrDragStart(event,'+i+')" title="드래그로 순서 변경" style="cursor:grab;color:var(--th);font-size:15px;flex-shrink:0">⠿</span>'
+      + '<input class="form-input" value="'+esc(s)+'" onchange="spStoreMgrRename(\''+sq+'\',this.value)" style="flex:1;font-size:13px;padding:5px 8px" title="매장명 수정">'
+      + '<span style="font-size:10px;color:var(--th);flex-shrink:0">('+cnt+'명)</span>'
+      + '<input class="form-input" type="number" min="0" value="'+to+'" onchange="spStoreMgrSetTO(\''+sq+'\',this.value)" style="width:52px;font-size:13px;padding:5px 4px;text-align:center" title="적정 T.O">'
+      + '<button class="btn-cancel-sm" style="padding:3px 7px;font-size:12px;color:var(--rd);border-color:var(--rd);flex-shrink:0" onclick="spStoreMgrDel(\''+sq+'\')"><i class="ti ti-trash"></i></button>'
       + '</div>';
   }).join('') || '<div style="color:var(--th);font-size:13px;padding:12px 0;text-align:center">매장이 없습니다. 위에서 추가하세요.</div>';
 }
-function spStoreMgrMove(i, dir){
-  const sp = window.__sp; const j = i+dir;
-  if (j<0 || j>=sp.stores.length) return;
-  const t = sp.stores[i]; sp.stores[i]=sp.stores[j]; sp.stores[j]=t;
+function spStoreMgrDragStart(e, i){ window.__spSmDrag = i; try{ e.dataTransfer.setData('text/plain', String(i)); e.dataTransfer.effectAllowed='move'; }catch(_){} e.stopPropagation(); }
+function spStoreMgrDrop(e, destIdx){
+  e.preventDefault();
+  const sp = window.__sp;
+  const src = (window.__spSmDrag!=null) ? window.__spSmDrag : parseInt(e.dataTransfer && e.dataTransfer.getData('text/plain'));
+  window.__spSmDrag = null;
+  if (src==null || isNaN(src) || src===destIdx || src<0 || src>=sp.stores.length) return;
+  const arr = sp.stores.slice();
+  const [moved] = arr.splice(src,1);
+  const insertAt = src < destIdx ? destIdx-1 : destIdx;   // 제거로 인한 인덱스 보정
+  arr.splice(Math.max(0,insertAt), 0, moved);
+  sp.stores = arr; window.__spDirty = true; spStoreMgrRenderList(); spRenderSim();
+}
+function spStoreMgrRename(oldName, val){
+  const sp = window.__sp; const nn = (val||'').trim();
+  if (!nn || nn===oldName) { spStoreMgrRenderList(); return; }
+  if (nn === '본사') { alert('본사로는 변경할 수 없습니다.'); spStoreMgrRenderList(); return; }
+  if (sp.stores.includes(nn)) { alert('이미 있는 매장명입니다.'); spStoreMgrRenderList(); return; }
+  sp.stores = sp.stores.map(s => s===oldName ? nn : s);
+  Object.keys(sp.place).forEach(k => { if (sp.place[k]===oldName) sp.place[k]=nn; });
+  if (sp.storeTo[oldName]!=null) { sp.storeTo[nn]=sp.storeTo[oldName]; delete sp.storeTo[oldName]; }
   window.__spDirty = true; spStoreMgrRenderList(); spRenderSim();
+}
+function spStoreMgrSetTO(store, val){
+  const sp = window.__sp; const n = Math.max(0, parseInt(val)||0);
+  sp.storeTo[store] = n; window.__spDirty = true; spRenderSim();
 }
 function spStoreMgrAdd(){
   const el = document.getElementById('spStoreMgrNew'); const nm = (el?.value||'').trim();
