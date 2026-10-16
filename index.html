@@ -667,13 +667,15 @@ table.g-tbl th{background:var(--crm);font-weight:700}
 </div>
 
 <div class="modal-bg" id="catModal">
-  <div class="modal-inner">
-    <div class="modal-title" id="catModalTitle">게시판 카테고리 관리</div>
-    <div class="tag-list" id="catList"></div>
-    <button class="btn-add-tag" id="catModalAddBtn" onclick="addCatField()"><i class="ti ti-plus"></i> 카테고리 추가</button>
-    <div class="modal-footer">
+  <div class="modal-inner" style="display:flex;flex-direction:column;max-height:90vh;padding:0;overflow:hidden">
+    <div class="modal-title" style="display:flex;align-items:center;gap:8px;margin:0;padding:15px 20px;border-bottom:0.5px solid var(--crd);flex-shrink:0;background:#fff">
+      <span id="catModalTitle" style="flex:1;min-width:0">게시판 카테고리 관리</span>
       <button class="btn-sm ghost" onclick="closeCatModal()">취소</button>
       <button class="btn-sm primary" id="catModalOkBtn" onclick="saveCats()">저장</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px;overflow-y:auto;flex:1 1 auto">
+      <div class="tag-list" id="catList"></div>
+      <button class="btn-add-tag" id="catModalAddBtn" onclick="addCatField()"><i class="ti ti-plus"></i> 카테고리 추가</button>
     </div>
   </div>
 </div>
@@ -1301,13 +1303,13 @@ async function loginAs(user) {
   document.getElementById('sidebarInfoTxt').textContent = user.store + ' · ' + user.name;
   loadAppSettings();
   loadSecureMenuSettings();
-  loadCats();
-  setInterval(checkScheduled, 60000);
-
-  // check for deep-link post
+  // 딥링크(?post=123): loadCats 가 goPage('all') 로 덮어쓰지 않도록 먼저 플래그 설정
   const params = new URLSearchParams(location.search);
   const postId = params.get('post');
-  if (postId) openPostById(parseInt(postId));
+  window.__deepPost = postId ? parseInt(postId) : null;
+  loadCats();   // 내부에서 __deepPost 있으면 openPostById, 없으면 goPage('all')
+  setInterval(checkScheduled, 60000);
+
   const opsB = params.get('opsboard');
   if (opsB) { setTimeout(function(){ try{ if(typeof opsCanSee==='function' && opsCanSee()){ window.__ops.boardId=parseInt(opsB); goPage('opsboard'); const oc=params.get('opscard'); if(oc){ setTimeout(function(){ try{ opsOpenCard(parseInt(oc)); }catch(e){} }, 1300); } } }catch(e){} }, 700); }
 
@@ -1404,7 +1406,9 @@ async function loadCats() {
   }
 
   renderCatNav();
-  goPage('all');
+  // 딥링크로 들어온 경우 해당 게시글 상세로 (목록으로 덮어쓰지 않음)
+  if (window.__deepPost) { const __dp = window.__deepPost; window.__deepPost = null; openPostById(__dp); }
+  else goPage('all');
   updateNotifDot();
   loadFeatureFlags();
 
@@ -1920,34 +1924,46 @@ function goPage(page) {
 
 // ── BOARD ─────────────────────────────────────────
 const BOARD_PAGE = 20;
+let __boardSearchTimer = null;
+// 셸(헤더·탭·검색창)만 1회 렌더 → 검색/페이지 변경은 리스트 영역(#boardListWrap)만 갱신해 검색창 포커스 유지
 async function renderBoard(area, opts) {
   if (!opts || !opts.keepPage) window.__boardPage = 0;
-  const __page  = window.__boardPage || 0;
-  const __limit = (__page + 1) * BOARD_PAGE;
-  area.innerHTML = `<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>`;
-  const q = (document.getElementById('boardSearch')?.value || '').trim().toLowerCase();
-  await poLoadSecure();
-  const postsRaw = await poList(currentCatId, q||null, __limit);
-  const __fetchedFull = (postsRaw || []).length >= __limit;   // 상한까지 꽉 찼으면 더 있을 수 있음
-  // 임시저장(draft)·예약(scheduled) 글은 게시판에 노출하지 않음 → 게시완료(published)만.
-  //  (작성자·관리자 본인에게도 초안은 게시판에 안 뜨고, '임시저장함'에서만 관리)
-  const filtered = (postsRaw || []).filter(p => (p.status||'published')==='published');
-  const week = new Date(Date.now() - 7*24*60*60*1000).toISOString();
-
+  const curQ = (opts && opts.keepSearch) ? (document.getElementById('boardSearch')?.value || '') : '';
   const catTabs = visibleCats().map(c =>
     `<button class="tab-btn${c.id===currentCatId?' active':''}" onclick="switchCat(${c.id},'${c.name}')">${c.name}</button>`
   ).join('');
   const adminBtn = currentUser.role==='admin' ? `<button class="tab-manage" onclick="openCatModal()"><i class="ti ti-settings"></i> 카테고리 관리</button>` : '';
   const newBtn = canWrite() ? `<button class="btn-new" onclick="goPage('newpost')"><i class="ti ti-plus"></i> 새 공지</button>` : '';
-
-  // get comment counts
+  area.innerHTML = `
+    <div class="page-header"><div class="page-title">운영 매뉴얼</div><div class="page-sub">매장 운영 기준 및 공지 열람</div></div>
+    <div class="board-tabs">${catTabs}${adminBtn}</div>
+    <div class="board-toolbar">
+      <div class="search-box"><i class="ti ti-search" style="color:var(--th)"></i><input id="boardSearch" placeholder="공지 검색... (제목·본문)" value="${esc(curQ)}" oninput="boardSearchInput()" /></div>
+      ${newBtn}
+    </div>
+    <div id="boardListWrap"><div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div></div>`;
+  renderBoardList();
+}
+function boardSearchInput(){
+  clearTimeout(__boardSearchTimer);
+  __boardSearchTimer = setTimeout(()=>{ window.__boardPage = 0; renderBoardList(); }, 250);
+}
+async function renderBoardList(){
+  const wrap = document.getElementById('boardListWrap'); if (!wrap) return;
+  const __page  = window.__boardPage || 0;
+  const __limit = (__page + 1) * BOARD_PAGE;
+  const q = (document.getElementById('boardSearch')?.value || '').trim().toLowerCase();
+  await poLoadSecure();
+  const postsRaw = await poList(currentCatId, q||null, __limit);
+  const __fetchedFull = (postsRaw || []).length >= __limit;
+  const filtered = (postsRaw || []).filter(p => (p.status||'published')==='published');
+  const week = new Date(Date.now() - 7*24*60*60*1000).toISOString();
   const postIds = filtered.map(p=>p.id);
   let cmtCounts = {};
   if (postIds.length > 0) {
     const { data: cmts } = await sb.from('comments').select('post_id').in('post_id', postIds);
     (cmts||[]).forEach(c => { cmtCounts[c.post_id] = (cmtCounts[c.post_id]||0)+1; });
   }
-
   const postHtml = filtered.length ? filtered.map(p => {
     const isNew = new Date(p.created_at) >= new Date(week);
     const accLbl = postIsManagerAccess(p.access)?'매니저 이상':'전 직원';
@@ -1965,17 +1981,9 @@ async function renderBoard(area, opts) {
         ${(['admin','dept','ceo','executive_director'].includes(currentUser.role) || currentUser.is_master || currentUser.is_vice_master || currentUser.part) ? `<span class="read-rate" id="rate-${p.id}">확인률 로드중...</span>` : ''}
       </div>
     </div>`;
-  }).join('') : `<div style="text-align:center;padding:40px;color:var(--th);font-size:14px">등록된 공지가 없습니다.</div>`;
-
-  area.innerHTML = `
-    <div class="page-header"><div class="page-title">운영 매뉴얼</div><div class="page-sub">매장 운영 기준 및 공지 열람</div></div>
-    <div class="board-tabs">${catTabs}${adminBtn}</div>
-    <div class="board-toolbar">
-      <div class="search-box"><i class="ti ti-search" style="color:var(--th)"></i><input id="boardSearch" placeholder="공지 검색..." oninput="renderBoard(document.getElementById('contentArea'))" /></div>
-      ${newBtn}
-    </div>
-    <div class="post-list">${postHtml}</div>
-    ${__fetchedFull ? `<div style="text-align:center;margin:14px 0"><button class="btn-cancel-sm" style="padding:9px 22px;font-size:13px" onclick="window.__boardPage=(window.__boardPage||0)+1;renderBoard(document.getElementById('contentArea'),{keepPage:true})"><i class="ti ti-chevron-down"></i> 더 보기</button></div>` : ''}`;
+  }).join('') : `<div style="text-align:center;padding:40px;color:var(--th);font-size:14px">${q?'검색 결과가 없습니다.':'등록된 공지가 없습니다.'}</div>`;
+  wrap.innerHTML = `<div class="post-list">${postHtml}</div>`
+    + (__fetchedFull ? `<div style="text-align:center;margin:14px 0"><button class="btn-cancel-sm" style="padding:9px 22px;font-size:13px" onclick="window.__boardPage=(window.__boardPage||0)+1;renderBoardList()"><i class="ti ti-chevron-down"></i> 더 보기</button></div>` : '');
 
   // load read rates async
   if ((['admin','dept','ceo','executive_director'].includes(currentUser.role) || currentUser.is_master || currentUser.is_vice_master || currentUser.part) && filtered.length > 0) {
@@ -3719,7 +3727,7 @@ async function openEditUser(userId){
   document.querySelector('#catModal .modal-inner').classList.add('wide');
   document.getElementById('catModalTitle').textContent = userId?'직원 정보 수정':'직원 추가';
   document.getElementById('catList').innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
       <div><label class="form-label">이름 *</label><input class="form-input" id="eu_name" value="${u?.name||''}" placeholder="홍길동"/></div>
       <div><label class="form-label">계정 코드</label>
         ${editingUserId
@@ -17129,6 +17137,37 @@ function spPosRank(p){
 }
 function fmtHireShort(d){ if(!d) return ''; const s=String(d).slice(0,10).replace(/-/g,'.'); return s.length>=10 ? s.slice(2) : s; }
 
+// ── 열람 권한 UI (직원 면담 메뉴와 동일한 방식: 권한자 표기 strip + 체크박스 예외/제외 모달) ──
+function spDefaultFull(u){ return !!(u && (u.is_master || u.is_vice_master || u.role==='admin' || u.role==='hr' || ['운영','운영팀','인사팀'].includes(u.part||''))); }
+function spIsViewer(u){ if(!u) return false; const id=String(u.id); if((window.__spExcluded||[]).includes(id)) return false; return spDefaultFull(u) || (window.__spAllowed||[]).includes(id); }
+async function spLoadPeople(){ try{ const { data } = await sb.from('users').select('id,name,is_master,is_vice_master,role,store,part,active').eq('active',true).order('name'); window.__spPeople=data||[]; }catch(e){ window.__spPeople=window.__spPeople||[]; } return window.__spPeople; }
+function spViewerStripHtml(){
+  const full=(window.__spPeople||[]).filter(u=>spIsViewer(u));
+  return '<div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:var(--tm)"><i class="ti ti-eye"></i> <b>열람 권한</b> <span style="color:var(--ts)">'+(full.map(u=>esc(u.name)).join(' · ')||'-')+'</span>'+(currentUser && currentUser.is_master?' <button class="btn-cancel-sm" style="font-size:11px;padding:3px 9px;margin-left:6px" onclick="spPermMgr()"><i class="ti ti-settings"></i> 열람 권한 관리</button>':'')+'</div>';
+}
+function spPermMgr(){
+  if(!currentUser.is_master){ alert('총괄만 설정할 수 있습니다.'); return; }
+  const rows=(window.__spPeople||[]).filter(u=>u.active!==false).slice().sort((a,b)=>(spDefaultFull(b)?1:0)-(spDefaultFull(a)?1:0)).map(u=>{
+    const def=spDefaultFull(u); const checked=spIsViewer(u);
+    const tag=u.is_master?'총괄':(u.is_vice_master?'부총괄':((['운영','운영팀','인사팀'].includes(u.part||'')||u.role==='admin'||u.role==='hr')?'운영·인사':((window.__spAllowed||[]).includes(String(u.id))?'예외':'')));
+    const k=(String(u.name)+' '+String(u.store||'')+' '+String(u.part||'')).toLowerCase().replace(/"/g,'');
+    return '<label class="spperm-row" data-k="'+k+'" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--crd)"><input type="checkbox" class="spperm-ck" data-id="'+u.id+'" data-def="'+(def?1:0)+'" '+(checked?'checked':'')+'> <span style="flex:1">'+esc(u.name)+' <span style="font-size:11px;color:var(--th)">'+esc(u.store||u.part||'')+'</span></span><span style="font-size:10px;color:'+(def?'var(--gn)':'var(--th)')+'">'+tag+'</span></label>';
+  }).join('');
+  const modal=document.createElement('div'); modal.id='spPermMgrModal'; modal.style.cssText='position:fixed;inset:0;background:rgba(43,26,14,.5);z-index:340;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML='<div style="background:#fff;border-radius:14px;max-width:460px;width:94vw;display:flex;flex-direction:column;max-height:88vh"><div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:0.5px solid var(--crd)"><b>인원 배치 열람 권한 관리 (총괄 전용)</b><button onclick="document.getElementById(\'spPermMgrModal\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div><div style="padding:16px 20px;overflow-y:auto"><input id="spPermMgrSearch" class="form-input" placeholder="이름·매장·파트 검색" oninput="spPermMgrFilter(this.value)" style="margin-bottom:10px" autocomplete="off"><p style="font-size:12px;color:var(--th);margin-bottom:10px">총괄·부총괄·운영·인사팀은 <b>기본 포함</b>됩니다. 직무상 열람이 불필요한 인원은 <b>체크 해제</b>로 제외, 나머지는 체크로 추가합니다. (총괄만 수정)</p><div id="spPermMgrList">'+(rows||'<div style="color:var(--th);font-size:13px">대상 직원이 없습니다.</div>')+'</div></div><div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:0.5px solid var(--crd)"><button class="btn-cancel-sm" onclick="document.getElementById(\'spPermMgrModal\').remove()">취소</button><button class="btn-submit" onclick="spPermMgrSave()">저장</button></div></div>';
+  document.body.appendChild(modal);
+}
+function spPermMgrFilter(q){ q=(q||'').trim().toLowerCase(); document.querySelectorAll('#spPermMgrModal .spperm-row').forEach(function(r){ r.style.display=(!q||(r.getAttribute('data-k')||'').indexOf(q)>=0)?'':'none'; }); }
+async function spPermMgrSave(){
+  const boxes=[...document.querySelectorAll('#spPermMgrModal .spperm-ck')]; const added=[]; const excluded=[];
+  boxes.forEach(function(x){ const id=x.getAttribute('data-id'); const def=x.getAttribute('data-def')==='1'; if(x.checked){ if(!def) added.push(id); } else { if(def) excluded.push(id); } });
+  window.__spAllowed=added.map(String); window.__spExcluded=excluded.map(String);
+  const [r1,r2]=await Promise.all([ sb.from('app_settings').upsert({key:'staffing_allowed_users',value:JSON.stringify(window.__spAllowed)},{onConflict:'key'}), sb.from('app_settings').upsert({key:'staffing_excluded_users',value:JSON.stringify(window.__spExcluded)},{onConflict:'key'}) ]);
+  if(r1.error||r2.error){ alert('저장 오류: '+((r1.error||r2.error).message)); return; }
+  const m=document.getElementById('spPermMgrModal'); if(m) m.remove();
+  renderStaffingPlan(document.getElementById('contentArea'));
+}
+
 // 열람 권한 로드(총괄·부총괄·운영·인사 + 지정계정 − 제외계정)
 async function spLoadPerm(){
   let allowed=[], excluded=[];
@@ -17170,16 +17209,12 @@ async function renderStaffingPlan(area){
   if (!roleOptions || !roleOptions.length) { try { await loadRoleOptions(); } catch(e){} }
   await spLoadStateColors();
   await spLoadPosColors();
+  await spLoadPeople();
   const tab = (window.__spTab) || 'sim';
-  const gear = (currentUser && currentUser.is_master)
-    ? '<button class="btn-cancel-sm" style="font-size:11px;padding:3px 9px" onclick="spOpenPermModal()" title="열람 권한 예외 관리"><i class="ti ti-settings"></i> 권한 설정</button>' : '';
   area.innerHTML = ''
     + '<div class="page-header"><div class="page-title">인원 배치 관리</div>'
     +   '<div class="page-sub">직원 배치 시뮬레이션 · 발령 공지 생성 · 코치 관할 관리</div></div>'
-    + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#F5F7FA;border:0.5px solid var(--crd);border-radius:8px;padding:7px 12px;margin-bottom:10px">'
-    +   '<span style="font-size:12px;color:var(--ts)"><i class="ti ti-eye"></i> 열람 권한: <b>총괄 · 부총괄 · 운영팀 · 인사팀</b> (+ 지정 계정)</span>'
-    +   '<span style="margin-left:auto">'+gear+'</span>'
-    + '</div>'
+    + spViewerStripHtml()
     + '<div id="spLegend">'+renderStaffingLegend()+'</div>'
     + '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">'
     +   '<button class="staff-tab'+(tab==='sim'?' active':'')+'" onclick="spSwitchTab(\'sim\')"><i class="ti ti-layout-grid"></i> 직원 배치 시뮬레이션</button>'
@@ -17324,10 +17359,18 @@ function spCardHtml(key, opts){
   const hist = (!p.__dummy && window.__sp.txCount[String(p.id)]>0)
     ? '<span onclick="event.stopPropagation();spOpenStaffHistory(\''+p.id+'\')" title="이동 이력 '+window.__sp.txCount[String(p.id)]+'건" style="cursor:pointer;color:#B45309;font-size:11px;margin-left:2px">↔</span>' : '';
   const tag = (opts && opts.tag) ? opts.tag : '';
-  // 3줄 세로 표기: 1) 이름(볼드) 2) 직책 3) 입사일
+  // 예정자(가상카드)는 입사일 대신 '설정한 예정 날짜 + 라벨' 표기
+  let dateTxt = esc(hire);
+  if (p.__dummy) {
+    const dd = p.hire_date || p.retire_date || '';
+    const md = (dd && String(dd).length>=10) ? (String(dd).slice(5,7)+'/'+String(dd).slice(8,10)) : '';
+    const lbl = p.__kind==='resign' ? '퇴사예정' : (p.__kind==='hire' ? '입사예정' : '');
+    dateTxt = (md ? md+' ' : '') + lbl;
+  }
+  // 3줄 세로 표기: 1) 이름(볼드) 2) 직책 3) 입사일/예정일
   const line1 = '<span style="display:inline-flex;align-items:center;gap:3px;font-weight:700;font-size:12px">'+dummyTag+esc(p.name)+hist+delBtn+'</span>';
   const line2 = '<span style="font-size:10px;opacity:.8;font-weight:600;line-height:1.3">'+(pos?esc(pos):'&nbsp;')+'</span>';
-  const line3 = '<span style="font-size:9px;opacity:.7;font-weight:500;line-height:1.2">'+(esc(hire)||'&nbsp;')+(tag?' '+tag:'')+'</span>';
+  const line3 = '<span style="font-size:9px;opacity:.75;font-weight:600;line-height:1.2">'+(dateTxt||'&nbsp;')+(tag?' '+tag:'')+'</span>';
   return '<div class="sp-card" draggable="true" ondragstart="spDragStart(event,\''+p.id+'\')" onclick="spCardMenu(event,\''+p.id+'\')" '
     + 'style="display:inline-flex;flex-direction:column;align-items:flex-start;background:'+c.bg+';color:'+c.fg+';border:0.5px solid rgba(0,0,0,.12);border-radius:8px;padding:5px 9px;margin:3px;cursor:pointer;white-space:nowrap">'
     + line1 + line2 + line3 + '</div>';
@@ -17394,9 +17437,9 @@ function spRenderSim(){
       : '';
     const delRow = sp.toEdit ? '<button onclick="spDelStore(\''+q(store)+'\')" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:12px;margin-left:4px" title="매장 행 삭제"><i class="ti ti-trash"></i></button>' : '';
     return '<div class="sp-row" id="sprow-'+idx+'" ondragover="event.preventDefault()" ondrop="spDrop(event,\''+q(store)+'\')" '
-      + 'style="display:flex;align-items:flex-start;gap:8px;border:0.5px solid var(--crd);border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#fff">'
+      + 'style="display:flex;align-items:flex-start;gap:8px;border:0.5px solid var(--crd);border-radius:10px;padding:8px 10px;background:#fff">'
       + '<span draggable="true" ondragstart="spRowDragStart(event,\''+q(store)+'\')" title="드래그로 순서 변경" style="cursor:grab;color:var(--th);font-size:14px;padding-top:2px">⠿</span>'
-      + '<div style="min-width:120px;flex-shrink:0">'
+      + '<div style="min-width:110px;flex-shrink:0">'
       +   '<div style="font-size:13px;font-weight:700">'+esc(store)+delRow+'</div>'
       +   '<div style="font-size:11px;color:var(--th);white-space:nowrap">'+actual+' / '+to+' <span style="color:'+diffColor+';font-weight:600">('+diffStr+')</span>'+toCtrl+'</div>'
       + '</div>'
@@ -17407,11 +17450,11 @@ function spRenderSim(){
   const panelSection = (title, bucket, icon) => {
     const keys = spKeysIn(bucket);
     const cards = keys.map(k=>spCardHtml(k)).join('') || '<span style="font-size:11px;color:var(--th)">여기로 드래그</span>';
-    return '<div class="sp-row" ondragover="event.preventDefault()" ondrop="spDrop(event,\''+bucket+'\')" style="border:0.5px solid var(--crd);border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#fff">'
+    return '<div class="sp-row" ondragover="event.preventDefault()" ondrop="spDrop(event,\''+bucket+'\')" style="border:0.5px solid var(--crd);border-radius:10px;padding:8px 10px;background:#fff">'
       + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:12px;font-weight:700"><i class="ti '+icon+'"></i> '+title+' ('+keys.length+')</span></div>'
       + '<div style="display:flex;flex-wrap:wrap;align-items:center;min-height:32px">'+cards+'</div></div>';
   };
-  // [파트4] 채용 예정: 매장 배치돼도 풀에서 사라지지 않음(상태 태그 표시)
+  // [파트4] 입사 예정: 매장 배치돼도 풀에서 사라지지 않음(상태 태그 표시)
   const hireList = (sp.dummies||[]).filter(d=>d.kind==='hire');
   const hireCards = hireList.map(d=>{
     const b = sp.place[d.id];
@@ -17419,15 +17462,24 @@ function spRenderSim(){
     const tag = placed ? '<span style="background:#DCFCE7;color:#15803D;border-radius:6px;padding:0 5px">→ '+esc(b)+' 배치됨</span>' : '';
     return spCardHtml(d.id, { tag: tag });
   }).join('') || '<span style="font-size:11px;color:var(--th)">[+ 예정자 등록]으로 추가</span>';
-  const hirePanel = '<div class="sp-row" ondragover="event.preventDefault()" ondrop="spDrop(event,\''+SP_HIRE+'\')" style="border:0.5px solid var(--crd);border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#fff">'
-    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:12px;font-weight:700"><i class="ti ti-user-plus"></i> 채용 예정 ('+hireList.length+')</span></div>'
+  const hirePanel = '<div class="sp-row" ondragover="event.preventDefault()" ondrop="spDrop(event,\''+SP_HIRE+'\')" style="border:0.5px solid var(--crd);border-radius:10px;padding:8px 10px;background:#fff">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:12px;font-weight:700"><i class="ti ti-user-plus"></i> 입사 예정 ('+hireList.length+')</span></div>'
     + '<div style="display:flex;flex-wrap:wrap;align-items:center;min-height:32px">'+hireCards+'</div></div>';
+  // 대기 패널 — 최상단(요약 장표 아래)으로 이동, 3섹션 가로 배치
+  const waitPanel = '<div style="margin-bottom:12px">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:13px;font-weight:700"><i class="ti ti-users"></i> 대기 패널</span>'
+    +   '<button class="btn-cancel-sm" style="font-size:11px" onclick="spOpenRegister()"><i class="ti ti-user-plus"></i> 예정자 등록</button></div>'
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px">'
+    +   panelSection('미배치 인원', SP_WAIT, 'ti-user-off')
+    +   panelSection('퇴사 예정', SP_RESIGN, 'ti-user-minus')
+    +   hirePanel
+    + '</div></div>';
 
   body.innerHTML = ''
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
     +   '<label style="font-size:12px;color:var(--ts)">작성 기준일 <input type="date" id="spPlanDate" value="'+sp.planDate+'" onchange="spChangeDate(this.value)" style="border:0.5px solid var(--crd);border-radius:7px;padding:5px 8px;font-size:12px"></label>'
     +   '<button class="btn-cancel-sm" style="font-size:12px'+(sp.toEdit?';background:var(--brm);color:#fff;border-color:var(--brm)':'')+'" onclick="spToggleTOEdit()"><i class="ti ti-adjustments"></i> T.O 편집</button>'
-    +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spAddEmptyRow()"><i class="ti ti-row-insert-bottom"></i> 빈 매장 행</button>'
+    +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spOpenStoreMgr()"><i class="ti ti-building-store"></i> 매장 배치 관리</button>'
     +   '<button class="btn-cancel-sm" style="font-size:12px;color:var(--bl);border-color:var(--bl)" onclick="spResetToLive()"><i class="ti ti-refresh"></i> 최신 계정 정보로 복구</button>'
     +   '<button class="btn-cancel-sm" style="font-size:12px;color:var(--gn);border-color:var(--gn)" onclick="spSave()"><i class="ti ti-device-floppy"></i> 저장</button>'
     +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spOpenPlanList()"><i class="ti ti-history"></i> 저장된 계획</button>'
@@ -17435,16 +17487,56 @@ function spRenderSim(){
     +   '<span style="font-size:11px;color:var(--th);margin-left:auto"><i class="ti ti-shield-check"></i> 드래그·클릭 이동은 시뮬레이션일 뿐 실제 직원정보를 바꾸지 않습니다.</span>'
     + '</div>'
     + dashHtml
-    + '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">'
-    +   '<div style="flex:1;min-width:320px">'+rowsHtml+'</div>'
-    +   '<div style="width:300px;flex-shrink:0">'
-    +     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:13px;font-weight:700">대기 패널</span>'
-    +       '<button class="btn-cancel-sm" style="font-size:11px" onclick="spOpenRegister()"><i class="ti ti-user-plus"></i> 예정자 등록</button></div>'
-    +     panelSection('미배치 인원', SP_WAIT, 'ti-user-off')
-    +     panelSection('퇴사 예정', SP_RESIGN, 'ti-user-minus')
-    +     hirePanel
-    +   '</div>'
-    + '</div>';
+    + waitPanel
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;align-items:start">'+rowsHtml+'</div>';
+}
+// 매장 배치 관리 모달 (순서 ↑↓ · 삭제 · 빈 매장 추가)
+function spOpenStoreMgr(){
+  const old = document.getElementById('spStoreMgrModal'); if (old) old.remove();
+  const m = document.createElement('div'); m.id='spStoreMgrModal'; m.className='modal-bg open';
+  m.innerHTML = '<div class="modal-inner" style="width:420px;max-width:94vw;display:flex;flex-direction:column;max-height:88vh;padding:0;overflow:hidden">'
+    + '<div class="modal-title" style="display:flex;align-items:center;gap:8px;margin:0;padding:15px 20px;border-bottom:0.5px solid var(--crd)"><span style="flex:1"><i class="ti ti-building-store"></i> 매장 배치 관리</span><button class="btn-sm primary" onclick="document.getElementById(\'spStoreMgrModal\').remove()">완료</button></div>'
+    + '<div style="padding:12px 16px;overflow-y:auto">'
+    +   '<div style="display:flex;gap:6px;margin-bottom:10px"><input class="form-input" id="spStoreMgrNew" placeholder="빈 매장(행) 이름 추가" style="flex:1;font-size:13px" onkeydown="if(event.key===\'Enter\')spStoreMgrAdd()"><button class="btn-submit" style="padding:7px 12px;font-size:13px" onclick="spStoreMgrAdd()">추가</button></div>'
+    +   '<div id="spStoreMgrList"></div>'
+    + '</div></div>';
+  document.body.appendChild(m);
+  spStoreMgrRenderList();
+}
+function spStoreMgrRenderList(){
+  const box = document.getElementById('spStoreMgrList'); if (!box) return;
+  const sp = window.__sp;
+  box.innerHTML = sp.stores.map((s,i)=>{
+    const cnt = spKeysIn(s).length;
+    return '<div style="display:flex;align-items:center;gap:6px;padding:7px 2px;border-bottom:0.5px solid var(--crd)">'
+      + '<span style="flex:1;font-size:13px;font-weight:600">'+esc(s)+' <span style="font-size:11px;color:var(--th);font-weight:400">('+cnt+'명)</span></span>'
+      + '<button class="btn-cancel-sm" style="padding:3px 7px;font-size:12px" onclick="spStoreMgrMove('+i+',-1)" '+(i===0?'disabled':'')+'>↑</button>'
+      + '<button class="btn-cancel-sm" style="padding:3px 7px;font-size:12px" onclick="spStoreMgrMove('+i+',1)" '+(i===sp.stores.length-1?'disabled':'')+'>↓</button>'
+      + '<button class="btn-cancel-sm" style="padding:3px 7px;font-size:12px;color:var(--rd);border-color:var(--rd)" onclick="spStoreMgrDel(\''+String(s).replace(/'/g,"\\'")+'\')"><i class="ti ti-trash"></i></button>'
+      + '</div>';
+  }).join('') || '<div style="color:var(--th);font-size:13px;padding:12px 0;text-align:center">매장이 없습니다. 위에서 추가하세요.</div>';
+}
+function spStoreMgrMove(i, dir){
+  const sp = window.__sp; const j = i+dir;
+  if (j<0 || j>=sp.stores.length) return;
+  const t = sp.stores[i]; sp.stores[i]=sp.stores[j]; sp.stores[j]=t;
+  window.__spDirty = true; spStoreMgrRenderList(); spRenderSim();
+}
+function spStoreMgrAdd(){
+  const el = document.getElementById('spStoreMgrNew'); const nm = (el?.value||'').trim();
+  if (!nm) return;
+  if (nm === '본사') { alert('본사는 추가할 수 없습니다.'); return; }
+  if (window.__sp.stores.includes(nm)) { alert('이미 있는 매장입니다.'); return; }
+  window.__sp.stores.push(nm); if (window.__sp.storeTo[nm]==null) window.__sp.storeTo[nm]=0;
+  if (el) el.value=''; window.__spDirty = true; spStoreMgrRenderList(); spRenderSim();
+}
+function spStoreMgrDel(store){
+  const sp = window.__sp;
+  const occupied = spKeysIn(store).length;
+  if (occupied > 0 && !confirm("'"+store+"' 에 배치된 "+occupied+"명은 미배치로 이동됩니다. 삭제할까요?")) return;
+  Object.keys(sp.place).forEach(k => { if (sp.place[k] === store) sp.place[k] = SP_WAIT; });
+  sp.stores = sp.stores.filter(s => s !== store); delete sp.storeTo[store];
+  window.__spDirty = true; spStoreMgrRenderList(); spRenderSim();
 }
 function spDashToggle(mode){ window.__spDashFilter = mode; spRenderSim(); }
 function spScrollToRow(idx){ const el = document.getElementById('sprow-'+idx); if (el){ el.scrollIntoView({behavior:'smooth', block:'center'}); el.style.transition='box-shadow .2s'; el.style.boxShadow='0 0 0 2px var(--brm)'; setTimeout(()=>{ try{ el.style.boxShadow='none'; }catch(_){} }, 1200); } }
@@ -17589,15 +17681,24 @@ async function spSave(){
 
 // ── 발령 공지 (HTML 표) ──
 function spBucketLabel(b){ if (b===SP_WAIT) return '미배치'; if (b===SP_RESIGN) return '퇴사'; if (b===SP_HIRE) return '채용예정'; return b; }
-async function spLoadReasons(){
-  let list = SP_REASON_TEMPLATES.slice();
-  try{ const { data } = await sb.from('app_settings').select('value').eq('key','staffing_reason_templates').maybeSingle();
-    if(data && data.value){ const v=JSON.parse(data.value); if(Array.isArray(v) && v.length) list=v; } }catch(e){}
-  window.__spReasons = list; return list;
+// 발령 공지 템플릿 (사유/직책/매장) — app_settings 저장, 사용자 편집
+async function spLoadTemplates(){
+  const def = { reason: SP_REASON_TEMPLATES.slice(), pos: ['바리스타 → 매니저B','매니저B → 매니저','팀원 → 바리스타'], store: [] };
+  try{
+    const { data } = await sb.from('app_settings').select('key,value').in('key',['staffing_reason_templates','staffing_pos_templates','staffing_store_templates']);
+    (data||[]).forEach(r=>{ try{ const v=JSON.parse(r.value||'[]'); if(Array.isArray(v)){ if(r.key==='staffing_reason_templates'&&v.length) def.reason=v; if(r.key==='staffing_pos_templates') def.pos=v; if(r.key==='staffing_store_templates') def.store=v; } }catch(e){} });
+  }catch(e){}
+  window.__spReasons=def.reason; window.__spPosTpl=def.pos; window.__spStoreTpl=def.store; return def;
 }
-function spReasonOptsHtml(){
-  const list = window.__spReasons || SP_REASON_TEMPLATES;
-  return '<option value="">사유 템플릿</option>' + list.map(t=>'<option value="'+esc(t)+'">'+esc(t)+'</option>').join('');
+function spTplOpts(list, label){ return '<option value="">'+label+'</option>' + (list||[]).map(t=>'<option value="'+esc(t)+'">'+esc(t)+'</option>').join(''); }
+function spReasonOptsHtml(){ return spTplOpts(window.__spReasons||SP_REASON_TEMPLATES, '사유 템플릿'); }
+function spPosOptsHtml(){ return spTplOpts(window.__spPosTpl||[], '직책 템플릿'); }
+function spStoreOptsHtml(){ return spTplOpts(window.__spStoreTpl||[], '매장 템플릿'); }
+function spTplPick(sel){ const cell=sel.closest('td'); if(!cell) return; const div=cell.querySelector('[contenteditable]'); if(div && sel.value) div.textContent=sel.value; }
+function spAnnCellTpl(optsHtml, cls, inner){
+  return '<td style="border:1px solid #d0d0d0;padding:4px 6px;font-size:13px;text-align:center">'
+    + '<select class="'+cls+'" onchange="spTplPick(this)" style="font-size:11px;width:100%;margin-bottom:3px;border:0.5px solid #d0d0d0;border-radius:4px">'+optsHtml+'</select>'
+    + '<div contenteditable="true" style="min-height:18px;outline:none">'+inner+'</div></td>';
 }
 function spAnnRowHtml(c){
   const esc2=(s)=>esc(s==null?'':s);
@@ -17608,10 +17709,10 @@ function spAnnRowHtml(c){
   return '<tr>'
     + '<td '+ced+' style="'+td+';text-align:center;width:44px">'+c.no+'</td>'
     + '<td '+ced+' style="'+td+';font-weight:bold">'+esc2(c.name)+'</td>'
-    + '<td '+ced+' style="'+td+';text-align:center">'+posCell+'</td>'
-    + '<td '+ced+' style="'+td+';text-align:center">'+storeCell+'</td>'
+    + spAnnCellTpl(spPosOptsHtml(), 'sp-tpl-pos', posCell)
+    + spAnnCellTpl(spStoreOptsHtml(), 'sp-tpl-store', storeCell)
     + '<td style="border:1px solid #d0d0d0;padding:4px 6px;font-size:13px;color:#555">'
-    +   '<select class="sp-reason" onchange="spReasonPick(this)" style="font-size:11px;width:100%;margin-bottom:3px;border:0.5px solid #d0d0d0;border-radius:4px">'+spReasonOptsHtml()+'</select>'
+    +   '<select class="sp-reason" onchange="spTplPick(this)" style="font-size:11px;width:100%;margin-bottom:3px;border:0.5px solid #d0d0d0;border-radius:4px">'+spReasonOptsHtml()+'</select>'
     +   '<div class="sp-remark" '+ced+' style="min-height:18px;outline:none">'+esc2(c.remark)+'</div>'
     + '</td>'
     + '<td class="sp-ann-act" style="border:1px solid #d0d0d0;padding:4px;text-align:center;width:34px"><button onclick="spDelAnnRow(this)" title="행 삭제" style="background:none;border:none;color:#B91C1C;cursor:pointer;font-weight:700">✕</button></td>'
@@ -17619,23 +17720,15 @@ function spAnnRowHtml(c){
 }
 async function spOpenAnnounce(){
   const sp = window.__sp; if (!sp) return;
-  await spLoadReasons();
+  await spLoadTemplates();
   const changed = [];
+  // [필터] 순수 인사이동(매장→매장)만. 입사/퇴사 예정(대기 패널 인원·가상카드)은 완전 제외.
   sp.users.forEach(u => {
     const toBucket = sp.place[u.id];
     const asStore = u.store || '';
-    const pos = spPos(u) || '-';   // 직책(position) 기준 (코치 판별 포함). 미지정은 '-'
-    if (toBucket && toBucket !== asStore) {
-      let remark = '';
-      if (toBucket === SP_RESIGN) remark = '퇴사 예정';
-      else if (toBucket === SP_WAIT) remark = '미배치';
-      changed.push({ no:0, name:u.name, posFrom:pos, posTo:pos, storeFrom:asStore, storeTo:spBucketLabel(toBucket), remark });
-    }
-  });
-  (sp.dummies||[]).forEach(d => {
-    const b = sp.place[d.id];
-    if (b && b !== SP_HIRE && b !== SP_WAIT && b !== SP_RESIGN) {
-      changed.push({ no:0, name:d.name, posFrom:'신규', posTo:(d.position||'-'), storeFrom:'채용예정', storeTo:b, remark:'신규 채용(예정)' });
+    if (toBucket && ![SP_WAIT,SP_RESIGN,SP_HIRE].includes(toBucket) && toBucket !== asStore) {
+      const pos = spPos(u) || '-';
+      changed.push({ no:0, name:u.name, posFrom:pos, posTo:pos, storeFrom:asStore, storeTo:toBucket, remark:'' });
     }
   });
   changed.forEach((c,i)=>c.no=i+1);
@@ -17652,12 +17745,12 @@ async function spOpenAnnounce(){
     + '</tr></thead><tbody>'+trs+'</tbody></table>';
   const old = document.getElementById('spAnnounceModal'); if (old) old.remove();
   const m = document.createElement('div'); m.id='spAnnounceModal'; m.className='modal-bg open';
-  m.innerHTML = '<div class="modal-inner" style="width:800px;max-width:96vw">'
+  m.innerHTML = '<div class="modal-inner" style="width:860px;max-width:96vw">'
     + '<div class="modal-title"><i class="ti ti-file-text"></i> 발령 공지 (기준일 '+sp.planDate+')</div>'
     + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">'
     +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spAddAnnRow()"><i class="ti ti-plus"></i> 행 추가</button>'
-    +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spOpenReasonMgr()"><i class="ti ti-list-check"></i> 사유 템플릿 관리</button>'
-    +   '<span style="font-size:11px;color:var(--th);margin-left:auto">모든 칸 직접 수정 가능 · 복사 시 드롭다운·삭제버튼은 제외됩니다.</span>'
+    +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spOpenTplMgr()"><i class="ti ti-list-check"></i> 템플릿 관리 (사유·직책·매장)</button>'
+    +   '<span style="font-size:11px;color:var(--th);margin-left:auto">모든 칸 직접 수정·드롭다운 선택 가능 · 복사 시 드롭다운·삭제버튼은 제외됩니다.</span>'
     + '</div>'
     + '<div id="spAnnBox" style="border:0.5px solid var(--crd);border-radius:8px;padding:12px;max-height:50vh;overflow:auto;background:#fff">'+tableHtml+'</div>'
     + '<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">'
@@ -17666,7 +17759,6 @@ async function spOpenAnnounce(){
     + '</div></div>';
   document.body.appendChild(m);
 }
-function spReasonPick(sel){ const cell = sel.parentElement; if (!cell) return; const div = cell.querySelector('.sp-remark'); if (div && sel.value) div.textContent = sel.value; }
 function spRenumAnn(){ const tb=document.querySelector('#spAnnTable tbody'); if(!tb) return; [...tb.rows].forEach((tr,i)=>{ if(tr.cells[0]) tr.cells[0].textContent=i+1; }); }
 function spAddAnnRow(){ const tb=document.querySelector('#spAnnTable tbody'); if(!tb) return; tb.insertAdjacentHTML('beforeend', spAnnRowHtml({no:tb.rows.length+1,name:'',posFrom:'',posTo:'',storeFrom:'',storeTo:'',remark:''})); spRenumAnn(); }
 function spDelAnnRow(btn){ const tr=btn&&btn.closest('tr'); if(tr) tr.remove(); spRenumAnn(); }
@@ -17683,26 +17775,35 @@ function spCopyAnnounce(){
     } else { spCopyFallbackHtml(html); }
   }catch(e){ spCopyFallbackHtml(html); }
 }
-// 사유 템플릿 관리 (한 줄에 하나) — app_settings.staffing_reason_templates
-function spOpenReasonMgr(){
-  const list = window.__spReasons || SP_REASON_TEMPLATES;
-  const old = document.getElementById('spReasonModal'); if (old) old.remove();
-  const m = document.createElement('div'); m.id='spReasonModal'; m.className='modal-bg open';
-  m.innerHTML = '<div class="modal-inner" style="width:380px;max-width:94vw"><div class="modal-title"><i class="ti ti-list-check"></i> 사유 템플릿 관리</div>'
-    + '<div style="font-size:12px;color:var(--ts);margin-bottom:8px">한 줄에 하나씩 입력하세요. (추가·삭제·수정 자유)</div>'
-    + '<textarea id="spReasonText" class="form-input" style="min-height:160px;font-size:13px;line-height:1.6">'+esc(list.join('\n'))+'</textarea>'
-    + '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button class="btn-cancel-sm" onclick="document.getElementById(\'spReasonModal\').remove()">취소</button><button class="btn-submit" onclick="spSaveReasons()"><i class="ti ti-device-floppy"></i> 저장</button></div></div>';
+// 템플릿 관리 (사유·직책·매장 3종, 한 줄에 하나) — app_settings 저장
+function spOpenTplMgr(){
+  const r=(window.__spReasons||[]).join('\n'), p=(window.__spPosTpl||[]).join('\n'), s=(window.__spStoreTpl||[]).join('\n');
+  const old = document.getElementById('spTplModal'); if (old) old.remove();
+  const ta=(id,v)=>'<textarea id="'+id+'" class="form-input" style="min-height:92px;font-size:13px;line-height:1.6">'+esc(v)+'</textarea>';
+  const m = document.createElement('div'); m.id='spTplModal'; m.className='modal-bg open';
+  m.innerHTML = '<div class="modal-inner" style="width:440px;max-width:94vw;max-height:90vh;overflow-y:auto"><div class="modal-title"><i class="ti ti-list-check"></i> 공지 템플릿 관리</div>'
+    + '<div style="font-size:12px;color:var(--ts);margin-bottom:10px">각 칸에 한 줄당 하나씩 입력하세요. 표의 드롭다운에서 선택 후 직접 수정도 가능합니다.</div>'
+    + '<div style="font-size:12px;font-weight:700;margin:4px 0">직책 이동 템플릿</div>'+ta('spTplPos',p)
+    + '<div style="font-size:12px;font-weight:700;margin:10px 0 4px">매장 이동 템플릿</div>'+ta('spTplStore',s)
+    + '<div style="font-size:12px;font-weight:700;margin:10px 0 4px">사유(비고) 템플릿</div>'+ta('spTplReason',r)
+    + '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button class="btn-cancel-sm" onclick="document.getElementById(\'spTplModal\').remove()">취소</button><button class="btn-submit" onclick="spSaveTpl()"><i class="ti ti-device-floppy"></i> 저장</button></div></div>';
   document.body.appendChild(m);
 }
-async function spSaveReasons(){
-  const txt = document.getElementById('spReasonText')?.value || '';
-  const list = txt.split('\n').map(s=>s.trim()).filter(Boolean);
+async function spSaveTpl(){
+  const parse=(id)=> (document.getElementById(id)?.value||'').split('\n').map(x=>x.trim()).filter(Boolean);
+  const reason=parse('spTplReason'), pos=parse('spTplPos'), store=parse('spTplStore');
   try{
-    await sb.from('app_settings').upsert({ key:'staffing_reason_templates', value: JSON.stringify(list) }, { onConflict:'key' });
-    window.__spReasons = list.length ? list : SP_REASON_TEMPLATES.slice();
-    const mm = document.getElementById('spReasonModal'); if (mm) mm.remove();
+    await Promise.all([
+      sb.from('app_settings').upsert({ key:'staffing_reason_templates', value: JSON.stringify(reason) }, { onConflict:'key' }),
+      sb.from('app_settings').upsert({ key:'staffing_pos_templates', value: JSON.stringify(pos) }, { onConflict:'key' }),
+      sb.from('app_settings').upsert({ key:'staffing_store_templates', value: JSON.stringify(store) }, { onConflict:'key' })
+    ]);
+    window.__spReasons = reason.length?reason:SP_REASON_TEMPLATES.slice(); window.__spPosTpl=pos; window.__spStoreTpl=store;
+    const mm = document.getElementById('spTplModal'); if (mm) mm.remove();
     document.querySelectorAll('#spAnnTable select.sp-reason').forEach(sel=>{ const v=sel.value; sel.innerHTML=spReasonOptsHtml(); sel.value=v; });
-    alert('사유 템플릿이 저장되었습니다.');
+    document.querySelectorAll('#spAnnTable select.sp-tpl-pos').forEach(sel=>{ const v=sel.value; sel.innerHTML=spPosOptsHtml(); sel.value=v; });
+    document.querySelectorAll('#spAnnTable select.sp-tpl-store').forEach(sel=>{ const v=sel.value; sel.innerHTML=spStoreOptsHtml(); sel.value=v; });
+    alert('템플릿이 저장되었습니다.');
   }catch(e){ alert('저장 오류: '+(e.message||e)); }
 }
 function spCopyFallbackHtml(html){
