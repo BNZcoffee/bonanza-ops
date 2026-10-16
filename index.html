@@ -758,9 +758,9 @@ function isManagerRole(role) {
   return role === 'manager' || role.indexOf('manager') === 0;  // manager, manager_b, managerB(소문자화) 등
 }
 // 직책(position): 화면 표시·정렬 전용. 권한 role과 분리. null이면 role 기반 폴백.
-const SCH_POSITIONS = ['매니저','매니저B','바리스타','파티쉐','팀원','PT'];
+const SCH_POSITIONS = ['코치','매니저','매니저B','바리스타','파티쉐','팀원','PT'];
 function userPosition(u){ if(!u) return ''; if(u.position) return u.position; if(u.employment_type==='parttime') return 'PT'; const r=u.role||''; return (typeof roleLbl!=='undefined' && roleLbl[r]) || r || ''; }
-function positionRank(u){ const p=userPosition(u); if(p==='매니저') return 0; if(p==='매니저B'||/매니저\s*b/i.test(p)) return 1; if(p==='PT'||p==='파트타임'||(u&&u.employment_type==='parttime')) return 6; const r=(u&&u.role)||''; if(r==='manager') return 0; if(r.indexOf('manager')===0) return 1; const ord={ceo:0,executive_director:1,admin:2,dept:3,member:5}; if(r in ord) return ord[r]; return 5; }
+function positionRank(u){ const p=userPosition(u); if(p==='코치') return -1; if(p==='매니저') return 0; if(p==='매니저B'||/매니저\s*b/i.test(p)) return 1; if(p==='PT'||p==='파트타임'||(u&&u.employment_type==='parttime')) return 6; const r=(u&&u.role)||''; if(r==='manager') return 0; if(r.indexOf('manager')===0) return 1; const ord={ceo:0,executive_director:1,admin:2,dept:3,member:5}; if(r in ord) return ord[r]; return 5; }
 function schPositionOptions(cur){ const list=['',...SCH_POSITIONS]; if(cur && list.indexOf(cur)<0) list.push(cur); return list.map(o=>`<option value="${esc(o)}"${(cur||'')===o?' selected':''}>${o||'(직책 없음 · 직위 기준 자동)'}</option>`).join(''); }
 let roleOptions = [];  // [{role_key,label,is_core,sort_order}]
 
@@ -17116,9 +17116,7 @@ const SP_REASON_TEMPLATES = ['정기 인사이동','신규 매장 오픈 지원'
 function spPos(u){
   if (!u) return '';
   const p = String(u.position||'').trim();
-  if (p) return p;
-  // 코치 판별: position='코치' 또는 (권한 dept + 소속 파트 '운영')
-  if (u.role === 'dept' && String(u.part||'').trim() === '운영') return '코치';
+  if (p) return p;   // 코치 포함 모든 직책은 position 값으로 직접 지정
   if (u.employment_type === 'parttime') return 'PT';
   return '';   // 직책 미지정: 빈값(role 라벨 노출 금지)
 }
