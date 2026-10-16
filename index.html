@@ -17117,6 +17117,8 @@ function spPos(u){
   if (!u) return '';
   const p = String(u.position||'').trim();
   if (p) return p;
+  // 코치 판별: position='코치' 또는 (권한 dept + 소속 파트 '운영')
+  if (u.role === 'dept' && String(u.part||'').trim() === '운영') return '코치';
   if (u.employment_type === 'parttime') return 'PT';
   return '';   // 직책 미지정: 빈값(role 라벨 노출 금지)
 }
@@ -17246,13 +17248,13 @@ async function spSaveColors(){
   }catch(e){ alert('저장 오류: '+(e.message||e)); }
 }
 
-// ── 시뮬레이션 상태 초기화 ──
-async function spInit(){
+// ── 시뮬레이션 상태 초기화 ── (opts.fresh=true → 저장된 계획 무시하고 최신 계정정보로 복구)
+async function spInit(opts){
   const body = document.getElementById('spBody');
   if (body) body.innerHTML = '<div class="loading"><i class="ti ti-loader spin"></i> 배치 불러오는 중...</div>';
   const planDate = (window.__sp && window.__sp.planDate) || todayKST();
   const [uRes, soRes, txRes] = await Promise.all([
-    sb.from('users').select('id,name,store,role,position,employment_type,hire_date,retire_date,active').eq('active', true).neq('role','admin').order('store'),
+    sb.from('users').select('id,name,store,role,part,position,employment_type,hire_date,retire_date,active').eq('active', true).neq('role','admin').order('store'),
     sb.from('store_options').select('name,sort_order').order('sort_order'),
     (async()=>{ try{ return await sb.rpc('pt_list',{p_token:getSessionToken(),p_limit:2000}); }catch(e){ return {data:[]}; } })()
   ]);
@@ -17274,8 +17276,8 @@ async function spInit(){
   const storeTo = {};
   stores.forEach(s => { storeTo[s] = users.filter(u => (u.store||'') === s).length; });
   window.__sp = { planDate, users, stores, place, storeTo, dummies: [], planId: null, toEdit: false, txCount, title: '' };
-  // 저장된 계획 로드
-  try {
+  // 저장된 계획 로드 (fresh 복구 시 건너뜀 → 현재 계정정보 기준 초기 배치만)
+  if (!(opts && opts.fresh)) try {
     const { data } = await sb.rpc('sp_get', { p_token: getSessionToken(), p_plan_date: planDate });
     if (data && (data.placements || data.store_to)) {
       window.__sp.planId = data.id || null;
@@ -17290,6 +17292,7 @@ async function spInit(){
       window.__sp.stores.forEach(s=>{ if(window.__sp.storeTo[s]==null) window.__sp.storeTo[s]=0; });
     }
   } catch(e){ console.warn('[sp_get]', e); }
+  window.__spDirty = false;
   spRenderSim();
 }
 
@@ -17323,12 +17326,13 @@ function spCardHtml(key, opts){
   const hist = (!p.__dummy && window.__sp.txCount[String(p.id)]>0)
     ? '<span onclick="event.stopPropagation();spOpenStaffHistory(\''+p.id+'\')" title="이동 이력 '+window.__sp.txCount[String(p.id)]+'건" style="cursor:pointer;color:#B45309;font-size:11px;margin-left:2px">↔</span>' : '';
   const tag = (opts && opts.tag) ? opts.tag : '';
-  const posTxt = pos ? '<span style="font-size:10px;opacity:.75;font-weight:500">'+esc(pos)+'</span>' : '';
-  const sub = (hire || tag) ? '<span style="font-size:9px;opacity:.8;font-weight:500">'+esc(hire)+(hire&&tag?' · ':'')+tag+'</span>' : '';
+  // 3줄 세로 표기: 1) 이름(볼드) 2) 직책 3) 입사일
+  const line1 = '<span style="display:inline-flex;align-items:center;gap:3px;font-weight:700;font-size:12px">'+dummyTag+esc(p.name)+hist+delBtn+'</span>';
+  const line2 = '<span style="font-size:10px;opacity:.8;font-weight:600;line-height:1.3">'+(pos?esc(pos):'&nbsp;')+'</span>';
+  const line3 = '<span style="font-size:9px;opacity:.7;font-weight:500;line-height:1.2">'+(esc(hire)||'&nbsp;')+(tag?' '+tag:'')+'</span>';
   return '<div class="sp-card" draggable="true" ondragstart="spDragStart(event,\''+p.id+'\')" onclick="spCardMenu(event,\''+p.id+'\')" '
-    + 'style="display:inline-flex;flex-direction:column;align-items:flex-start;background:'+c.bg+';color:'+c.fg+';border:0.5px solid rgba(0,0,0,.12);border-radius:8px;padding:4px 8px;margin:3px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">'
-    + '<span style="display:inline-flex;align-items:center;gap:3px">'+dummyTag+esc(p.name)+posTxt+hist+delBtn+'</span>'
-    + sub + '</div>';
+    + 'style="display:inline-flex;flex-direction:column;align-items:flex-start;background:'+c.bg+';color:'+c.fg+';border:0.5px solid rgba(0,0,0,.12);border-radius:8px;padding:5px 9px;margin:3px;cursor:pointer;white-space:nowrap">'
+    + line1 + line2 + line3 + '</div>';
 }
 
 function spKeysIn(bucket){
@@ -17426,6 +17430,7 @@ function spRenderSim(){
     +   '<label style="font-size:12px;color:var(--ts)">작성 기준일 <input type="date" id="spPlanDate" value="'+sp.planDate+'" onchange="spChangeDate(this.value)" style="border:0.5px solid var(--crd);border-radius:7px;padding:5px 8px;font-size:12px"></label>'
     +   '<button class="btn-cancel-sm" style="font-size:12px'+(sp.toEdit?';background:var(--brm);color:#fff;border-color:var(--brm)':'')+'" onclick="spToggleTOEdit()"><i class="ti ti-adjustments"></i> T.O 편집</button>'
     +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spAddEmptyRow()"><i class="ti ti-row-insert-bottom"></i> 빈 매장 행</button>'
+    +   '<button class="btn-cancel-sm" style="font-size:12px;color:var(--bl);border-color:var(--bl)" onclick="spResetToLive()"><i class="ti ti-refresh"></i> 최신 계정 정보로 복구</button>'
     +   '<button class="btn-cancel-sm" style="font-size:12px;color:var(--gn);border-color:var(--gn)" onclick="spSave()"><i class="ti ti-device-floppy"></i> 저장</button>'
     +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spOpenPlanList()"><i class="ti ti-history"></i> 저장된 계획</button>'
     +   '<button class="btn-new" style="background:var(--brm);font-size:12px" onclick="spOpenAnnounce()"><i class="ti ti-file-text"></i> 발령 공지 생성</button>'
@@ -17452,7 +17457,7 @@ function spDrop(e, bucket){
   e.preventDefault();
   if (window.__spRowDrag){ spReorderStore(window.__spRowDrag, bucket); window.__spRowDrag = null; return; }
   const key = window.__spDrag || (e.dataTransfer && e.dataTransfer.getData('text/plain')); if (!key) return;
-  window.__sp.place[key] = bucket; window.__spDrag = null; spRenderSim();
+  window.__sp.place[key] = bucket; window.__spDrag = null; window.__spDirty = true; spRenderSim();
 }
 function spReorderStore(src, dest){
   const sp = window.__sp;
@@ -17460,19 +17465,30 @@ function spReorderStore(src, dest){
     const arr = sp.stores.filter(s=>s!==src);
     const di = arr.indexOf(dest);
     if (di < 0) { arr.push(src); } else { arr.splice(di, 0, src); }
-    sp.stores = arr;
+    sp.stores = arr; window.__spDirty = true;
     spRenderSim();
   }
 }
-function spSetTO(store, delta){ const sp = window.__sp; sp.storeTo[store] = Math.max(0, (sp.storeTo[store]||0) + delta); spRenderSim(); }
+function spSetTO(store, delta){ const sp = window.__sp; sp.storeTo[store] = Math.max(0, (sp.storeTo[store]||0) + delta); window.__spDirty = true; spRenderSim(); }
 function spToggleTOEdit(){ window.__sp.toEdit = !window.__sp.toEdit; spRenderSim(); }
-function spChangeDate(v){ if (!v) return; window.__sp.planDate = v; spInit(); }
+function spChangeDate(v){
+  if (!v || v === window.__sp.planDate) { return; }
+  if (window.__spDirty && !confirm('저장되지 않은 편집 내역은 초기화되고 현재 계정 정보로 복구됩니다.\n기준일을 변경할까요?')) {
+    const el = document.getElementById('spPlanDate'); if (el) el.value = window.__sp.planDate; return;
+  }
+  window.__sp.planDate = v; spInit();
+}
+// 최신 계정 정보로 복구(저장된 계획 무시)
+function spResetToLive(){
+  if (!confirm('저장되지 않은 편집 내역은 초기화되고 현재 계정 정보로 복구됩니다.\n계속할까요?')) return;
+  spInit({ fresh: true });
+}
 function spAddEmptyRow(){
   const name = prompt('추가할 매장(행) 이름을 입력하세요:'); if (name === null) return;
   const nm = name.trim(); if (!nm) return;
   if (nm === '본사') { alert('본사는 추가할 수 없습니다.'); return; }
   if (window.__sp.stores.includes(nm)) { alert('이미 있는 매장입니다.'); return; }
-  window.__sp.stores.push(nm); if (window.__sp.storeTo[nm]==null) window.__sp.storeTo[nm]=0; spRenderSim();
+  window.__sp.stores.push(nm); if (window.__sp.storeTo[nm]==null) window.__sp.storeTo[nm]=0; window.__spDirty = true; spRenderSim();
 }
 function spDelStore(store){
   const sp = window.__sp;
@@ -17480,7 +17496,7 @@ function spDelStore(store){
   if (occupied > 0 && !confirm("'"+store+"' 행에 배치된 "+occupied+"명은 미배치로 이동됩니다. 행을 삭제할까요?")) return;
   Object.keys(sp.place).forEach(k => { if (sp.place[k] === store) sp.place[k] = SP_WAIT; });
   sp.stores = sp.stores.filter(s => s !== store); delete sp.storeTo[store];
-  spRenderSim();
+  window.__spDirty = true; spRenderSim();
 }
 function spAddDummyTo(bucket){
   const kind = (bucket === SP_RESIGN) ? 'resign' : (bucket === SP_HIRE ? 'hire' : 'dummy');
@@ -17493,7 +17509,7 @@ function spAddDummyTo(bucket){
   window.__sp.place[id] = bucket;
   spRenderSim();
 }
-function spDelDummy(id){ window.__sp.dummies = (window.__sp.dummies||[]).filter(d => d.id !== id); delete window.__sp.place[id]; spCloseCardMenu(); spRenderSim(); }
+function spDelDummy(id){ window.__sp.dummies = (window.__sp.dummies||[]).filter(d => d.id !== id); delete window.__sp.place[id]; window.__spDirty = true; spCloseCardMenu(); spRenderSim(); }
 
 // ── [파트2] 카드 클릭 → 퀵 액션 메뉴 (장거리 드래그 대체) ──
 function spCardMenu(e, key){
@@ -17510,6 +17526,9 @@ function spCardMenu(e, key){
     + (!p.__dummy ? '<button class="btn-cancel-sm" style="width:100%;font-size:12px" onclick="spCloseCardMenu();spOpenStaffHistory(\''+key+'\')"><i class="ti ti-timeline"></i> 상세 히스토리/메모</button>'
                   : '<button class="btn-cancel-sm" style="width:100%;font-size:12px;color:var(--rd);border-color:var(--rd)" onclick="spDelDummy(\''+key+'\')"><i class="ti ti-trash"></i> 가상 카드 삭제</button>');
   document.body.appendChild(menu);
+  // 메뉴 내부 클릭은 바깥(document) 닫기 핸들러로 버블링되지 않도록 차단 → 드롭다운 즉시 닫힘 버그 방지
+  menu.addEventListener('click', function(ev){ ev.stopPropagation(); });
+  menu.addEventListener('mousedown', function(ev){ ev.stopPropagation(); });
   const mw = 214, mh = menu.offsetHeight || 180;
   let x = (e && e.clientX) || 100, y = (e && e.clientY) || 100;
   if (x + mw > window.innerWidth)  x = window.innerWidth - mw - 8;
@@ -17518,7 +17537,7 @@ function spCardMenu(e, key){
   setTimeout(()=>{ document.addEventListener('click', spCloseCardMenu, { once:true }); }, 0);
 }
 function spCloseCardMenu(){ const m = document.getElementById('spCardMenu'); if (m) m.remove(); }
-function spCardMove(key, bucket){ if (!bucket) return; window.__sp.place[key] = bucket; spCloseCardMenu(); spRenderSim(); }
+function spCardMove(key, bucket){ if (!bucket) return; window.__sp.place[key] = bucket; window.__spDirty = true; spCloseCardMenu(); spRenderSim(); }
 
 // ── [파트3] 입사·퇴사 예정자 통합 단일 등록 모달 ──
 function spOpenRegister(){
@@ -17554,6 +17573,7 @@ function spRegisterSubmit(){
   const id = 'dummy_' + Date.now() + '_' + Math.floor(Math.random()*1000);
   window.__sp.dummies.push({ id, name, position:pos, kind, date, status:pos });
   window.__sp.place[id] = store ? store : (kind==='hire' ? SP_HIRE : SP_RESIGN);
+  window.__spDirty = true;
   const mm = document.getElementById('spRegModal'); if (mm) mm.remove();
   spRenderSim();
 }
@@ -17565,19 +17585,48 @@ async function spSave(){
     store_to: sp.storeTo, placements: { assign, dummies: sp.dummies, rows: sp.stores } };
   const { data, error } = await sb.rpc('sp_save', { p_token: getSessionToken(), p_id: sp.planId || null, p_payload: payload });
   if (error) { alert('저장 오류: ' + error.message); return; }
-  if (data && data.ok) { sp.planId = data.id || sp.planId; alert('배치 계획이 저장되었습니다. ('+sp.planDate+')'); }
+  if (data && data.ok) { sp.planId = data.id || sp.planId; window.__spDirty = false; alert('배치 계획이 저장되었습니다. ('+sp.planDate+')'); }
   else { alert('저장 실패: ' + ((data&&data.error)||'알 수 없음')); }
 }
 
 // ── 발령 공지 (HTML 표) ──
 function spBucketLabel(b){ if (b===SP_WAIT) return '미배치'; if (b===SP_RESIGN) return '퇴사'; if (b===SP_HIRE) return '채용예정'; return b; }
-function spOpenAnnounce(){
+async function spLoadReasons(){
+  let list = SP_REASON_TEMPLATES.slice();
+  try{ const { data } = await sb.from('app_settings').select('value').eq('key','staffing_reason_templates').maybeSingle();
+    if(data && data.value){ const v=JSON.parse(data.value); if(Array.isArray(v) && v.length) list=v; } }catch(e){}
+  window.__spReasons = list; return list;
+}
+function spReasonOptsHtml(){
+  const list = window.__spReasons || SP_REASON_TEMPLATES;
+  return '<option value="">사유 템플릿</option>' + list.map(t=>'<option value="'+esc(t)+'">'+esc(t)+'</option>').join('');
+}
+function spAnnRowHtml(c){
+  const esc2=(s)=>esc(s==null?'':s);
+  const ced='contenteditable="true"';
+  const td='border:1px solid #d0d0d0;padding:6px 10px;font-size:13px;outline:none';
+  const posCell = (c.posFrom===c.posTo) ? (esc2(c.posTo)||'-') : (esc2(c.posFrom||'-')+' → '+esc2(c.posTo||'-'));
+  const storeCell = (c.storeFrom===c.storeTo) ? esc2(c.storeTo) : (esc2(c.storeFrom)+' → '+esc2(c.storeTo));
+  return '<tr>'
+    + '<td '+ced+' style="'+td+';text-align:center;width:44px">'+c.no+'</td>'
+    + '<td '+ced+' style="'+td+';font-weight:bold">'+esc2(c.name)+'</td>'
+    + '<td '+ced+' style="'+td+';text-align:center">'+posCell+'</td>'
+    + '<td '+ced+' style="'+td+';text-align:center">'+storeCell+'</td>'
+    + '<td style="border:1px solid #d0d0d0;padding:4px 6px;font-size:13px;color:#555">'
+    +   '<select class="sp-reason" onchange="spReasonPick(this)" style="font-size:11px;width:100%;margin-bottom:3px;border:0.5px solid #d0d0d0;border-radius:4px">'+spReasonOptsHtml()+'</select>'
+    +   '<div class="sp-remark" '+ced+' style="min-height:18px;outline:none">'+esc2(c.remark)+'</div>'
+    + '</td>'
+    + '<td class="sp-ann-act" style="border:1px solid #d0d0d0;padding:4px;text-align:center;width:34px"><button onclick="spDelAnnRow(this)" title="행 삭제" style="background:none;border:none;color:#B91C1C;cursor:pointer;font-weight:700">✕</button></td>'
+    + '</tr>';
+}
+async function spOpenAnnounce(){
   const sp = window.__sp; if (!sp) return;
+  await spLoadReasons();
   const changed = [];
   sp.users.forEach(u => {
     const toBucket = sp.place[u.id];
     const asStore = u.store || '';
-    const pos = spPos(u);   // 직책(position) 기준 — 시스템 role 라벨 배제
+    const pos = spPos(u) || '-';   // 직책(position) 기준 (코치 판별 포함). 미지정은 '-'
     if (toBucket && toBucket !== asStore) {
       let remark = '';
       if (toBucket === SP_RESIGN) remark = '퇴사 예정';
@@ -17592,52 +17641,41 @@ function spOpenAnnounce(){
     }
   });
   changed.forEach((c,i)=>c.no=i+1);
-  const esc2 = (s)=> esc(s==null?'':s);
-  const reasonOpts = '<option value="">사유 템플릿</option>' + SP_REASON_TEMPLATES.map(t=>'<option value="'+esc2(t)+'">'+esc2(t)+'</option>').join('');
-  const ced = 'contenteditable="true"';
-  let tableHtml;
-  if (!changed.length) { tableHtml = '<div style="padding:24px;text-align:center;color:var(--th)">변동 인원이 없습니다. (매장 이동을 먼저 반영하세요)</div>'; }
-  else {
-    const trs = changed.map(c => {
-      const posCell = (c.posFrom===c.posTo) ? esc2(c.posTo) : (esc2(c.posFrom)+' → '+esc2(c.posTo));
-      const storeCell = (c.storeFrom===c.storeTo) ? esc2(c.storeTo) : (esc2(c.storeFrom)+' → '+esc2(c.storeTo));
-      return '<tr>'
-        + '<td style="border:1px solid #d0d0d0;padding:6px 10px;text-align:center;font-size:13px">'+c.no+'</td>'
-        + '<td '+ced+' style="border:1px solid #d0d0d0;padding:6px 10px;font-size:13px;font-weight:bold;outline:none">'+esc2(c.name)+'</td>'
-        + '<td '+ced+' style="border:1px solid #d0d0d0;padding:6px 10px;text-align:center;font-size:13px;outline:none">'+posCell+'</td>'
-        + '<td '+ced+' style="border:1px solid #d0d0d0;padding:6px 10px;text-align:center;font-size:13px;outline:none">'+storeCell+'</td>'
-        + '<td style="border:1px solid #d0d0d0;padding:4px 6px;font-size:13px;color:#555">'
-        +   '<select onchange="spReasonPick(this)" style="font-size:11px;width:100%;margin-bottom:3px;border:0.5px solid #d0d0d0;border-radius:4px">'+reasonOpts+'</select>'
-        +   '<div class="sp-remark" '+ced+' style="min-height:18px;outline:none">'+esc2(c.remark)+'</div>'
-        + '</td>'
-        + '</tr>';
-    }).join('');
-    tableHtml = '<table id="spAnnTable" style="border-collapse:collapse;width:100%;font-family:\'맑은 고딕\',sans-serif;background:#ffffff">'
-      + '<thead><tr style="background:#f2f2f2">'
-      +   '<th style="border:1px solid #d0d0d0;padding:7px 10px;font-size:13px;width:44px">NO</th>'
-      +   '<th style="border:1px solid #d0d0d0;padding:7px 10px;font-size:13px">이름</th>'
-      +   '<th style="border:1px solid #d0d0d0;padding:7px 10px;font-size:13px">직책(As-is→To-be)</th>'
-      +   '<th style="border:1px solid #d0d0d0;padding:7px 10px;font-size:13px">매장(As-is→To-be)</th>'
-      +   '<th style="border:1px solid #d0d0d0;padding:7px 10px;font-size:13px">비고</th>'
-      + '</tr></thead><tbody>'+trs+'</tbody></table>';
-  }
+  const th='border:1px solid #d0d0d0;padding:7px 10px;font-size:13px';
+  const trs = changed.map(spAnnRowHtml).join('');
+  const tableHtml = '<table id="spAnnTable" style="border-collapse:collapse;width:100%;font-family:\'맑은 고딕\',sans-serif;background:#ffffff">'
+    + '<thead><tr style="background:#f2f2f2">'
+    +   '<th style="'+th+';width:44px">NO</th>'
+    +   '<th style="'+th+'">이름</th>'
+    +   '<th style="'+th+'">직책(As-is→To-be)</th>'
+    +   '<th style="'+th+'">매장(As-is→To-be)</th>'
+    +   '<th style="'+th+'">비고</th>'
+    +   '<th class="sp-ann-act" style="'+th+';width:34px"></th>'
+    + '</tr></thead><tbody>'+trs+'</tbody></table>';
   const old = document.getElementById('spAnnounceModal'); if (old) old.remove();
   const m = document.createElement('div'); m.id='spAnnounceModal'; m.className='modal-bg open';
-  m.innerHTML = '<div class="modal-inner" style="width:760px;max-width:96vw">'
+  m.innerHTML = '<div class="modal-inner" style="width:800px;max-width:96vw">'
     + '<div class="modal-title"><i class="ti ti-file-text"></i> 발령 공지 (기준일 '+sp.planDate+')</div>'
-    + '<div style="font-size:12px;color:var(--ts);margin-bottom:10px">표의 각 칸을 직접 클릭해 수정할 수 있습니다. 비고는 [사유 템플릿] 선택 후 수정 가능. 복사 시 드롭다운은 제외되고 서식만 복사됩니다.</div>'
+    + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">'
+    +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spAddAnnRow()"><i class="ti ti-plus"></i> 행 추가</button>'
+    +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spOpenReasonMgr()"><i class="ti ti-list-check"></i> 사유 템플릿 관리</button>'
+    +   '<span style="font-size:11px;color:var(--th);margin-left:auto">모든 칸 직접 수정 가능 · 복사 시 드롭다운·삭제버튼은 제외됩니다.</span>'
+    + '</div>'
     + '<div id="spAnnBox" style="border:0.5px solid var(--crd);border-radius:8px;padding:12px;max-height:50vh;overflow:auto;background:#fff">'+tableHtml+'</div>'
     + '<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">'
     +   '<button class="btn-cancel-sm" onclick="document.getElementById(\'spAnnounceModal\').remove()">닫기</button>'
-    +   (changed.length ? '<button class="btn-submit" onclick="spCopyAnnounce()"><i class="ti ti-copy"></i> 클립보드 복사</button>' : '')
+    +   '<button class="btn-submit" onclick="spCopyAnnounce()"><i class="ti ti-copy"></i> 클립보드 복사</button>'
     + '</div></div>';
   document.body.appendChild(m);
 }
 function spReasonPick(sel){ const cell = sel.parentElement; if (!cell) return; const div = cell.querySelector('.sp-remark'); if (div && sel.value) div.textContent = sel.value; }
+function spRenumAnn(){ const tb=document.querySelector('#spAnnTable tbody'); if(!tb) return; [...tb.rows].forEach((tr,i)=>{ if(tr.cells[0]) tr.cells[0].textContent=i+1; }); }
+function spAddAnnRow(){ const tb=document.querySelector('#spAnnTable tbody'); if(!tb) return; tb.insertAdjacentHTML('beforeend', spAnnRowHtml({no:tb.rows.length+1,name:'',posFrom:'',posTo:'',storeFrom:'',storeTo:'',remark:''})); spRenumAnn(); }
+function spDelAnnRow(btn){ const tr=btn&&btn.closest('tr'); if(tr) tr.remove(); spRenumAnn(); }
 function spCopyAnnounce(){
   const src = document.getElementById('spAnnTable'); if (!src) return;
   const clone = src.cloneNode(true);
-  clone.querySelectorAll('select').forEach(s=>s.remove());
+  clone.querySelectorAll('select, button, .sp-ann-act').forEach(el=>el.remove());  // 드롭다운·삭제버튼·관리열 제거
   clone.querySelectorAll('[contenteditable]').forEach(el=>el.removeAttribute('contenteditable'));
   const html = clone.outerHTML, text = clone.innerText;
   try{
@@ -17646,6 +17684,28 @@ function spCopyAnnounce(){
       navigator.clipboard.write([item]).then(()=>alert('표가 복사되었습니다. (서식 포함)')).catch(()=>spCopyFallbackHtml(html));
     } else { spCopyFallbackHtml(html); }
   }catch(e){ spCopyFallbackHtml(html); }
+}
+// 사유 템플릿 관리 (한 줄에 하나) — app_settings.staffing_reason_templates
+function spOpenReasonMgr(){
+  const list = window.__spReasons || SP_REASON_TEMPLATES;
+  const old = document.getElementById('spReasonModal'); if (old) old.remove();
+  const m = document.createElement('div'); m.id='spReasonModal'; m.className='modal-bg open';
+  m.innerHTML = '<div class="modal-inner" style="width:380px;max-width:94vw"><div class="modal-title"><i class="ti ti-list-check"></i> 사유 템플릿 관리</div>'
+    + '<div style="font-size:12px;color:var(--ts);margin-bottom:8px">한 줄에 하나씩 입력하세요. (추가·삭제·수정 자유)</div>'
+    + '<textarea id="spReasonText" class="form-input" style="min-height:160px;font-size:13px;line-height:1.6">'+esc(list.join('\n'))+'</textarea>'
+    + '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button class="btn-cancel-sm" onclick="document.getElementById(\'spReasonModal\').remove()">취소</button><button class="btn-submit" onclick="spSaveReasons()"><i class="ti ti-device-floppy"></i> 저장</button></div></div>';
+  document.body.appendChild(m);
+}
+async function spSaveReasons(){
+  const txt = document.getElementById('spReasonText')?.value || '';
+  const list = txt.split('\n').map(s=>s.trim()).filter(Boolean);
+  try{
+    await sb.from('app_settings').upsert({ key:'staffing_reason_templates', value: JSON.stringify(list) }, { onConflict:'key' });
+    window.__spReasons = list.length ? list : SP_REASON_TEMPLATES.slice();
+    const mm = document.getElementById('spReasonModal'); if (mm) mm.remove();
+    document.querySelectorAll('#spAnnTable select.sp-reason').forEach(sel=>{ const v=sel.value; sel.innerHTML=spReasonOptsHtml(); sel.value=v; });
+    alert('사유 템플릿이 저장되었습니다.');
+  }catch(e){ alert('저장 오류: '+(e.message||e)); }
 }
 function spCopyFallbackHtml(html){
   const tmp = document.createElement('div'); tmp.style.cssText='position:fixed;left:-9999px;top:0'; tmp.innerHTML = html; document.body.appendChild(tmp);
