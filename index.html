@@ -1434,7 +1434,7 @@ async function loadCats() {
 
 function visibleCats() {
   const grade = userGrade(currentUser);
-  const isAdminView = (grade === 'master' || grade === 'vice');
+  const isAdminView = (grade === 'master' || grade === 'sub_master');
   return allCats.filter(c => {
     // 숨김 게시판: 총괄·부총괄만 (관리 목적)
     if (c.hidden && !isAdminView) return false;
@@ -1594,7 +1594,7 @@ function canSee(post) {
     if (!(currentUser.is_master || currentUser.is_vice_master || post.author_id === currentUser.id)) return false;
   }
   const grade = userGrade(currentUser);
-  if (grade === 'master' || grade === 'vice') return true;  // 총괄·부총괄 전체 열람
+  if (grade === 'master' || grade === 'sub_master') return true;  // 총괄·부총괄 전체 열람
   const cat = allCats.find(c => c.id === post.category_id);
   if (cat) {
     // 게시판 단위 열람권한(read_perm)이 '최우선' 보안 게이트.
@@ -1629,11 +1629,11 @@ function canWriteCatObj(cat) {
   if (!hasPerm('notice_write')) return false;  // 공지 작성 권한 자체가 없으면 불가
   const wp = cat.write_perm || 'dept_lead';
   if (wp === 'master') return grade === 'master';
-  if (wp === 'all_admin') return ['vice','dept','master'].includes(grade);  // 모든 관리자
+  if (wp === 'all_admin') return ['sub_master','dept','master'].includes(grade);  // 모든 관리자
   // 주 담당부서 또는 협력부서(co_depts) 소속이면 글쓰기 허용
-  if (wp === 'dept_lead') return ['vice','master'].includes(grade) || (grade==='dept' && (!cat.dept || cat.dept==='공용' || catDeptMatch(cat)));
+  if (wp === 'dept_lead') return ['sub_master','master'].includes(grade) || (grade==='dept' && (!cat.dept || cat.dept==='공용' || catDeptMatch(cat)));
   if (wp === 'dept_only') {
-    if (grade==='master'||grade==='vice') return true;
+    if (grade==='master'||grade==='sub_master') return true;
     return grade==='dept' && catDeptMatch(cat);
   }
   return false;
@@ -5553,7 +5553,7 @@ async function sendPostUpdateNotify(postId){
   let sent=0;
   window.__notifBatchLog = true;
   for(const u of allUsers){
-    let grade='staff'; if(u.is_master)grade='master'; else if(u.is_vice_master)grade='vice'; else if(u.part)grade='dept'; else if(isManagerRole(u.role))grade='manager';
+    let grade='staff'; if(u.is_master)grade='master'; else if(u.is_vice_master)grade='sub_master'; else if(u.part)grade='dept'; else if(isManagerRole(u.role))grade='manager';
     if(postIsManagerAccess(__postAccess) && grade==='staff') continue; // 매니저 전용 공지는 매장직원 제외
     const shouldSend = roleCheck[grade]!==undefined ? roleCheck[grade] : !!(NOTIF_ROLE_DEFAULTS['new_post']?.[NOTIF_ROLES.findIndex(r=>r.key===grade)]);
     if(!shouldSend) continue;
@@ -5595,7 +5595,7 @@ async function sendRoleBasedPostNotify(postId, title) {
     // 역할 판정
     let grade = 'staff';
     if (u.is_master) grade = 'master';
-    else if (u.is_vice_master) grade = 'vice';
+    else if (u.is_vice_master) grade = 'sub_master';
     else if (u.part) grade = 'dept';
     else if (isManagerRole(u.role)) grade = 'manager';
 
@@ -10123,7 +10123,7 @@ function canSeeReq(r) {
 function canDeletePost(post) {
   if (!currentUser || !post) return false;
   const grade = userGrade(currentUser);
-  if (grade === 'master' || grade === 'vice') return true;
+  if (grade === 'master' || grade === 'sub_master') return true;
   return post.author_id === currentUser.id;  // 작성자 본인
 }
 
