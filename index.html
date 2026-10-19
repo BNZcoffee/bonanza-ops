@@ -6658,7 +6658,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-10-14';   // 배포 시 갱신 (표시는 app_settings.updated_at 과 비교해 더 최근값 노출)
+const APP_BUILD_DATE = '2026-10-19';   // 배포 시 자동 갱신
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -11662,7 +11662,181 @@ async function renderInterviewDetail(area) {
             : `<div style="font-size:13px;color:var(--th);padding:12px 0">운영팀 피드백 대기 중입니다.</div>`
         }
       </div>
+      <div id="ivCmtSection" style="margin-top:20px;position:relative"><div style="font-size:12px;color:var(--th)">댓글 불러오는 중...</div></div>
     </div>`;
+  loadIvComments(r.id);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 면담 댓글 + @태그 (공지 댓글과 동일 UX) — iv_comment_* Secure RPC 연동
+// ═══════════════════════════════════════════════════════════
+async function notifyInterviewViewers(refId, message, excludeIds) {
+  const excl = new Set((excludeIds||[]).map(String));
+  excl.add(String(currentUser.id));
+  try { await ivLoadAllowed(); } catch(e){}
+  const { data: users } = await sb.from('users')
+    .select('id,name,is_master,is_vice_master,role,part,active').eq('active', true);
+  if (!users || !users.length) return;
+  window.__notifBatchLog = true;
+  let n = 0;
+  for (const u of users) {
+    if (excl.has(String(u.id))) continue;
+    if (!isInterviewFull(u)) continue;
+    try { await createNotificationWithSlack(u.id, 'interview_new', refId, 'interview', message); n++; } catch(e){}
+  }
+  window.__notifBatchLog = false;
+  try { await logNotifSend('iv_viewer_ref', 'interview', refId, message, n); } catch(e){}
+}
+
+async function loadIvComments(ivId) {
+  const box = document.getElementById('ivCmtSection');
+  if (!box) return;
+  // 재직 전체 직원 = 멘션 후보
+  const uRes = await sb.from('users').select('id,name,store,part').eq('active', true).order('name');
+  window.__ivCmtPeople = uRes.data || [];
+  const nameById = {}; window.__ivCmtPeople.forEach(u => nameById[String(u.id)] = u.name);
+
+  // 댓글 로드: iv_comments RPC 우선, 미배포 시 직접조회 폴백
+  let comments = [];
+  if (window.__ivCmtSecure !== false) {
+    const { data, error } = await sb.rpc('iv_comments', { p_token: getSessionToken(), p_interview_id: ivId });
+    if (error && /does not exist|could not find|schema cache|function/i.test(error.message||'')) {
+      window.__ivCmtSecure = false;
+    } else if (error) {
+      comments = [];
+    } else {
+      window.__ivCmtSecure = true;
+      comments = (typeof data==='string' ? JSON.parse(data||'[]') : (data||[]));
+    }
+  }
+  if (window.__ivCmtSecure === false) {
+    const cRes = await sb.from('interview_comments').select('*').eq('interview_id', ivId).order('created_at');
+    comments = cRes.data || [];
+  }
+
+  window.__ivCmtTags = window.__ivCmtTags || {}; window.__ivCmtTags[ivId] = [];
+
+  const one = (cm) => {
+    const isMine = String(cm.author_id) === String(currentUser.id);
+    const canDel = isMine || currentUser.is_master || currentUser.is_vice_master;
+    let tags = [];
+    try { tags = cm.tagged_users ? (typeof cm.tagged_users==='string'?JSON.parse(cm.tagged_users):cm.tagged_users) : []; } catch(e){}
+    const tagHtml = (tags && tags.length)
+      ? `<div style="margin-top:4px">${tags.map(t=>`<span style="font-size:11px;background:var(--blb);color:var(--bl);border-radius:10px;padding:1px 8px;margin-right:4px">@${esc(t.name||nameById[String(t.id)]||'')}</span>`).join('')}</div>` : '';
+    return `<div style="padding:10px 0;border-bottom:0.5px solid var(--crm)">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <span style="font-size:12px;font-weight:600;color:var(--tm)">${esc(nameById[String(cm.author_id)]||'?')}</span>
+        <span style="font-size:11px;color:var(--th);margin-left:auto">${fmtDateTime(cm.created_at)}</span>
+        ${canDel ? `<button onclick="delIvComment(${cm.id},${ivId})" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px"><i class="ti ti-trash"></i></button>` : ''}
+      </div>
+      <div style="font-size:14px;line-height:1.7;color:var(--tm);white-space:pre-wrap">${esc(cm.body||'')}</div>
+      ${tagHtml}
+    </div>`;
+  };
+
+  box.innerHTML = `
+    <div class="section-label" style="margin-bottom:8px">댓글 ${comments.length}개</div>
+    <div id="ivCmtList">${comments.map(one).join('') || '<div style="font-size:13px;color:var(--th);padding:8px 0">첫 댓글을 남겨보세요. (@이름 으로 멘션)</div>'}</div>
+    <div style="margin-top:12px;position:relative">
+      <textarea id="ivCmtInput" class="form-input" rows="3" placeholder="의견이나 추가 확인할 내용을 남겨주세요. @이름 으로 멘션하면 알림이 갑니다." oninput="ivCmtAtTrigger(this,${ivId})"></textarea>
+      <div id="ivCmtAtMenu" style="display:none;position:absolute;left:0;right:auto;background:#fff;border:0.5px solid var(--crd);border-radius:8px;max-height:200px;overflow-y:auto;z-index:60;min-width:220px;box-shadow:0 4px 16px rgba(0,0,0,.12)"></div>
+      <div id="ivCmtTagChips" style="display:flex;flex-wrap:wrap;gap:5px;margin:6px 0"></div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:10px;color:var(--th)">@멘션 시 해당 인원 + 면담 열람 권한자에게 알림</span>
+        <button class="btn-submit" style="margin-left:auto" onclick="submitIvComment(${ivId})"><i class="ti ti-send"></i> 등록</button>
+      </div>
+    </div>`;
+}
+
+function ivCmtAtTrigger(ta, ivId) {
+  const menu = document.getElementById('ivCmtAtMenu');
+  if (!menu) return;
+  const pos = ta.selectionStart;
+  const upto = ta.value.slice(0, pos);
+  const m = upto.match(/@([^\s@]*)$/);
+  if (!m) { menu.style.display='none'; return; }
+  const q = (m[1]||'').toLowerCase();
+  const cand = (window.__ivCmtPeople||[]).filter(u =>
+    String(u.id)!==String(currentUser.id) &&
+    (!q || (u.name||'').toLowerCase().indexOf(q)>=0 || (u.store||'').toLowerCase().indexOf(q)>=0)
+  ).slice(0,8);
+  if (!cand.length) { menu.style.display='none'; return; }
+  menu.innerHTML = cand.map(u =>
+    `<div style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:0.5px solid var(--crm)" onmousedown="event.preventDefault();ivCmtPick(${ivId},'${u.id}','${(u.name||'').replace(/'/g,'')}')">${esc(u.name)} <span style="font-size:11px;color:var(--th)">${esc(u.store||u.part||'')}</span></div>`
+  ).join('');
+  menu.style.display='block';
+}
+function ivCmtPick(ivId, id, name) {
+  window.__ivCmtTags = window.__ivCmtTags || {}; window.__ivCmtTags[ivId] = window.__ivCmtTags[ivId] || [];
+  if (!window.__ivCmtTags[ivId].some(t=>String(t.id)===String(id))) window.__ivCmtTags[ivId].push({id:id, name:name});
+  const ta = document.getElementById('ivCmtInput');
+  if (ta) { ta.value = ta.value.replace(/@([^\s@]*)$/,''); ta.focus(); }
+  const menu = document.getElementById('ivCmtAtMenu'); if (menu) menu.style.display='none';
+  ivRenderCmtChips(ivId);
+}
+function ivRemoveCmtTag(ivId, id) {
+  if (window.__ivCmtTags && window.__ivCmtTags[ivId])
+    window.__ivCmtTags[ivId] = window.__ivCmtTags[ivId].filter(t=>String(t.id)!==String(id));
+  ivRenderCmtChips(ivId);
+}
+function ivRenderCmtChips(ivId) {
+  const box = document.getElementById('ivCmtTagChips'); if (!box) return;
+  const tags = (window.__ivCmtTags && window.__ivCmtTags[ivId]) || [];
+  box.innerHTML = tags.map(t=>`<span style="font-size:11px;background:var(--blb);color:var(--bl);border-radius:10px;padding:2px 8px;display:inline-flex;align-items:center;gap:4px">@${esc(t.name)} <span style="cursor:pointer" onclick="ivRemoveCmtTag(${ivId},'${t.id}')">✕</span></span>`).join('');
+}
+
+async function submitIvComment(ivId) {
+  if (typeof isTestMode==='function' && isTestMode()) { alert('⚠ 테스트 모드에서는 댓글을 작성할 수 없습니다.'); return; }
+  const inp = document.getElementById('ivCmtInput');
+  const body = (inp?.value.trim()) || '';
+  if (!body) { alert('내용을 입력해주세요.'); return; }
+  const tags = (window.__ivCmtTags && window.__ivCmtTags[ivId]) || [];
+
+  let done = false;
+  if (window.__ivCmtSecure !== false) {
+    const { error } = await sb.rpc('iv_comment_add', { p_token: getSessionToken(), p_interview_id: ivId, p_body: body, p_tagged: tags.length ? tags : null });
+    if (error && /does not exist|could not find|schema cache|function/i.test(error.message||'')) {
+      window.__ivCmtSecure = false;
+    } else if (error) { alert('등록 오류: ' + error.message); return; }
+    else { done = true; }
+  }
+  if (!done && window.__ivCmtSecure === false) {
+    const { error } = await sb.from('interview_comments').insert({
+      interview_id: ivId, author_id: currentUser.id, body,
+      tagged_users: tags.length ? JSON.stringify(tags) : null,
+      created_at: new Date().toISOString()
+    });
+    if (error) { alert('등록 오류: ' + error.message); return; }
+  }
+
+  const staffNm = (curInterview && curInterview.staff) ? curInterview.staff.name : '';
+  const msg = `[면담 댓글] ${(curInterview&&curInterview.store)||''} ${staffNm} 면담에 ${currentUser.name}님이 댓글을 남겼습니다.`;
+  const tagged = new Set();
+  for (const t of tags) {
+    if (String(t.id)===String(currentUser.id)) continue;
+    try { await createNotificationWithSlack(t.id, 'interview_new', ivId, 'interview', msg); } catch(e){}
+    tagged.add(String(t.id));
+  }
+  await notifyInterviewViewers(ivId, msg, [...tagged]);
+  updateNotifDot();
+  if (window.__ivCmtTags) window.__ivCmtTags[ivId] = [];
+  loadIvComments(ivId);
+}
+
+async function delIvComment(cmId, ivId) {
+  if (!confirm('이 댓글을 삭제하시겠습니까?')) return;
+  if (window.__ivCmtSecure !== false) {
+    const { error } = await sb.rpc('iv_comment_del', { p_token: getSessionToken(), p_id: cmId });
+    if (error && /does not exist|could not find|schema cache|function/i.test(error.message||'')) {
+      window.__ivCmtSecure = false;
+      const r = await sb.from('interview_comments').delete().eq('id', cmId);
+      if (r.error) { alert('삭제 오류: ' + r.error.message); return; }
+    } else if (error) { alert('삭제 오류: ' + error.message); return; }
+  } else {
+    const { error } = await sb.from('interview_comments').delete().eq('id', cmId);
+    if (error) { alert('삭제 오류: ' + error.message); return; }
+  }
+  loadIvComments(ivId);
 }
 
 async function submitFeedback(id) {
