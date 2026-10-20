@@ -1434,7 +1434,7 @@ async function loadCats() {
 
 function visibleCats() {
   const grade = userGrade(currentUser);
-  const isAdminView = (grade === 'master' || grade === 'sub_master');
+  const isAdminView = (grade === 'master' || grade === 'vice');
   return allCats.filter(c => {
     // 숨김 게시판: 총괄·부총괄만 (관리 목적)
     if (c.hidden && !isAdminView) return false;
@@ -1594,7 +1594,7 @@ function canSee(post) {
     if (!(currentUser.is_master || currentUser.is_vice_master || post.author_id === currentUser.id)) return false;
   }
   const grade = userGrade(currentUser);
-  if (grade === 'master' || grade === 'sub_master') return true;  // 총괄·부총괄 전체 열람
+  if (grade === 'master' || grade === 'vice') return true;  // 총괄·부총괄 전체 열람
   const cat = allCats.find(c => c.id === post.category_id);
   if (cat) {
     // 게시판 단위 열람권한(read_perm)이 '최우선' 보안 게이트.
@@ -1629,11 +1629,11 @@ function canWriteCatObj(cat) {
   if (!hasPerm('notice_write')) return false;  // 공지 작성 권한 자체가 없으면 불가
   const wp = cat.write_perm || 'dept_lead';
   if (wp === 'master') return grade === 'master';
-  if (wp === 'all_admin') return ['sub_master','dept','master'].includes(grade);  // 모든 관리자
+  if (wp === 'all_admin') return ['vice','dept','master'].includes(grade);  // 모든 관리자
   // 주 담당부서 또는 협력부서(co_depts) 소속이면 글쓰기 허용
-  if (wp === 'dept_lead') return ['sub_master','master'].includes(grade) || (grade==='dept' && (!cat.dept || cat.dept==='공용' || catDeptMatch(cat)));
+  if (wp === 'dept_lead') return ['vice','master'].includes(grade) || (grade==='dept' && (!cat.dept || cat.dept==='공용' || catDeptMatch(cat)));
   if (wp === 'dept_only') {
-    if (grade==='master'||grade==='sub_master') return true;
+    if (grade==='master'||grade==='vice') return true;
     return grade==='dept' && catDeptMatch(cat);
   }
   return false;
@@ -5553,7 +5553,7 @@ async function sendPostUpdateNotify(postId){
   let sent=0;
   window.__notifBatchLog = true;
   for(const u of allUsers){
-    let grade='staff'; if(u.is_master)grade='master'; else if(u.is_vice_master)grade='sub_master'; else if(u.part)grade='dept'; else if(isManagerRole(u.role))grade='manager';
+    let grade='staff'; if(u.is_master)grade='master'; else if(u.is_vice_master)grade='vice'; else if(u.part)grade='dept'; else if(isManagerRole(u.role))grade='manager';
     if(postIsManagerAccess(__postAccess) && grade==='staff') continue; // 매니저 전용 공지는 매장직원 제외
     const shouldSend = roleCheck[grade]!==undefined ? roleCheck[grade] : !!(NOTIF_ROLE_DEFAULTS['new_post']?.[NOTIF_ROLES.findIndex(r=>r.key===grade)]);
     if(!shouldSend) continue;
@@ -5595,7 +5595,7 @@ async function sendRoleBasedPostNotify(postId, title) {
     // 역할 판정
     let grade = 'staff';
     if (u.is_master) grade = 'master';
-    else if (u.is_vice_master) grade = 'sub_master';
+    else if (u.is_vice_master) grade = 'vice';
     else if (u.part) grade = 'dept';
     else if (isManagerRole(u.role)) grade = 'manager';
 
@@ -6658,7 +6658,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-10-19';   // 배포 시 자동 갱신
+const APP_BUILD_DATE = '2026-10-14';   // 배포 시 갱신 (표시는 app_settings.updated_at 과 비교해 더 최근값 노출)
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -10123,7 +10123,7 @@ function canSeeReq(r) {
 function canDeletePost(post) {
   if (!currentUser || !post) return false;
   const grade = userGrade(currentUser);
-  if (grade === 'master' || grade === 'sub_master') return true;
+  if (grade === 'master' || grade === 'vice') return true;
   return post.author_id === currentUser.id;  // 작성자 본인
 }
 
@@ -11662,181 +11662,7 @@ async function renderInterviewDetail(area) {
             : `<div style="font-size:13px;color:var(--th);padding:12px 0">운영팀 피드백 대기 중입니다.</div>`
         }
       </div>
-      <div id="ivCmtSection" style="margin-top:20px;position:relative"><div style="font-size:12px;color:var(--th)">댓글 불러오는 중...</div></div>
     </div>`;
-  loadIvComments(r.id);
-}
-
-// ═══════════════════════════════════════════════════════════
-// 면담 댓글 + @태그 (공지 댓글과 동일 UX) — iv_comment_* Secure RPC 연동
-// ═══════════════════════════════════════════════════════════
-async function notifyInterviewViewers(refId, message, excludeIds) {
-  const excl = new Set((excludeIds||[]).map(String));
-  excl.add(String(currentUser.id));
-  try { await ivLoadAllowed(); } catch(e){}
-  const { data: users } = await sb.from('users')
-    .select('id,name,is_master,is_vice_master,role,part,active').eq('active', true);
-  if (!users || !users.length) return;
-  window.__notifBatchLog = true;
-  let n = 0;
-  for (const u of users) {
-    if (excl.has(String(u.id))) continue;
-    if (!isInterviewFull(u)) continue;
-    try { await createNotificationWithSlack(u.id, 'interview_new', refId, 'interview', message); n++; } catch(e){}
-  }
-  window.__notifBatchLog = false;
-  try { await logNotifSend('iv_viewer_ref', 'interview', refId, message, n); } catch(e){}
-}
-
-async function loadIvComments(ivId) {
-  const box = document.getElementById('ivCmtSection');
-  if (!box) return;
-  // 재직 전체 직원 = 멘션 후보
-  const uRes = await sb.from('users').select('id,name,store,part').eq('active', true).order('name');
-  window.__ivCmtPeople = uRes.data || [];
-  const nameById = {}; window.__ivCmtPeople.forEach(u => nameById[String(u.id)] = u.name);
-
-  // 댓글 로드: iv_comments RPC 우선, 미배포 시 직접조회 폴백
-  let comments = [];
-  if (window.__ivCmtSecure !== false) {
-    const { data, error } = await sb.rpc('iv_comments', { p_token: getSessionToken(), p_interview_id: ivId });
-    if (error && /does not exist|could not find|schema cache|function/i.test(error.message||'')) {
-      window.__ivCmtSecure = false;
-    } else if (error) {
-      comments = [];
-    } else {
-      window.__ivCmtSecure = true;
-      comments = (typeof data==='string' ? JSON.parse(data||'[]') : (data||[]));
-    }
-  }
-  if (window.__ivCmtSecure === false) {
-    const cRes = await sb.from('interview_comments').select('*').eq('interview_id', ivId).order('created_at');
-    comments = cRes.data || [];
-  }
-
-  window.__ivCmtTags = window.__ivCmtTags || {}; window.__ivCmtTags[ivId] = [];
-
-  const one = (cm) => {
-    const isMine = String(cm.author_id) === String(currentUser.id);
-    const canDel = isMine || currentUser.is_master || currentUser.is_vice_master;
-    let tags = [];
-    try { tags = cm.tagged_users ? (typeof cm.tagged_users==='string'?JSON.parse(cm.tagged_users):cm.tagged_users) : []; } catch(e){}
-    const tagHtml = (tags && tags.length)
-      ? `<div style="margin-top:4px">${tags.map(t=>`<span style="font-size:11px;background:var(--blb);color:var(--bl);border-radius:10px;padding:1px 8px;margin-right:4px">@${esc(t.name||nameById[String(t.id)]||'')}</span>`).join('')}</div>` : '';
-    return `<div style="padding:10px 0;border-bottom:0.5px solid var(--crm)">
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-        <span style="font-size:12px;font-weight:600;color:var(--tm)">${esc(nameById[String(cm.author_id)]||'?')}</span>
-        <span style="font-size:11px;color:var(--th);margin-left:auto">${fmtDateTime(cm.created_at)}</span>
-        ${canDel ? `<button onclick="delIvComment(${cm.id},${ivId})" style="background:none;border:none;color:var(--th);cursor:pointer;font-size:12px"><i class="ti ti-trash"></i></button>` : ''}
-      </div>
-      <div style="font-size:14px;line-height:1.7;color:var(--tm);white-space:pre-wrap">${esc(cm.body||'')}</div>
-      ${tagHtml}
-    </div>`;
-  };
-
-  box.innerHTML = `
-    <div class="section-label" style="margin-bottom:8px">댓글 ${comments.length}개</div>
-    <div id="ivCmtList">${comments.map(one).join('') || '<div style="font-size:13px;color:var(--th);padding:8px 0">첫 댓글을 남겨보세요. (@이름 으로 멘션)</div>'}</div>
-    <div style="margin-top:12px;position:relative">
-      <textarea id="ivCmtInput" class="form-input" rows="3" placeholder="의견이나 추가 확인할 내용을 남겨주세요. @이름 으로 멘션하면 알림이 갑니다." oninput="ivCmtAtTrigger(this,${ivId})"></textarea>
-      <div id="ivCmtAtMenu" style="display:none;position:absolute;left:0;right:auto;background:#fff;border:0.5px solid var(--crd);border-radius:8px;max-height:200px;overflow-y:auto;z-index:60;min-width:220px;box-shadow:0 4px 16px rgba(0,0,0,.12)"></div>
-      <div id="ivCmtTagChips" style="display:flex;flex-wrap:wrap;gap:5px;margin:6px 0"></div>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span style="font-size:10px;color:var(--th)">@멘션 시 해당 인원 + 면담 열람 권한자에게 알림</span>
-        <button class="btn-submit" style="margin-left:auto" onclick="submitIvComment(${ivId})"><i class="ti ti-send"></i> 등록</button>
-      </div>
-    </div>`;
-}
-
-function ivCmtAtTrigger(ta, ivId) {
-  const menu = document.getElementById('ivCmtAtMenu');
-  if (!menu) return;
-  const pos = ta.selectionStart;
-  const upto = ta.value.slice(0, pos);
-  const m = upto.match(/@([^\s@]*)$/);
-  if (!m) { menu.style.display='none'; return; }
-  const q = (m[1]||'').toLowerCase();
-  const cand = (window.__ivCmtPeople||[]).filter(u =>
-    String(u.id)!==String(currentUser.id) &&
-    (!q || (u.name||'').toLowerCase().indexOf(q)>=0 || (u.store||'').toLowerCase().indexOf(q)>=0)
-  ).slice(0,8);
-  if (!cand.length) { menu.style.display='none'; return; }
-  menu.innerHTML = cand.map(u =>
-    `<div style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:0.5px solid var(--crm)" onmousedown="event.preventDefault();ivCmtPick(${ivId},'${u.id}','${(u.name||'').replace(/'/g,'')}')">${esc(u.name)} <span style="font-size:11px;color:var(--th)">${esc(u.store||u.part||'')}</span></div>`
-  ).join('');
-  menu.style.display='block';
-}
-function ivCmtPick(ivId, id, name) {
-  window.__ivCmtTags = window.__ivCmtTags || {}; window.__ivCmtTags[ivId] = window.__ivCmtTags[ivId] || [];
-  if (!window.__ivCmtTags[ivId].some(t=>String(t.id)===String(id))) window.__ivCmtTags[ivId].push({id:id, name:name});
-  const ta = document.getElementById('ivCmtInput');
-  if (ta) { ta.value = ta.value.replace(/@([^\s@]*)$/,''); ta.focus(); }
-  const menu = document.getElementById('ivCmtAtMenu'); if (menu) menu.style.display='none';
-  ivRenderCmtChips(ivId);
-}
-function ivRemoveCmtTag(ivId, id) {
-  if (window.__ivCmtTags && window.__ivCmtTags[ivId])
-    window.__ivCmtTags[ivId] = window.__ivCmtTags[ivId].filter(t=>String(t.id)!==String(id));
-  ivRenderCmtChips(ivId);
-}
-function ivRenderCmtChips(ivId) {
-  const box = document.getElementById('ivCmtTagChips'); if (!box) return;
-  const tags = (window.__ivCmtTags && window.__ivCmtTags[ivId]) || [];
-  box.innerHTML = tags.map(t=>`<span style="font-size:11px;background:var(--blb);color:var(--bl);border-radius:10px;padding:2px 8px;display:inline-flex;align-items:center;gap:4px">@${esc(t.name)} <span style="cursor:pointer" onclick="ivRemoveCmtTag(${ivId},'${t.id}')">✕</span></span>`).join('');
-}
-
-async function submitIvComment(ivId) {
-  if (typeof isTestMode==='function' && isTestMode()) { alert('⚠ 테스트 모드에서는 댓글을 작성할 수 없습니다.'); return; }
-  const inp = document.getElementById('ivCmtInput');
-  const body = (inp?.value.trim()) || '';
-  if (!body) { alert('내용을 입력해주세요.'); return; }
-  const tags = (window.__ivCmtTags && window.__ivCmtTags[ivId]) || [];
-
-  let done = false;
-  if (window.__ivCmtSecure !== false) {
-    const { error } = await sb.rpc('iv_comment_add', { p_token: getSessionToken(), p_interview_id: ivId, p_body: body, p_tagged: tags.length ? tags : null });
-    if (error && /does not exist|could not find|schema cache|function/i.test(error.message||'')) {
-      window.__ivCmtSecure = false;
-    } else if (error) { alert('등록 오류: ' + error.message); return; }
-    else { done = true; }
-  }
-  if (!done && window.__ivCmtSecure === false) {
-    const { error } = await sb.from('interview_comments').insert({
-      interview_id: ivId, author_id: currentUser.id, body,
-      tagged_users: tags.length ? JSON.stringify(tags) : null,
-      created_at: new Date().toISOString()
-    });
-    if (error) { alert('등록 오류: ' + error.message); return; }
-  }
-
-  const staffNm = (curInterview && curInterview.staff) ? curInterview.staff.name : '';
-  const msg = `[면담 댓글] ${(curInterview&&curInterview.store)||''} ${staffNm} 면담에 ${currentUser.name}님이 댓글을 남겼습니다.`;
-  const tagged = new Set();
-  for (const t of tags) {
-    if (String(t.id)===String(currentUser.id)) continue;
-    try { await createNotificationWithSlack(t.id, 'interview_new', ivId, 'interview', msg); } catch(e){}
-    tagged.add(String(t.id));
-  }
-  await notifyInterviewViewers(ivId, msg, [...tagged]);
-  updateNotifDot();
-  if (window.__ivCmtTags) window.__ivCmtTags[ivId] = [];
-  loadIvComments(ivId);
-}
-
-async function delIvComment(cmId, ivId) {
-  if (!confirm('이 댓글을 삭제하시겠습니까?')) return;
-  if (window.__ivCmtSecure !== false) {
-    const { error } = await sb.rpc('iv_comment_del', { p_token: getSessionToken(), p_id: cmId });
-    if (error && /does not exist|could not find|schema cache|function/i.test(error.message||'')) {
-      window.__ivCmtSecure = false;
-      const r = await sb.from('interview_comments').delete().eq('id', cmId);
-      if (r.error) { alert('삭제 오류: ' + r.error.message); return; }
-    } else if (error) { alert('삭제 오류: ' + error.message); return; }
-  } else {
-    const { error } = await sb.from('interview_comments').delete().eq('id', cmId);
-    if (error) { alert('삭제 오류: ' + error.message); return; }
-  }
-  loadIvComments(ivId);
 }
 
 async function submitFeedback(id) {
@@ -17302,6 +17128,8 @@ const SP_REASON_TEMPLATES = ['정기 인사이동','신규 매장 오픈 지원'
 // 직책(position) 전용 표기 — 시스템 role 라벨('부서담당','팀원' 등)은 배제
 function spPos(u){
   if (!u) return '';
+  // 시뮬레이션 직책 변경(override) 우선 (실제 users 미반영)
+  if (u.id!=null && window.__sp && window.__sp.posOverride && window.__sp.posOverride[u.id]) return window.__sp.posOverride[u.id];
   const p = String(u.position||'').trim();
   if (p) return p;   // 코치 포함 모든 직책은 position 값으로 직접 지정
   if (u.employment_type === 'parttime') return 'PT';
@@ -17597,21 +17425,30 @@ async function spInit(opts){
   // 이동 이력 카운트
   const txCount = {};
   (txRes && txRes.data ? txRes.data : []).forEach(t=>{ if(t && t.user_id!=null){ const k=String(t.user_id); txCount[k]=(txCount[k]||0)+1; } });
-  // 기본 배치 — 실제 retire_date(확정 퇴사)가 '적용일 이후'면 자동 퇴사예정 패널
+  // 기본 배치 — 실제 retire_date(확정 퇴사 예정)여도 소속 매장에 그대로 두고(듀얼 노출), 퇴사예정 패널에도 함께 표기
   const place = {};
   const simRetire = {};   // 시뮬레이션용 퇴사예정일(실제 users 미반영) {userId:date}
+  const posOverride = {}; // 시뮬레이션 직책 변경(실제 users 미반영) {userId:position}
   users.forEach(u => {
-    if (u.retire_date && String(u.retire_date) >= planDate) place[u.id] = SP_RESIGN;
-    else place[u.id] = (stores.includes(u.store) ? u.store : (u.store ? u.store : SP_WAIT));
+    place[u.id] = (stores.includes(u.store) ? u.store : (u.store ? u.store : SP_WAIT));
   });
   users.forEach(u=>{ if(u.store && u.store!=='본사' && !stores.includes(u.store)) stores.push(u.store); });
+  // [자동연동] DB hire_date 가 기준일 이후인 '미래 입사자' → 소속 매장이 없으면 입사예정 풀로 자동 분류
+  //           (소속 매장이 있으면 위에서 이미 매장 슬롯에 배치됨 → 매장+입사예정 듀얼 노출)
+  users.forEach(u=>{
+    const hd = u.hire_date ? String(u.hire_date).slice(0,10) : '';
+    if (hd && hd > planDate){
+      const hasStore = u.store && u.store!=='본사' && stores.includes(u.store);
+      if (!hasStore) place[u.id] = SP_HIRE;   // 대기 패널 [입사 예정]으로
+    }
+  });
   // 글로벌 예정자 풀 → 가상카드(dummies). 기본 버킷(입사/퇴사) 배치
   const dummies = (window.__spGlobalPool||[]).slice();
   dummies.forEach(d=>{ place[d.id] = (d.kind==='hire' ? SP_HIRE : SP_RESIGN); });
   // 글로벌 T.O 반영 (설정 없으면 현재 소속 인원수로 폴백)
   const storeTo = {};
   stores.forEach(s => { const g = spToForDate(s, planDate); storeTo[s] = (g!=null) ? g : users.filter(u => (u.store||'') === s).length; });
-  window.__sp = { planDate, users, stores, place, storeTo, dummies, simRetire, planId: null, txCount, title: '', status:'draft', locked:false };
+  window.__sp = { planDate, users, stores, place, storeTo, dummies, simRetire, posOverride, toEdit:false, planId: null, txCount, title: '', status:'draft', locked:false };
   // 저장된 계획 로드 (fresh 복구 시 건너뜀)
   if (!(opts && opts.fresh)) try {
     const { data } = await sb.rpc('sp_get', { p_token: getSessionToken(), p_plan_date: planDate });
@@ -17625,7 +17462,10 @@ async function spInit(opts){
       if (Array.isArray(pl.rows) && pl.rows.length) window.__sp.stores = pl.rows.filter(s=>s!=='본사');
       Object.keys(assign).forEach(k => { window.__sp.place[k] = assign[k]; });   // 저장된 배치(실제·가상 모두) 복원
       if (pl.simRetire && typeof pl.simRetire==='object') window.__sp.simRetire = pl.simRetire;
-      // 매장행 보강 + T.O 글로벌 우선 재적용
+      if (pl.posOverride && typeof pl.posOverride==='object') window.__sp.posOverride = pl.posOverride;
+      // 계획에 저장된 T.O(인라인 편집분)가 있으면 글로벌보다 우선
+      if (data.store_to && typeof data.store_to==='object') { Object.keys(data.store_to).forEach(s=>{ window.__sp.storeTo[s]=data.store_to[s]; }); }
+      // 매장행 보강
       window.__sp.stores.forEach(s=>{ if(window.__sp.storeTo[s]==null){ const g=spToForDate(s,planDate); window.__sp.storeTo[s]=(g!=null)?g:0; } });
     }
   } catch(e){ console.warn('[sp_get]', e); }
@@ -17643,48 +17483,80 @@ function spPerson(key){
     __dummy:true, __kind:d.kind, __status:d.status||'' };
   return null;
 }
-function spCardColor(p){
+function spCardColor(p, forceResign, forceHire){
   const base = spPosColor(spPos(p));   // 직책(position) 기준 색상 — 범례/편집과 완전 일치
   let bg = base.bg, fg = base.fg;
   const sc = window.__spStateColors || SP_STATE_COLOR_DEFAULT;
   const ym = ((window.__sp && window.__sp.planDate) || todayKST()).slice(0,7);
   const hy = (p && p.hire_date ? String(p.hire_date) : '').slice(0,7);
-  // 퇴사예정: 실제 retire_date 가 있거나, 시뮬레이션상 RESIGN 버킷에 있으면 빨강
-  const inResign = p && !p.__dummy && window.__sp && window.__sp.place && window.__sp.place[p.id]===SP_RESIGN;
-  if ((p && p.retire_date) || inResign) { bg = sc.resign.bg; fg = sc.resign.fg; }
-  else if (hy && hy === ym) { bg = sc.hire.bg; fg = sc.hire.fg; }     // 당월 입사
+  // 퇴사예정(빨강): 패널 강제표기, 퇴사 가상카드, 또는 RESIGN 버킷(수동 퇴사처리)
+  const inResign = forceResign || (p && p.__dummy && p.__kind==='resign') || (p && window.__sp && window.__sp.place && window.__sp.place[p.id]===SP_RESIGN);
+  // 입사예정(파랑): 패널 강제표기, 입사 가상카드, 당월 입사, 또는 실제 미래 입사자(hire_date>기준일)
+  const inHire = !inResign && (forceHire || (p && p.__dummy && p.__kind==='hire') || (hy && hy === ym) || !!spHireInfo(p));
+  if (inResign) { bg = sc.resign.bg; fg = sc.resign.fg; }
+  else if (inHire) { bg = sc.hire.bg; fg = sc.hire.fg; }
   return { bg, fg };
 }
+// 적용일 기준 '실제 퇴사 예정'(확정 retire_date) 인가 + 남은 일수
+function spRetireInfo(p){
+  if (!p || p.__dummy || !p.retire_date) return null;
+  const rd = String(p.retire_date).slice(0,10);
+  const pd = (window.__sp && window.__sp.planDate) || todayKST();
+  if (rd < pd) return null;   // 이미 지난 퇴사일
+  const days = Math.round((new Date(rd+'T00:00:00+09:00') - new Date(pd+'T00:00:00+09:00'))/86400000);
+  return { date: rd, days };
+}
+// 적용일 기준 '실제 미래 입사자'(DB hire_date > 기준일) 인가 + 남은 일수 (가상 더미는 제외)
+function spHireInfo(p){
+  if (!p || p.__dummy || !p.hire_date) return null;
+  const hd = String(p.hire_date).slice(0,10);
+  const pd = (window.__sp && window.__sp.planDate) || todayKST();
+  if (hd <= pd) return null;   // 이미 입사했거나 당일 입사 → 일반 재직자
+  const days = Math.round((new Date(hd+'T00:00:00+09:00') - new Date(pd+'T00:00:00+09:00'))/86400000);
+  return { date: hd, days };
+}
 function spCardHtml(key, opts){
+  opts = opts || {};
   const p = spPerson(key); if (!p) return '';
-  const c = spCardColor(p);
+  const forceResign = !!opts.forceResign;   // 퇴사예정 패널에서 '매장 유지 중인 실제 퇴사예정자' 표기용
+  const forceHire = !!opts.forceHire;        // 입사예정 패널에서 '실제 미래 입사자' 표기용
+  const c = spCardColor(p, forceResign, forceHire);
   const pos = spPos(p);
   const hire = fmtHireShort(p.hire_date);
   const dummyTag = p.__dummy ? '<i class="ti ti-user-question" style="font-size:11px;opacity:.7"></i> ' : '';
   const delBtn = p.__dummy ? '<span onclick="event.stopPropagation();spDelDummy(\''+p.id+'\')" style="cursor:pointer;color:#B91C1C;font-weight:700;margin-left:2px" title="삭제">✕</span>' : '';
   const hist = (!p.__dummy && window.__sp.txCount[String(p.id)]>0)
     ? '<span onclick="event.stopPropagation();spOpenStaffHistory(\''+p.id+'\')" title="이동 이력 '+window.__sp.txCount[String(p.id)]+'건" style="cursor:pointer;color:#B45309;font-size:11px;margin-left:2px">↔</span>' : '';
-  const tag = (opts && opts.tag) ? opts.tag : '';
+  const tag = opts.tag || '';
   const locked = !!(window.__sp && window.__sp.locked);
-  // 예정자(가상)·시뮬 퇴사처리된 실제직원은 입사일 대신 '예정 날짜 + 라벨' 표기
+  const ri = spRetireInfo(p);   // 실제 확정 퇴사예정(적용일 이후)
+  const hi = spHireInfo(p);     // 실제 미래 입사자(적용일 이후) — 가상 더미는 null
+  const retiringInStore = ri && !forceResign && window.__sp.place[p.id]!==SP_RESIGN;   // 매장에 남아있는 듀얼노출(퇴사)
+  const hiringInStore = hi && !forceHire && window.__sp.place[p.id]!==SP_HIRE;         // 매장에 남아있는 듀얼노출(입사)
   let dateTxt = esc(hire);
   if (p.__dummy) {
     const dd = p.hire_date || p.retire_date || '';
     const md = (dd && String(dd).length>=10) ? (String(dd).slice(5,7)+'/'+String(dd).slice(8,10)) : '';
     const lbl = p.__kind==='resign' ? '퇴사예정' : (p.__kind==='hire' ? '입사예정' : '');
     dateTxt = (md ? md+' ' : '') + lbl;
-  } else if (window.__sp && window.__sp.place && window.__sp.place[p.id]===SP_RESIGN) {
+  } else if (forceResign || (window.__sp && window.__sp.place && window.__sp.place[p.id]===SP_RESIGN)) {
     const dd = (window.__sp.simRetire && window.__sp.simRetire[p.id]) || p.retire_date || '';
     const md = (dd && String(dd).length>=10) ? (String(dd).slice(5,7)+'/'+String(dd).slice(8,10)) : '';
     dateTxt = (md ? md+' ' : '') + '퇴사예정';
+  } else if (hi) {   // 실제 미래 입사자(매장 듀얼 or 입사예정 풀)
+    dateTxt = hi.date.slice(5,7)+'/'+hi.date.slice(8,10)+' 입사예정';
   }
-  // 3줄 세로 표기: 1) 이름(볼드) 2) 직책 3) 입사일/예정일
+  // 매장에 남은 듀얼노출 뱃지: 퇴사='N일 후 퇴사'(빨강) / 입사='N일 후 입사'(파랑)
+  const retBadge = retiringInStore ? '<span style="background:#FEE2E2;color:#B91C1C;border-radius:5px;padding:0 5px;font-size:9px;font-weight:700;margin-left:2px">'+ri.days+'일 후 퇴사</span>' : '';
+  const hireBadge = hiringInStore ? '<span style="background:#DBEAFE;color:#1E40AF;border-radius:5px;padding:0 5px;font-size:9px;font-weight:700;margin-left:2px">'+hi.days+'일 후 입사</span>' : '';
+  // 3줄 세로 표기: 1) 이름(볼드) 2) 직책 3) 날짜
   const line1 = '<span style="display:inline-flex;align-items:center;gap:3px;font-weight:700;font-size:12px">'+dummyTag+esc(p.name)+hist+(locked?'':delBtn)+'</span>';
-  const line2 = '<span style="font-size:10px;opacity:.8;font-weight:600;line-height:1.3">'+(pos?esc(pos):'&nbsp;')+'</span>';
+  const line2 = '<span style="font-size:10px;opacity:.8;font-weight:600;line-height:1.3">'+(pos?esc(pos):'&nbsp;')+retBadge+hireBadge+'</span>';
   const line3 = '<span style="font-size:9px;opacity:.75;font-weight:600;line-height:1.2">'+(dateTxt||'&nbsp;')+(tag?' '+tag:'')+'</span>';
   const drag = locked ? '' : 'draggable="true" ondragstart="spDragStart(event,\''+p.id+'\')" onclick="spCardMenu(event,\''+p.id+'\')"';
+  const border = retiringInStore ? '1.5px solid #EF4444' : (hiringInStore ? '1.5px solid #3B82F6' : '0.5px solid rgba(0,0,0,.12)');
   return '<div class="sp-card" '+drag+' '
-    + 'style="display:inline-flex;flex-direction:column;align-items:flex-start;background:'+c.bg+';color:'+c.fg+';border:0.5px solid rgba(0,0,0,.12);border-radius:8px;padding:5px 9px;margin:3px;cursor:'+(locked?'default':'pointer')+';white-space:nowrap">'
+    + 'style="display:inline-flex;flex-direction:column;align-items:flex-start;background:'+c.bg+';color:'+c.fg+';border:'+border+';border-radius:8px;padding:5px 9px;margin:3px;cursor:'+(locked?'default':'pointer')+';white-space:nowrap">'
     + line1 + line2 + line3 + '</div>';
 }
 
@@ -17710,8 +17582,8 @@ function spRenderSim(){
   const q = (s)=>String(s).replace(/'/g,"\\'");
   const locked = !!sp.locked;   // 확정(confirmed) → 읽기 전용
 
-  // ── [파트6] 매장별 T.O 과부족 대시보드 ──
-  const dashFilter = window.__spDashFilter || 'all';
+  // ── 매장별 T.O 과부족 대시보드 (기본값: 과부족만 보기) ──
+  const dashFilter = (window.__spDashFilter!==undefined) ? window.__spDashFilter : 'off';
   const dashItems = sp.stores.map((store, idx) => {
     const actual = spActualCount(store);
     const to = sp.storeTo[store]||0;
@@ -17727,12 +17599,27 @@ function spRenderSim(){
       + '<div style="height:6px;background:#eee;border-radius:4px;margin:5px 0;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+bar+'"></div></div>'
       + '<div style="font-size:10px;color:var(--th)">'+actual+' / '+to+'</div></div>';
   }).join('');
+  // 전사 합산 게이지 (전체 T.O vs 실제 배치)
+  const totTo = sp.stores.reduce((a,s)=>a+(sp.storeTo[s]||0),0);
+  const totAct = sp.stores.reduce((a,s)=>a+spActualCount(s),0);
+  const totDiff = totAct - totTo;
+  const totPct = totTo>0 ? Math.max(3, Math.min(100, Math.round(totAct/totTo*100))) : (totAct>0?100:0);
+  const totColor = totDiff<0 ? '#EF4444' : (totDiff>0 ? '#F59E0B' : '#22C55E');
+  const totBadge = totDiff===0 ? '충족' : (totDiff>0 ? '초과 +'+totDiff : '부족 '+totDiff);
+  const gauge = '<div style="background:#F8FAFC;border:0.5px solid var(--crd);border-radius:8px;padding:9px 12px;margin-bottom:10px">'
+    + '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
+    +   '<span style="font-size:12px;font-weight:700"><i class="ti ti-building-community"></i> 전사 합산</span>'
+    +   '<span style="font-size:14px;font-weight:800;color:'+totColor+'">배치 '+totAct+' <span style="color:var(--th);font-weight:600">/ 목표 T.O</span> '+totTo+'</span>'
+    +   '<span style="font-size:11px;font-weight:700;color:#fff;background:'+totColor+';border-radius:6px;padding:1px 8px">'+totBadge+'</span>'
+    +   '<div style="flex:1;min-width:140px;height:10px;background:#e5e7eb;border-radius:5px;overflow:hidden"><div style="height:100%;width:'+totPct+'%;background:'+totColor+'"></div></div>'
+    + '</div></div>';
   const dashHtml = '<div style="background:#fff;border:0.5px solid var(--crd);border-radius:10px;padding:10px 12px;margin-bottom:12px">'
     + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:12px;font-weight:700"><i class="ti ti-gauge"></i> 매장별 T.O 현황</span>'
     +   '<div style="margin-left:auto;display:flex;gap:4px">'
     +     '<button class="btn-cancel-sm" style="font-size:11px'+(dashFilter==='all'?';background:var(--brm);color:#fff;border-color:var(--brm)':'')+'" onclick="spDashToggle(\'all\')">전체 매장</button>'
     +     '<button class="btn-cancel-sm" style="font-size:11px'+(dashFilter==='off'?';background:var(--brm);color:#fff;border-color:var(--brm)':'')+'" onclick="spDashToggle(\'off\')">과부족만</button>'
     +   '</div></div>'
+    + gauge
     + '<div style="display:flex;flex-wrap:wrap;gap:8px">'+(dashItems||'<span style="font-size:12px;color:var(--th)">과부족 매장이 없습니다. (모두 충족)</span>')+'</div></div>';
 
   const rowsHtml = sp.stores.map((store, idx) => {
@@ -17747,12 +17634,20 @@ function spRenderSim(){
     if (actual < to) { for (let i=0;i<(to-actual);i++) empties += '<span style="display:inline-flex;align-items:center;justify-content:center;width:62px;height:34px;margin:3px;border:1px dashed var(--crd);border-radius:8px;color:var(--th);font-size:10px">빈자리</span>'; }
     // 세로형: 매장명(상단 1행) → 바로 아래 카드 가로 정렬(폭 초과 시 다음 줄로 wrap). T.O 편집은 글로벌 설정으로 이동.
     const handle = locked ? '' : '<span draggable="true" ondragstart="spRowDragStart(event,\''+q(store)+'\')" title="드래그로 순서 변경" style="cursor:grab;color:var(--th);font-size:14px">⠿</span>';
+    const toCtrl = (sp.toEdit && !locked)
+      ? '<span style="display:inline-flex;align-items:center;gap:3px;margin-left:4px">'
+        + '<button class="btn-cancel-sm" style="padding:0 6px;font-size:13px;line-height:1.4;font-weight:700" onclick="spSetTO(\''+q(store)+'\',-1)">−</button>'
+        + '<span style="font-size:11px;font-weight:700;min-width:38px;text-align:center;background:#FEF3C7;border-radius:5px;padding:1px 4px">T.O '+to+'</span>'
+        + '<button class="btn-cancel-sm" style="padding:0 6px;font-size:13px;line-height:1.4;font-weight:700" onclick="spSetTO(\''+q(store)+'\',1)">+</button>'
+        + '</span>'
+      : '';
     return '<div class="sp-row" id="sprow-'+idx+'" ondragover="event.preventDefault()" ondrop="spDrop(event,\''+q(store)+'\')" '
       + 'style="border:0.5px solid var(--crd);border-radius:10px;padding:8px 10px;background:#fff">'
       + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;white-space:nowrap">'
       +   handle
       +   '<span style="font-size:13px;font-weight:700">'+esc(store)+'</span>'
       +   '<span style="font-size:11px;color:var(--th)">'+actual+' / '+to+' <span style="color:'+diffColor+';font-weight:600">('+diffStr+')</span></span>'
+      +   toCtrl
       + '</div>'
       + '<div style="display:flex;flex-wrap:wrap;align-items:center;min-height:40px">'+cards+empties+'</div>'
       + '</div>';
@@ -17765,17 +17660,52 @@ function spRenderSim(){
       + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:12px;font-weight:700"><i class="ti '+icon+'"></i> '+title+' ('+keys.length+')</span></div>'
       + '<div style="display:flex;flex-wrap:wrap;align-items:center;min-height:32px">'+cards+'</div></div>';
   };
-  // [파트4] 입사 예정: 매장 배치돼도 풀에서 사라지지 않음(상태 태그 표시)
+  // [입사 예정 패널] ① 수동 가상 더미(dummy, kind=hire) + ② DB 자동연동 실제 미래 입사자 병합
+  // ── ① 수동 더미(배치돼도 풀에 유지, 상태 태그 표시) ──
   const hireList = (sp.dummies||[]).filter(d=>d.kind==='hire');
-  const hireCards = hireList.map(d=>{
+  const dummyHireCards = hireList.map(d=>{
     const b = sp.place[d.id];
     const placed = (b && b!==SP_HIRE && b!==SP_WAIT && b!==SP_RESIGN);
     const tag = placed ? '<span style="background:#DCFCE7;color:#15803D;border-radius:6px;padding:0 5px">→ '+esc(b)+' 배치됨</span>' : '';
     return spCardHtml(d.id, { tag: tag });
-  }).join('') || '<span style="font-size:11px;color:var(--th)">[+ 예정자 등록]으로 추가</span>';
+  }).join('');
+  // ── ② DB 자동연동 실제 미래 입사자(hire_date>기준일). UUID/정수 ID ↔ 더미 ID 는 id 공간이 달라 충돌 없음 ──
+  const realFutureHireKeys = (sp.users||[]).filter(u=>!!spHireInfo(u)).map(u=>String(u.id));
+  const hireBucketKeys   = realFutureHireKeys.filter(k=> sp.place[k]===SP_HIRE);   // 소속 매장 없음 → 풀 대기
+  const hireInStoreKeys  = realFutureHireKeys.filter(k=>{ const b=sp.place[k]; return b && b!==SP_WAIT && b!==SP_HIRE && b!==SP_RESIGN; });   // 매장 배치됨 → 듀얼
+  const sortByHire = (a,b)=>{ const ra=spHireInfo(spPerson(a)), rb=spHireInfo(spPerson(b)); return ((ra&&ra.days)||0)-((rb&&rb.days)||0); };
+  hireBucketKeys.sort(sortByHire); hireInStoreKeys.sort(sortByHire);
+  const realBucketCards  = hireBucketKeys.map(k=>spCardHtml(k,{forceHire:true})).join('');
+  const realInStoreCards = hireInStoreKeys.map(k=>spCardHtml(k,{forceHire:true, tag:(()=>{ const b=sp.place[k]; return '<span style="background:#DBEAFE;color:#1E40AF;border-radius:6px;padding:0 5px">→ '+esc(b)+'</span>'; })()})).join('');
+  const hireTotal = hireList.length + hireBucketKeys.length + hireInStoreKeys.length;
+  const hireCards = (dummyHireCards + realBucketCards + realInStoreCards)
+    || '<span style="font-size:11px;color:var(--th)">[+ 예정자 등록]으로 추가 · 계정 미래 입사일 자동 연동</span>';
+  const autoNote = (hireBucketKeys.length + hireInStoreKeys.length)
+    ? '<span style="font-size:9px;color:#1E40AF;font-weight:700">자동연동 '+(hireBucketKeys.length+hireInStoreKeys.length)+'명</span>' : '';
   const hirePanel = '<div class="sp-row" ondragover="event.preventDefault()" ondrop="spDrop(event,\''+SP_HIRE+'\')" style="border:0.5px solid var(--crd);border-radius:10px;padding:8px 10px;background:#fff">'
-    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:12px;font-weight:700"><i class="ti ti-user-plus"></i> 입사 예정 ('+hireList.length+')</span></div>'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:12px;font-weight:700"><i class="ti ti-user-plus"></i> 입사 예정 ('+hireTotal+')</span>'+autoNote+'</div>'
     + '<div style="display:flex;flex-wrap:wrap;align-items:center;min-height:32px">'+hireCards+'</div></div>';
+  // [파트2] 퇴사 예정 '듀얼 노출' 패널 — RESIGN 버킷 + 매장에 남아있는 실제 퇴사예정자(forceResign)
+  const resignBucketKeys = spKeysIn(SP_RESIGN);
+  const retiringInStoreKeys = Object.keys(sp.place).filter(k=>{
+    const b = sp.place[k];
+    if (b===SP_RESIGN || b===SP_WAIT || b===SP_HIRE) return false;   // 버킷이 아닌 실제 매장 배치만
+    return !!spRetireInfo(spPerson(k));
+  });
+  // 가까운 퇴사일 순 정렬
+  retiringInStoreKeys.sort((a,b)=>{
+    const ra=spRetireInfo(spPerson(a)), rb=spRetireInfo(spPerson(b));
+    return ((ra&&ra.days)||0) - ((rb&&rb.days)||0);
+  });
+  const resignCards = (resignBucketKeys.map(k=>spCardHtml(k)).join('')
+    + retiringInStoreKeys.map(k=>spCardHtml(k,{forceResign:true})).join(''))
+    || '<span style="font-size:11px;color:var(--th)">여기로 드래그</span>';
+  const resignTotal = resignBucketKeys.length + retiringInStoreKeys.length;
+  const resignPanel = '<div class="sp-row" ondragover="event.preventDefault()" ondrop="spDrop(event,\''+SP_RESIGN+'\')" style="border:0.5px solid var(--crd);border-radius:10px;padding:8px 10px;background:#fff">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:12px;font-weight:700"><i class="ti ti-user-minus"></i> 퇴사 예정 ('+resignTotal+')</span>'
+    +   (retiringInStoreKeys.length ? '<span style="font-size:9px;color:#B91C1C;font-weight:700">매장 유지중 '+retiringInStoreKeys.length+'명 포함</span>' : '')
+    + '</div>'
+    + '<div style="display:flex;flex-wrap:wrap;align-items:center;min-height:32px">'+resignCards+'</div></div>';
   // 대기 패널 — 최상단(요약 장표 아래)으로 이동, 3섹션 가로 배치
   const regBtn = locked ? '' : '<button class="btn-cancel-sm" style="font-size:11px" onclick="spOpenRegister()"><i class="ti ti-user-plus"></i> 예정자 등록</button>';
   const waitPanel = '<div style="margin-bottom:12px">'
@@ -17783,15 +17713,19 @@ function spRenderSim(){
     +   regBtn + '</div>'
     + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px">'
     +   panelSection('미배치 인원', SP_WAIT, 'ti-user-off')
-    +   panelSection('퇴사 예정', SP_RESIGN, 'ti-user-minus')
+    +   resignPanel
     +   hirePanel
-    + '</div></div>';
+    + '</div>'
+    + spCommentsPanelHtml()
+    + '</div>';
 
   const lockBtn = locked
     ? '<button class="btn-cancel-sm" style="font-size:12px;color:var(--brm);border-color:var(--brm)" onclick="spUnlockPlan()"><i class="ti ti-lock-open"></i> 발령 수정</button>'
     : '<button class="btn-new" style="background:var(--gn);font-size:12px" onclick="spConfirmPlan()"><i class="ti ti-lock"></i> 발령 확정</button>';
+  const toEditOn = !!sp.toEdit;
   const editBtns = locked ? '' : (
       '<button class="btn-cancel-sm" style="font-size:12px" onclick="spOpenStoreMgr()"><i class="ti ti-building-store"></i> 배치 매장 관리</button>'
+    + '<button class="btn-cancel-sm" style="font-size:12px'+(toEditOn?';background:#F59E0B;color:#fff;border-color:#F59E0B':'')+'" onclick="spToggleTOEdit()"><i class="ti ti-adjustments"></i> T.O 편집'+(toEditOn?' 완료':'')+'</button>'
     + '<button class="btn-cancel-sm" style="font-size:12px;color:var(--bl);border-color:var(--bl)" onclick="spResetToLive()"><i class="ti ti-refresh"></i> 최신 계정 복구</button>'
     + '<button class="btn-cancel-sm" style="font-size:12px;color:var(--gn);border-color:var(--gn)" onclick="spSaveClick()"><i class="ti ti-device-floppy"></i> 저장</button>'
   );
@@ -17811,6 +17745,9 @@ function spRenderSim(){
     + dashHtml
     + waitPanel
     + '<div class="sp-store-grid">'+rowsHtml+'</div>';
+  // 검토 메모장 로드(비동기) — @멘션 매칭용 인원도 보장
+  if (!window.__spPeople || !window.__spPeople.length) { spLoadPeople().then(()=>spLoadComments()); }
+  else spLoadComments();
 }
 // 배치 매장 관리 모달 (핸들 드래그 순서변경 · 매장명/T.O 편집 · 삭제 · 빈 매장 추가)
 function spOpenStoreMgr(){
@@ -17968,12 +17905,21 @@ function spCardMenu(e, key){
   const opts = sp.stores.map(s=>'<option value="'+esc(s)+'">'+esc(s)+'</option>').join('');
   const menu = document.createElement('div'); menu.id = 'spCardMenu';
   menu.style.cssText = 'position:fixed;z-index:99999;background:#fff;border:0.5px solid var(--crd);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.18);padding:9px;width:214px;font-size:12px';
+  const posSelOpt = SP_POS_ORDER.map(pp=>'<option value="'+pp+'"'+(spPos(p)===pp?' selected':'')+'>'+pp+'</option>').join('');
+  // 실제 직원 전용: DB 직접 반영 (안전 확인창)
+  const dbBlock = (!p.__dummy) ? (
+      '<div style="border-top:0.5px solid var(--crd);margin:7px 0 6px;padding-top:7px"><div style="font-size:9px;color:#B91C1C;font-weight:700;margin-bottom:4px"><i class="ti ti-database-cog"></i> 실제 계정에 반영(주의)</div>'
+    + '<button class="btn-cancel-sm" style="width:100%;font-size:12px;margin-bottom:4px;color:#B91C1C;border-color:#FCA5A5" onclick="spApplyRetireDB(\''+key+'\')"><i class="ti ti-calendar-x"></i> 퇴사일 실제 반영</button>'
+    + '<button class="btn-cancel-sm" style="width:100%;font-size:12px;color:#B91C1C;border-color:#FCA5A5" onclick="spApplyPosStoreDB(\''+key+'\')"><i class="ti ti-id-badge-2"></i> 직책·소속매장 실제 반영</button></div>'
+  ) : '';
   menu.innerHTML = '<div style="font-size:11px;font-weight:700;margin-bottom:7px">'+esc(p.name)+' <span style="color:var(--th);font-weight:500">'+esc(spPos(p))+'</span></div>'
     + '<div style="margin-bottom:6px"><select onchange="spCardMove(\''+key+'\',this.value)" style="width:100%;padding:5px;font-size:12px;border:0.5px solid var(--crd);border-radius:6px"><option value="">🏬 매장 이동…</option>'+opts+'</select></div>'
+    + '<div style="margin-bottom:6px"><select onchange="spChangePos(\''+key+'\',this.value)" style="width:100%;padding:5px;font-size:12px;border:0.5px solid var(--crd);border-radius:6px" title="직책 변경(시뮬레이션)"><option value="">👤 직책 변경…</option>'+posSelOpt+'</select></div>'
     + '<button class="btn-cancel-sm" style="width:100%;font-size:12px;margin-bottom:4px" onclick="spRetireUser(\''+key+'\')"><i class="ti ti-user-minus"></i> 퇴사 예정 처리</button>'
     + '<button class="btn-cancel-sm" style="width:100%;font-size:12px;margin-bottom:4px" onclick="spCardMove(\''+key+'\',\''+SP_WAIT+'\')"><i class="ti ti-user-off"></i> 미배치 풀로 이동</button>'
     + (!p.__dummy ? '<button class="btn-cancel-sm" style="width:100%;font-size:12px" onclick="spCloseCardMenu();spOpenStaffHistory(\''+key+'\')"><i class="ti ti-timeline"></i> 상세 히스토리/메모</button>'
-                  : '<button class="btn-cancel-sm" style="width:100%;font-size:12px;color:var(--rd);border-color:var(--rd)" onclick="spDelDummy(\''+key+'\')"><i class="ti ti-trash"></i> 가상 카드 삭제</button>');
+                  : '<button class="btn-cancel-sm" style="width:100%;font-size:12px;color:var(--rd);border-color:var(--rd)" onclick="spDelDummy(\''+key+'\')"><i class="ti ti-trash"></i> 가상 카드 삭제</button>')
+    + dbBlock;
   document.body.appendChild(menu);
   // 메뉴 내부 클릭은 바깥(document) 닫기 핸들러로 버블링되지 않도록 차단 → 드롭다운 즉시 닫힘 버그 방지
   menu.addEventListener('click', function(ev){ ev.stopPropagation(); });
@@ -17999,6 +17945,128 @@ function spRetireUser(key){
   sp.simRetire[key] = (d||'').trim();
   sp.place[key] = SP_RESIGN;
   window.__spDirty = true; spCloseCardMenu(); spRenderSim();
+}
+
+// 직책 변경(시뮬레이션) — 실제 users 미반영. sp.posOverride 에 저장, 저장 시 계획에 보존
+function spChangePos(key, pos){
+  if (!pos || spLocked()) return;
+  const sp = window.__sp; if (!sp) return;
+  if (!sp.posOverride) sp.posOverride = {};
+  sp.posOverride[key] = pos;
+  window.__spDirty = true; spCloseCardMenu(); spRenderSim();
+}
+// [파트7] 퇴사일 실제 반영 — users.retire_date 즉시 변경 (확인창 필수)
+async function spApplyRetireDB(key){
+  const sp = window.__sp; const p = spPerson(key);
+  if (!p || p.__dummy) { spCloseCardMenu(); return; }
+  const def = (sp.simRetire && sp.simRetire[key]) || (p.retire_date?String(p.retire_date).slice(0,10):'') || sp.planDate;
+  const d = prompt('실제 계정에 반영할 퇴사일을 입력하세요 (YYYY-MM-DD).\n비우면 퇴사일을 삭제합니다:', def);
+  if (d === null) { spCloseCardMenu(); return; }
+  const val = (d||'').trim();
+  if (val && !/^\d{4}-\d{2}-\d{2}$/.test(val)) { alert('날짜 형식(YYYY-MM-DD)이 올바르지 않습니다.'); return; }
+  if (!confirm('실제 직원 계정 정보가 즉시 변경됩니다. 진행하시겠습니까?\n\n· '+p.name+' · 퇴사일 → '+(val||'(삭제)'))) return;
+  try{
+    const { error } = await sb.from('users').update({ retire_date: (val||null) }).eq('id', p.id);
+    if (error) { alert('반영 실패: '+error.message); return; }
+    p.retire_date = val || null;   // 로컬 반영
+    spCloseCardMenu(); spRenderSim();
+    alert('퇴사일이 실제 계정에 반영되었습니다.');
+  }catch(e){ alert('반영 오류: '+(e&&e.message||e)); }
+}
+// [파트7] 직책·소속매장 실제 반영 — users.position + users.store 즉시 변경 (확인창 필수)
+async function spApplyPosStoreDB(key){
+  const sp = window.__sp; const p = spPerson(key);
+  if (!p || p.__dummy) { spCloseCardMenu(); return; }
+  const newPos = spPos(p);   // posOverride 반영된 현재 직책
+  const b = sp.place[key];
+  const newStore = (b && b!==SP_WAIT && b!==SP_HIRE && b!==SP_RESIGN) ? b : (p.store||'');
+  if (!confirm('실제 직원 계정 정보가 즉시 변경됩니다. 진행하시겠습니까?\n\n· '+p.name+'\n· 직책 → '+(newPos||'(미지정)')+'\n· 소속매장 → '+(newStore||'(미지정)'))) return;
+  try{
+    const upd = { position: (newPos||null), store: (newStore||null) };
+    const { error } = await sb.from('users').update(upd).eq('id', p.id);
+    if (error) { alert('반영 실패: '+error.message); return; }
+    p.position = newPos || null; p.store = newStore || null;
+    if (sp.posOverride) delete sp.posOverride[key];   // 실제 반영됐으니 오버라이드 해제
+    spCloseCardMenu(); spRenderSim();
+    alert('직책·소속매장이 실제 계정에 반영되었습니다.');
+  }catch(e){ alert('반영 오류: '+(e&&e.message||e)); }
+}
+
+// ── [파트5] 발령 검토 메모장 (댓글 + @멘션 → 인앱 알림 + 슬랙 DM) ──
+function spCommentsPanelHtml(){
+  const sp = window.__sp;
+  return '<div id="spCommentsPanel" style="margin-top:12px;border:0.5px solid var(--crd);border-radius:10px;padding:10px 12px;background:#fff">'
+    + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><span style="font-size:13px;font-weight:700"><i class="ti ti-message-2"></i> 발령 검토 메모장</span>'
+    +   '<span style="font-size:10px;color:var(--th)">@이름 으로 담당자를 언급하면 알림·슬랙 DM이 전송됩니다.</span></div>'
+    + '<div id="spCommentsList" style="display:flex;flex-direction:column;gap:7px;margin-bottom:9px"><div style="font-size:11px;color:var(--th)">불러오는 중…</div></div>'
+    + '<div style="display:flex;gap:6px;align-items:flex-start">'
+    +   '<textarea id="spCommentInput" rows="2" placeholder="검토 의견을 남기세요… (예: @'+esc((window.__spPeople&&window.__spPeople[0]&&window.__spPeople[0].name)||'홍길동')+' 확인 부탁드립니다)" style="flex:1;font-size:12px;padding:7px 9px;border:0.5px solid var(--crd);border-radius:8px;resize:vertical;font-family:inherit"></textarea>'
+    +   '<button class="btn-submit" style="padding:8px 12px;font-size:12px;white-space:nowrap" onclick="spAddComment()"><i class="ti ti-send"></i> 등록</button>'
+    + '</div></div>';
+}
+async function spLoadComments(){
+  const sp = window.__sp; if (!sp) return;
+  const box = document.getElementById('spCommentsList'); if (!box) return;
+  try{
+    const { data, error } = await sb.rpc('spc_list', { p_token: getSessionToken(), p_plan_date: sp.planDate });
+    if (error) throw error;
+    const list = Array.isArray(data) ? data : (data||[]);
+    window.__spComments = list;
+    spRenderComments();
+  }catch(e){ box.innerHTML = '<div style="font-size:11px;color:var(--rd)">메모를 불러오지 못했습니다. ('+(e&&e.message||'')+')</div>'; }
+}
+function spRenderComments(){
+  const box = document.getElementById('spCommentsList'); if (!box) return;
+  const list = window.__spComments||[];
+  const me = (window.currentUser && currentUser.id!=null) ? String(currentUser.id) : '';
+  const isAdmin = !!(window.currentUser && (currentUser.is_master||currentUser.is_vice_master));
+  if (!list.length){ box.innerHTML = '<div style="font-size:11px;color:var(--th)">아직 등록된 검토 메모가 없습니다.</div>'; return; }
+  box.innerHTML = list.map(c=>{
+    const ts = c.created_at ? String(c.created_at).replace('T',' ').slice(5,16) : '';
+    const canDel = (String(c.author_id)===me) || isAdmin;
+    const del = canDel ? '<span onclick="spDelComment('+c.id+')" title="삭제" style="cursor:pointer;color:var(--th);font-size:11px;margin-left:6px">✕</span>' : '';
+    // @멘션 하이라이트
+    const body = esc(c.content||'').replace(/@([^\s@]{1,20})/g, '<span style="color:var(--brm);font-weight:700">@$1</span>');
+    return '<div style="border:0.5px solid var(--crd);border-radius:8px;padding:7px 9px;background:#FAFAFA">'
+      + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px"><span style="font-size:11px;font-weight:700">'+esc(c.author_name||'?')+'</span>'
+      +   '<span style="font-size:10px;color:var(--th)">'+ts+'</span>'+del+'</div>'
+      + '<div style="font-size:12px;line-height:1.45;white-space:pre-wrap">'+body+'</div></div>';
+  }).join('');
+}
+async function spAddComment(){
+  const sp = window.__sp; if (!sp) return;
+  const el = document.getElementById('spCommentInput'); const txt = (el?.value||'').trim();
+  if (!txt) { alert('내용을 입력하세요.'); return; }
+  // @멘션 파싱 → 이름 매칭 → 대상 user 추출
+  const people = window.__spPeople||[];
+  const mentionNames = (txt.match(/@([^\s@]{1,20})/g)||[]).map(s=>s.slice(1));
+  const mentioned = [];
+  mentionNames.forEach(nm=>{
+    const u = people.find(x=> x.name===nm || String(x.name||'').replace(/\s/g,'')===nm.replace(/\s/g,''));
+    if (u && !mentioned.find(m=>m.id===u.id)) mentioned.push({ id:u.id, name:u.name });
+  });
+  try{
+    const { data, error } = await sb.rpc('spc_add', { p_token: getSessionToken(), p_plan_date: sp.planDate, p_content: txt, p_mentions: mentioned });
+    if (error) throw error;
+    if (!(data && data.ok)) { alert('등록 실패: '+((data&&data.error)||'')); return; }
+    if (el) el.value='';
+    // 멘션 알림 + 슬랙 DM
+    for (const m of mentioned){
+      if (String(m.id)===String(currentUser&&currentUser.id)) continue;   // 본인 멘션 제외
+      try{ await createNotificationWithSlack(m.id, 'staffing_mention', (data.id||sp.planDate), 'staffing',
+        '[발령 검토 메모] '+(currentUser&&currentUser.name||'')+'님이 '+sp.planDate+' 배치계획에서 회원님을 언급했습니다: '+txt); }catch(_){}
+    }
+    await spLoadComments();
+  }catch(e){ alert('등록 오류: '+(e&&e.message||e)); }
+}
+async function spDelComment(id){
+  if (!confirm('이 검토 메모를 삭제할까요?')) return;
+  try{
+    const { data, error } = await sb.rpc('spc_del', { p_token: getSessionToken(), p_id: id });
+    if (error) throw error;
+    if (!(data && data.ok)) { alert('삭제 실패: '+((data&&data.error)||'')); return; }
+    await spLoadComments();
+  }catch(e){ alert('삭제 오류: '+(e&&e.message||e)); }
 }
 
 // ── [파트3] 입사·퇴사 예정자 통합 단일 등록 모달 ──
@@ -18049,7 +18117,7 @@ async function spSave(){
   const assign = {}; Object.keys(sp.place).forEach(k => { assign[k] = sp.place[k]; });
   // 예정자 풀(dummies)은 글로벌이라 계획에 저장하지 않음. 계획엔 배치(assign)·매장순서(rows)·시뮬퇴사일(simRetire)만.
   const payload = { plan_date: sp.planDate, title: sp.title || ('배치계획 '+sp.planDate),
-    store_to: sp.storeTo, placements: { assign, rows: sp.stores, simRetire: sp.simRetire||{} } };
+    store_to: sp.storeTo, placements: { assign, rows: sp.stores, simRetire: sp.simRetire||{}, posOverride: sp.posOverride||{} } };
   const { data, error } = await sb.rpc('sp_save', { p_token: getSessionToken(), p_id: sp.planId || null, p_payload: payload });
   if (error) { alert('저장 오류: ' + error.message); return { ok:false }; }
   if (data && data.ok) { sp.planId = data.id || sp.planId; window.__spDirty = false; return { ok:true }; }
@@ -18310,10 +18378,16 @@ async function spOpenStaffHistory(userId){
   const name = u ? u.name : '';
   const old = document.getElementById('spHistModal'); if (old) old.remove();
   const m = document.createElement('div'); m.id='spHistModal'; m.className='modal-bg open';
-  m.innerHTML = '<div class="modal-inner" style="width:540px;max-width:95vw"><div class="modal-title"><i class="ti ti-timeline"></i> '+esc(name)+' — 이동 이력 · 특이사항</div>'
+  m.innerHTML = '<div class="modal-inner" style="width:540px;max-width:95vw"><div class="modal-title" style="margin-bottom:8px"><i class="ti ti-id-badge-2"></i> '+esc(name)+' — 인사 정보</div>'
+    + '<div style="display:flex;gap:6px;margin-bottom:10px;border-bottom:0.5px solid var(--crd)">'
+    +   '<button id="spHistTab-move" class="sp-hist-tab" onclick="spHistTab(\'move\')" style="background:none;border:none;border-bottom:2px solid var(--brm);color:var(--brm);font-weight:700;font-size:12px;padding:5px 8px;cursor:pointer">이동 이력 · 특이사항</button>'
+    +   '<button id="spHistTab-hr" class="sp-hist-tab" onclick="spHistTab(\'hr\')" style="background:none;border:none;border-bottom:2px solid transparent;color:var(--th);font-weight:600;font-size:12px;padding:5px 8px;cursor:pointer">인사이력카드</button>'
+    + '</div>'
     + '<div id="spHistBody"><div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div></div>'
+    + '<div id="spHistHrBody" style="display:none"><div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div></div>'
     + '<div style="text-align:right;margin-top:12px"><button class="btn-cancel-sm" onclick="document.getElementById(\'spHistModal\').remove()">닫기</button></div></div>';
   document.body.appendChild(m);
+  window.__spHistUser = String(userId); window.__spHistHrLoaded = false;
   let hist = [], note = '';
   try{ const r = await sb.rpc('pt_user', { p_token:getSessionToken(), p_user_id:String(userId) }); hist = Array.isArray(r.data)?r.data:[]; }catch(e){}
   try{ const r = await sb.rpc('sn_get', { p_token:getSessionToken(), p_user_id:String(userId) }); if (r.data && r.data.note) note = r.data.note; }catch(e){}
@@ -18334,6 +18408,37 @@ async function spSaveStaffNote(userId){
   const note = document.getElementById('spNoteInput')?.value || '';
   try{ const { data } = await sb.rpc('sn_save', { p_token:getSessionToken(), p_user_id:String(userId), p_note:note });
     if (data && data.ok) alert('메모가 저장되었습니다.'); else alert('저장 실패: '+((data&&data.error)||'')); }
+  catch(e){ alert('저장 오류: '+(e.message||e)); }
+}
+// [파트4] 히스토리 모달 탭 전환 (이동이력 ↔ 인사이력카드)
+function spHistTab(tab){
+  const move = document.getElementById('spHistBody'); const hr = document.getElementById('spHistHrBody');
+  const tm = document.getElementById('spHistTab-move'); const th = document.getElementById('spHistTab-hr');
+  if (!move||!hr) return;
+  const on = (btn)=>{ btn.style.borderBottom='2px solid var(--brm)'; btn.style.color='var(--brm)'; btn.style.fontWeight='700'; };
+  const off = (btn)=>{ btn.style.borderBottom='2px solid transparent'; btn.style.color='var(--th)'; btn.style.fontWeight='600'; };
+  if (tab==='hr'){ move.style.display='none'; hr.style.display=''; on(th); off(tm); if(!window.__spHistHrLoaded) spLoadHrCard(window.__spHistUser); }
+  else { hr.style.display='none'; move.style.display=''; on(tm); off(th); }
+}
+// [파트4] 인사이력카드 로드 (hr_get — 열람권한자만, 보안 RPC)
+async function spLoadHrCard(userId){
+  const box = document.getElementById('spHistHrBody'); if (!box) return;
+  window.__spHistHrLoaded = true;
+  let content = '', meta = '';
+  try{
+    const { data, error } = await sb.rpc('hr_get', { p_token:getSessionToken(), p_user_id:String(userId) });
+    if (error) throw error;
+    if (data){ content = data.content||''; if (data.updated_at) meta = '최종 수정: '+String(data.updated_at).replace('T',' ').slice(0,16); }
+  }catch(e){ box.innerHTML = '<div style="font-size:12px;color:var(--rd)">인사이력카드를 불러오지 못했습니다. (권한 또는 네트워크 오류)</div>'; return; }
+  const canEdit = currentUser && (currentUser.is_master || (typeof isAdminGroup==='function'&&isAdminGroup()) || (typeof spIsViewer==='function'&&spIsViewer(currentUser)));
+  box.innerHTML = '<div style="font-size:11px;color:var(--th);margin-bottom:6px"><i class="ti ti-lock"></i> 열람 권한자 전용 · 입·퇴사, 발령, 평가, 징계/표창 등 인사 이력을 자유 서식으로 기록합니다.'+(meta?' · '+esc(meta):'')+'</div>'
+    + '<textarea id="spHrInput" class="form-input" style="min-height:220px;font-size:13px;line-height:1.5" '+(canEdit?'':'readonly')+' placeholder="예)\n2024-03-01 입사 (바리스타, 성수점)\n2025-01 매니저 승진\n2025-06 한남점 발령\n2025-12 우수사원 표창">'+esc(content)+'</textarea>'
+    + (canEdit ? '<div style="text-align:right;margin-top:8px"><button class="btn-submit" style="font-size:12px" onclick="spSaveHrCard(\''+esc(String(userId))+'\')"><i class="ti ti-device-floppy"></i> 인사이력 저장</button></div>' : '');
+}
+async function spSaveHrCard(userId){
+  const content = document.getElementById('spHrInput')?.value || '';
+  try{ const { data } = await sb.rpc('hr_save', { p_token:getSessionToken(), p_user_id:String(userId), p_content:content });
+    if (data && data.ok) alert('인사이력카드가 저장되었습니다.'); else alert('저장 실패: '+((data&&data.error)||'')); }
   catch(e){ alert('저장 오류: '+(e.message||e)); }
 }
 
