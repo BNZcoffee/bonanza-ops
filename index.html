@@ -17906,8 +17906,9 @@ function spCardMenu(e, key){
   const menu = document.createElement('div'); menu.id = 'spCardMenu';
   menu.style.cssText = 'position:fixed;z-index:99999;background:#fff;border:0.5px solid var(--crd);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.18);padding:9px;width:214px;font-size:12px';
   const posSelOpt = SP_POS_ORDER.map(pp=>'<option value="'+pp+'"'+(spPos(p)===pp?' selected':'')+'>'+pp+'</option>').join('');
-  // 실제 직원 전용: DB 직접 반영 (안전 확인창)
-  const dbBlock = (!p.__dummy) ? (
+  // 실제 직원 전용 + 총괄(is_master)에게만 노출: DB 직접 반영 (안전 확인창)
+  const canApplyDb = !!(window.currentUser && currentUser.is_master);
+  const dbBlock = (!p.__dummy && canApplyDb) ? (
       '<div style="border-top:0.5px solid var(--crd);margin:7px 0 6px;padding-top:7px"><div style="font-size:9px;color:#B91C1C;font-weight:700;margin-bottom:4px"><i class="ti ti-database-cog"></i> 실제 계정에 반영(주의)</div>'
     + '<button class="btn-cancel-sm" style="width:100%;font-size:12px;margin-bottom:4px;color:#B91C1C;border-color:#FCA5A5" onclick="spApplyRetireDB(\''+key+'\')"><i class="ti ti-calendar-x"></i> 퇴사일 실제 반영</button>'
     + '<button class="btn-cancel-sm" style="width:100%;font-size:12px;color:#B91C1C;border-color:#FCA5A5" onclick="spApplyPosStoreDB(\''+key+'\')"><i class="ti ti-id-badge-2"></i> 직책·소속매장 실제 반영</button></div>'
@@ -17964,7 +17965,8 @@ async function spApplyRetireDB(key){
   if (d === null) { spCloseCardMenu(); return; }
   const val = (d||'').trim();
   if (val && !/^\d{4}-\d{2}-\d{2}$/.test(val)) { alert('날짜 형식(YYYY-MM-DD)이 올바르지 않습니다.'); return; }
-  if (!confirm('실제 직원 계정 정보가 즉시 변경됩니다. 진행하시겠습니까?\n\n· '+p.name+' · 퇴사일 → '+(val||'(삭제)'))) return;
+  const oldRet = p.retire_date ? String(p.retire_date).slice(0,10) : '(없음)';
+  if (!confirm('실제 직원 계정 정보가 즉시 변경됩니다. 진행하시겠습니까?\n\n· '+p.name+'\n· 퇴사일: '+oldRet+' → '+(val||'(삭제)'))) return;
   try{
     const { error } = await sb.from('users').update({ retire_date: (val||null) }).eq('id', p.id);
     if (error) { alert('반영 실패: '+error.message); return; }
@@ -17980,7 +17982,9 @@ async function spApplyPosStoreDB(key){
   const newPos = spPos(p);   // posOverride 반영된 현재 직책
   const b = sp.place[key];
   const newStore = (b && b!==SP_WAIT && b!==SP_HIRE && b!==SP_RESIGN) ? b : (p.store||'');
-  if (!confirm('실제 직원 계정 정보가 즉시 변경됩니다. 진행하시겠습니까?\n\n· '+p.name+'\n· 직책 → '+(newPos||'(미지정)')+'\n· 소속매장 → '+(newStore||'(미지정)'))) return;
+  const oldPos = p.position || '(미지정)';   // DB 기존값
+  const oldStore = p.store || '(미지정)';
+  if (!confirm('실제 직원 계정 정보가 즉시 변경됩니다. 진행하시겠습니까?\n\n· '+p.name+'\n· 직책: '+oldPos+' → '+(newPos||'(미지정)')+'\n· 소속매장: '+oldStore+' → '+(newStore||'(미지정)'))) return;
   try{
     const upd = { position: (newPos||null), store: (newStore||null) };
     const { error } = await sb.from('users').update(upd).eq('id', p.id);
@@ -18037,14 +18041,16 @@ async function spAddComment(){
   const sp = window.__sp; if (!sp) return;
   const el = document.getElementById('spCommentInput'); const txt = (el?.value||'').trim();
   if (!txt) { alert('내용을 입력하세요.'); return; }
-  // @멘션 파싱 → 이름 매칭 → 대상 user 추출
-  const people = window.__spPeople||[];
+  // @멘션 파싱 → 이름 매칭. 단, '인원 배치 관리' 열람 권한 대상자만 태그/알림 허용
+  const people = (window.__spPeople||[]).filter(u=> (typeof spIsViewer==='function') ? spIsViewer(u) : true);
   const mentionNames = (txt.match(/@([^\s@]{1,20})/g)||[]).map(s=>s.slice(1));
-  const mentioned = [];
+  const mentioned = [], skipped = [];
   mentionNames.forEach(nm=>{
     const u = people.find(x=> x.name===nm || String(x.name||'').replace(/\s/g,'')===nm.replace(/\s/g,''));
-    if (u && !mentioned.find(m=>m.id===u.id)) mentioned.push({ id:u.id, name:u.name });
+    if (u){ if (!mentioned.find(m=>m.id===u.id)) mentioned.push({ id:u.id, name:u.name }); }
+    else if (!skipped.includes(nm)) skipped.push(nm);
   });
+  if (skipped.length && !confirm('열람 권한이 없어 태그되지 않는 대상이 있습니다: @'+skipped.join(', @')+'\n(열람 권한자만 알림/슬랙 DM이 전송됩니다)\n그대로 등록할까요?')) return;
   try{
     const { data, error } = await sb.rpc('spc_add', { p_token: getSessionToken(), p_plan_date: sp.planDate, p_content: txt, p_mentions: mentioned });
     if (error) throw error;
