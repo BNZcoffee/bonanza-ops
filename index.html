@@ -1434,7 +1434,7 @@ async function loadCats() {
 
 function visibleCats() {
   const grade = userGrade(currentUser);
-  const isAdminView = (grade === 'master' || grade === 'vice');
+  const isAdminView = (grade === 'master' || grade === 'sub_master');
   return allCats.filter(c => {
     // 숨김 게시판: 총괄·부총괄만 (관리 목적)
     if (c.hidden && !isAdminView) return false;
@@ -1594,7 +1594,7 @@ function canSee(post) {
     if (!(currentUser.is_master || currentUser.is_vice_master || post.author_id === currentUser.id)) return false;
   }
   const grade = userGrade(currentUser);
-  if (grade === 'master' || grade === 'vice') return true;  // 총괄·부총괄 전체 열람
+  if (grade === 'master' || grade === 'sub_master') return true;  // 총괄·부총괄 전체 열람
   const cat = allCats.find(c => c.id === post.category_id);
   if (cat) {
     // 게시판 단위 열람권한(read_perm)이 '최우선' 보안 게이트.
@@ -1629,11 +1629,11 @@ function canWriteCatObj(cat) {
   if (!hasPerm('notice_write')) return false;  // 공지 작성 권한 자체가 없으면 불가
   const wp = cat.write_perm || 'dept_lead';
   if (wp === 'master') return grade === 'master';
-  if (wp === 'all_admin') return ['vice','dept','master'].includes(grade);  // 모든 관리자
+  if (wp === 'all_admin') return ['sub_master','dept','master'].includes(grade);  // 모든 관리자
   // 주 담당부서 또는 협력부서(co_depts) 소속이면 글쓰기 허용
-  if (wp === 'dept_lead') return ['vice','master'].includes(grade) || (grade==='dept' && (!cat.dept || cat.dept==='공용' || catDeptMatch(cat)));
+  if (wp === 'dept_lead') return ['sub_master','master'].includes(grade) || (grade==='dept' && (!cat.dept || cat.dept==='공용' || catDeptMatch(cat)));
   if (wp === 'dept_only') {
-    if (grade==='master'||grade==='vice') return true;
+    if (grade==='master'||grade==='sub_master') return true;
     return grade==='dept' && catDeptMatch(cat);
   }
   return false;
@@ -5553,7 +5553,7 @@ async function sendPostUpdateNotify(postId){
   let sent=0;
   window.__notifBatchLog = true;
   for(const u of allUsers){
-    let grade='staff'; if(u.is_master)grade='master'; else if(u.is_vice_master)grade='vice'; else if(u.part)grade='dept'; else if(isManagerRole(u.role))grade='manager';
+    let grade='staff'; if(u.is_master)grade='master'; else if(u.is_vice_master)grade='sub_master'; else if(u.part)grade='dept'; else if(isManagerRole(u.role))grade='manager';
     if(postIsManagerAccess(__postAccess) && grade==='staff') continue; // 매니저 전용 공지는 매장직원 제외
     const shouldSend = roleCheck[grade]!==undefined ? roleCheck[grade] : !!(NOTIF_ROLE_DEFAULTS['new_post']?.[NOTIF_ROLES.findIndex(r=>r.key===grade)]);
     if(!shouldSend) continue;
@@ -5595,7 +5595,7 @@ async function sendRoleBasedPostNotify(postId, title) {
     // 역할 판정
     let grade = 'staff';
     if (u.is_master) grade = 'master';
-    else if (u.is_vice_master) grade = 'vice';
+    else if (u.is_vice_master) grade = 'sub_master';
     else if (u.part) grade = 'dept';
     else if (isManagerRole(u.role)) grade = 'manager';
 
@@ -6658,7 +6658,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-10-14';   // 배포 시 갱신 (표시는 app_settings.updated_at 과 비교해 더 최근값 노출)
+const APP_BUILD_DATE = '2026-10-23';   // 배포 시 갱신 (표시는 app_settings.updated_at 과 비교해 더 최근값 노출)
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -10123,7 +10123,7 @@ function canSeeReq(r) {
 function canDeletePost(post) {
   if (!currentUser || !post) return false;
   const grade = userGrade(currentUser);
-  if (grade === 'master' || grade === 'vice') return true;
+  if (grade === 'master' || grade === 'sub_master') return true;
   return post.author_id === currentUser.id;  // 작성자 본인
 }
 
@@ -17574,7 +17574,31 @@ function spKeysIn(bucket){
   return keys;
 }
 
-function spActualCount(store){ return spKeysIn(store).length; }  // 실근무자(퇴사예정은 RESIGN 버킷이라 제외됨)
+function spActualCount(store){ return spKeysIn(store).length; }  // 실근무자(미도래 퇴사예정 포함 — 매장 슬롯 잔류)
+
+// 시뮬레이션 변경 내역(As-Is → To-Be): 매장이동 · 직책변경 · 퇴사지정
+function spChangeList(){
+  const sp = window.__sp; const items = [];
+  (sp.users||[]).forEach(u=>{
+    const key = String(u.id);
+    const bucket = sp.place[key];
+    const parts = [];
+    // 매장 이동 / 미배치
+    if (bucket===SP_WAIT) parts.push('소속 '+(u.store||'-')+' → 미배치');
+    else if (bucket && bucket!==SP_RESIGN && bucket!==SP_HIRE && bucket!==(u.store||'')) parts.push('소속 '+(u.store||'-')+' → '+bucket);
+    // 직책 변경(시뮬)
+    const ov = (sp.posOverride && sp.posOverride[key]!=null) ? String(sp.posOverride[key]) : '';
+    if (ov && ov!==(u.position||'')) parts.push('직책 '+(u.position||'-')+' → '+ov);
+    // 퇴사 지정/변경(시뮬)
+    const origRet = u.retire_date ? String(u.retire_date).slice(0,10) : '';
+    const simRet = (sp.simRetire && sp.simRetire[key]) ? String(sp.simRetire[key]) : '';
+    if (bucket===SP_RESIGN) parts.push('퇴사 처리'+((simRet||origRet)?' ('+(simRet||origRet)+')':''));
+    else if (simRet && simRet!==origRet) parts.push('퇴사예정 '+(origRet||'-')+' → '+simRet);
+    if (!parts.length) return;
+    items.push({ name:u.name, pos:spPos(spPerson(key)), parts });
+  });
+  return items;
+}
 
 function spRenderSim(){
   const sp = window.__sp; if (!sp) return;
@@ -17706,15 +17730,24 @@ function spRenderSim(){
     +   (retiringInStoreKeys.length ? '<span style="font-size:9px;color:#B91C1C;font-weight:700">매장 유지중 '+retiringInStoreKeys.length+'명 포함</span>' : '')
     + '</div>'
     + '<div style="display:flex;flex-wrap:wrap;align-items:center;min-height:32px">'+resignCards+'</div></div>';
-  // 대기 패널 — 최상단(요약 장표 아래)으로 이동, 3섹션 가로 배치
+  // [변경 내역] 기존 DB 배치 대비 현재 시뮬레이션 변경(매장이동·직책변경·퇴사지정) As-Is → To-Be 요약
+  const chg = spChangeList();
+  const chgRows = chg.map(it=>'<div style="display:flex;gap:6px;align-items:flex-start;padding:4px 0;border-bottom:0.5px solid var(--crd)">'
+      + '<span style="font-size:11px;font-weight:700;white-space:nowrap">'+esc(it.name)+(it.pos?' <span style="color:var(--th);font-weight:500">'+esc(it.pos)+'</span>':'')+'</span>'
+      + '<span style="font-size:11px;color:var(--tm);flex:1">'+it.parts.map(esc).join(' · ')+'</span>'
+      + '</div>').join('') || '<span style="font-size:11px;color:var(--th)">변경된 배치·직책·퇴사 지정이 없습니다.</span>';
+  const chgPanel = '<div class="sp-row" style="border:0.5px solid var(--crd);border-radius:10px;padding:8px 10px;background:#fff">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:12px;font-weight:700"><i class="ti ti-arrows-exchange"></i> 시뮬레이션 변경 내역 ('+chg.length+')</span></div>'
+    + '<div style="max-height:200px;overflow-y:auto">'+chgRows+'</div></div>';
+  // 대기 패널 — 3섹션: 입사 예정 → 퇴사 예정 → 시뮬레이션 변경 내역
   const regBtn = locked ? '' : '<button class="btn-cancel-sm" style="font-size:11px" onclick="spOpenRegister()"><i class="ti ti-user-plus"></i> 예정자 등록</button>';
   const waitPanel = '<div style="margin-bottom:12px">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:13px;font-weight:700"><i class="ti ti-users"></i> 대기 패널</span>'
     +   regBtn + '</div>'
     + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px">'
-    +   panelSection('미배치 인원', SP_WAIT, 'ti-user-off')
-    +   resignPanel
     +   hirePanel
+    +   resignPanel
+    +   chgPanel
     + '</div>'
     + spCommentsPanelHtml()
     + '</div>';
@@ -17736,7 +17769,9 @@ function spRenderSim(){
   body.innerHTML = ''
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
     +   '<button class="btn-cancel-sm" style="font-size:12px" onclick="spBackToDash()"><i class="ti ti-arrow-left"></i> 목록</button>'
-    +   '<span style="font-size:12px;color:var(--tm);font-weight:700">적용일자 '+esc(sp.planDate)+(sp.title?' · '+esc(sp.title):'')+'</span>'
+    +   '<span style="font-size:12px;color:var(--tm);font-weight:700;display:inline-flex;align-items:center;gap:5px"><i class="ti ti-calendar-event"></i> 적용일자 '
+    +     '<input type="date" id="spPlanDate" value="'+esc(sp.planDate)+'" '+(locked?'disabled':'')+' onchange="spChangeDate(this.value)" style="border:0.5px solid var(--crd);border-radius:7px;padding:4px 7px;font-size:12px;font-weight:700'+(locked?';background:#f3f3f3;color:var(--th)':'')+'" title="날짜를 바꾸면 입사 합류·퇴사 잔류·매장 T.O 과부족이 즉시 재계산됩니다">'
+    +     (sp.title?'<span style="color:var(--th);font-weight:500">· '+esc(sp.title)+'</span>':'')+'</span>'
     +   lockBtn
     +   editBtns
     +   '<button class="btn-new" style="background:var(--brm);font-size:12px" onclick="spOpenAnnounce()"><i class="ti ti-file-text"></i> 발령 공지 생성</button>'
@@ -17906,8 +17941,8 @@ function spCardMenu(e, key){
   const menu = document.createElement('div'); menu.id = 'spCardMenu';
   menu.style.cssText = 'position:fixed;z-index:99999;background:#fff;border:0.5px solid var(--crd);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.18);padding:9px;width:214px;font-size:12px';
   const posSelOpt = SP_POS_ORDER.map(pp=>'<option value="'+pp+'"'+(spPos(p)===pp?' selected':'')+'>'+pp+'</option>').join('');
-  // 실제 직원 전용 + 총괄(is_master)에게만 노출: DB 직접 반영 (안전 확인창)
-  const canApplyDb = !!(window.currentUser && currentUser.is_master);
+  // 실제 직원 전용 + 총괄·부총괄에게만 노출: DB 직접 반영 (안전 확인창)
+  const canApplyDb = !!(window.currentUser && (currentUser.is_master || currentUser.is_vice_master));
   const dbBlock = (!p.__dummy && canApplyDb) ? (
       '<div style="border-top:0.5px solid var(--crd);margin:7px 0 6px;padding-top:7px"><div style="font-size:9px;color:#B91C1C;font-weight:700;margin-bottom:4px"><i class="ti ti-database-cog"></i> 실제 계정에 반영(주의)</div>'
     + '<button class="btn-cancel-sm" style="width:100%;font-size:12px;margin-bottom:4px;color:#B91C1C;border-color:#FCA5A5" onclick="spApplyRetireDB(\''+key+'\')"><i class="ti ti-calendar-x"></i> 퇴사일 실제 반영</button>'
@@ -17917,7 +17952,6 @@ function spCardMenu(e, key){
     + '<div style="margin-bottom:6px"><select onchange="spCardMove(\''+key+'\',this.value)" style="width:100%;padding:5px;font-size:12px;border:0.5px solid var(--crd);border-radius:6px"><option value="">🏬 매장 이동…</option>'+opts+'</select></div>'
     + '<div style="margin-bottom:6px"><select onchange="spChangePos(\''+key+'\',this.value)" style="width:100%;padding:5px;font-size:12px;border:0.5px solid var(--crd);border-radius:6px" title="직책 변경(시뮬레이션)"><option value="">👤 직책 변경…</option>'+posSelOpt+'</select></div>'
     + '<button class="btn-cancel-sm" style="width:100%;font-size:12px;margin-bottom:4px" onclick="spRetireUser(\''+key+'\')"><i class="ti ti-user-minus"></i> 퇴사 예정 처리</button>'
-    + '<button class="btn-cancel-sm" style="width:100%;font-size:12px;margin-bottom:4px" onclick="spCardMove(\''+key+'\',\''+SP_WAIT+'\')"><i class="ti ti-user-off"></i> 미배치 풀로 이동</button>'
     + (!p.__dummy ? '<button class="btn-cancel-sm" style="width:100%;font-size:12px" onclick="spCloseCardMenu();spOpenStaffHistory(\''+key+'\')"><i class="ti ti-timeline"></i> 상세 히스토리/메모</button>'
                   : '<button class="btn-cancel-sm" style="width:100%;font-size:12px;color:var(--rd);border-color:var(--rd)" onclick="spDelDummy(\''+key+'\')"><i class="ti ti-trash"></i> 가상 카드 삭제</button>')
     + dbBlock;
