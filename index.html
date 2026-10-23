@@ -17603,6 +17603,7 @@ async function spInit(opts){
   const place = {};
   const simRetire = {};   // 시뮬레이션용 퇴사예정일(실제 users 미반영) {userId:date}
   const posOverride = {}; // 시뮬레이션 직책 변경(실제 users 미반영) {userId:position}
+  const moveDate = {};    // 소속 이동(발령) 기준일 {userId:date}
   users.forEach(u => {
     place[u.id] = (stores.includes(u.store) ? u.store : (u.store ? u.store : SP_WAIT));
   });
@@ -17622,7 +17623,7 @@ async function spInit(opts){
   // 글로벌 T.O 반영 (설정 없으면 현재 소속 인원수로 폴백)
   const storeTo = {};
   stores.forEach(s => { const g = spToForDate(s, planDate); storeTo[s] = (g!=null) ? g : users.filter(u => (u.store||'') === s).length; });
-  window.__sp = { planDate, users, stores, place, storeTo, dummies, simRetire, posOverride, toEdit:false, planId: null, txCount, title: '', status:'draft', locked:false };
+  window.__sp = { planDate, users, stores, place, storeTo, dummies, simRetire, posOverride, moveDate, toEdit:false, planId: null, txCount, title: '', status:'draft', locked:false };
   // 저장된 계획 로드 (fresh 복구 시 건너뜀)
   if (!(opts && opts.fresh)) try {
     const { data } = await sb.rpc('sp_get', { p_token: getSessionToken(), p_plan_date: planDate });
@@ -17637,12 +17638,27 @@ async function spInit(opts){
       Object.keys(assign).forEach(k => { window.__sp.place[k] = assign[k]; });   // 저장된 배치(실제·가상 모두) 복원
       if (pl.simRetire && typeof pl.simRetire==='object') window.__sp.simRetire = pl.simRetire;
       if (pl.posOverride && typeof pl.posOverride==='object') window.__sp.posOverride = pl.posOverride;
+      if (pl.moveDate && typeof pl.moveDate==='object') window.__sp.moveDate = pl.moveDate;
       // 계획에 저장된 T.O(인라인 편집분)가 있으면 글로벌보다 우선
       if (data.store_to && typeof data.store_to==='object') { Object.keys(data.store_to).forEach(s=>{ window.__sp.storeTo[s]=data.store_to[s]; }); }
       // 매장행 보강
       window.__sp.stores.forEach(s=>{ if(window.__sp.storeTo[s]==null){ const g=spToForDate(s,planDate); window.__sp.storeTo[s]=(g!=null)?g:0; } });
     }
   } catch(e){ console.warn('[sp_get]', e); }
+  // [보정] 실제 직원이 퇴사 버킷(SP_RESIGN)에 저장돼 있어도, 적용일자 미도래 퇴사면 원 소속 매장으로 되돌림.
+  //        퇴사 예정 패널은 '게시판'일 뿐이며 매장 인원을 빼지 않는다. 이미 도래했으면 화면에서 제외.
+  (window.__sp.users||[]).forEach(u=>{
+    const k=String(u.id);
+    if (window.__sp.place[k]===SP_RESIGN){
+      const eff = (window.__sp.simRetire&&window.__sp.simRetire[k]) ? String(window.__sp.simRetire[k]).slice(0,10)
+                : (u.retire_date?String(u.retire_date).slice(0,10):'');
+      if (eff && eff < planDate){ delete window.__sp.place[k]; }   // 이미 퇴사 도래 → 어디에도 표기 안 함
+      else {
+        if (eff){ if(!window.__sp.simRetire) window.__sp.simRetire={}; if(!window.__sp.simRetire[k]) window.__sp.simRetire[k]=eff; }
+        window.__sp.place[k] = (window.__sp.stores.includes(u.store) ? u.store : (u.store||SP_WAIT));
+      }
+    }
+  });
   window.__spDirty = false;
   spRenderSim();
 }
@@ -17671,14 +17687,29 @@ function spCardColor(p, forceResign, forceHire){
   else if (inHire) { bg = sc.hire.bg; fg = sc.hire.fg; }
   return { bg, fg };
 }
-// 적용일 기준 '실제 퇴사 예정'(확정 retire_date) 인가 + 남은 일수
+// 실제 직원의 '유효 퇴사일' — 시뮬 지정(simRetire) 우선, 없으면 계정 retire_date
+function spEffRetire(key){
+  const sp = window.__sp; if (!sp) return '';
+  if (sp.simRetire && sp.simRetire[String(key)]) return String(sp.simRetire[String(key)]).slice(0,10);
+  const u = (sp.users||[]).find(x=>String(x.id)===String(key));
+  return (u && u.retire_date) ? String(u.retire_date).slice(0,10) : '';
+}
+// 적용일 기준 '퇴사 예정'(유효 퇴사일이 적용일 이후) 인가 + 남은 일수 — 매장 잔류 듀얼 표기용
 function spRetireInfo(p){
-  if (!p || p.__dummy || !p.retire_date) return null;
-  const rd = String(p.retire_date).slice(0,10);
+  if (!p || p.__dummy) return null;
+  const eff = spEffRetire(p.id);
+  if (!eff) return null;
   const pd = (window.__sp && window.__sp.planDate) || todayKST();
-  if (rd < pd) return null;   // 이미 지난 퇴사일
-  const days = Math.round((new Date(rd+'T00:00:00+09:00') - new Date(pd+'T00:00:00+09:00'))/86400000);
-  return { date: rd, days };
+  if (eff < pd) return null;   // 이미 지난 퇴사일(도래)
+  const days = Math.round((new Date(eff+'T00:00:00+09:00') - new Date(pd+'T00:00:00+09:00'))/86400000);
+  return { date: eff, days };
+}
+// 적용일 기준 '이미 퇴사(도래)' — 유효 퇴사일 < 적용일자 → 매장/집계에서 제외 (실제 직원만)
+function spIsGone(key){
+  const sp = window.__sp; if (!sp) return false;
+  if (String(key).indexOf('dummy_')===0) return false;   // 가상 더미 제외
+  const eff = spEffRetire(key);
+  return !!(eff && eff < String(sp.planDate));
 }
 // 적용일 기준 '실제 미래 입사자'(DB hire_date > 기준일) 인가 + 남은 일수 (가상 더미는 제외)
 function spHireInfo(p){
@@ -17707,25 +17738,30 @@ function spCardHtml(key, opts){
   const hi = spHireInfo(p);     // 실제 미래 입사자(적용일 이후) — 가상 더미는 null
   const retiringInStore = ri && !forceResign && window.__sp.place[p.id]!==SP_RESIGN;   // 매장에 남아있는 듀얼노출(퇴사)
   const hiringInStore = hi && !forceHire && window.__sp.place[p.id]!==SP_HIRE;         // 매장에 남아있는 듀얼노출(입사)
+  const mmdd = (d)=>{ const s=String(d||''); return s.length>=10 ? (s.slice(5,7)+'/'+s.slice(8,10)) : ''; };
   let dateTxt = esc(hire);
   if (p.__dummy) {
     const dd = p.hire_date || p.retire_date || '';
-    const md = (dd && String(dd).length>=10) ? (String(dd).slice(5,7)+'/'+String(dd).slice(8,10)) : '';
     const lbl = p.__kind==='resign' ? '퇴사예정' : (p.__kind==='hire' ? '입사예정' : '');
+    const md = mmdd(dd);
     dateTxt = (md ? md+' ' : '') + lbl;
-  } else if (forceResign || (window.__sp && window.__sp.place && window.__sp.place[p.id]===SP_RESIGN)) {
-    const dd = (window.__sp.simRetire && window.__sp.simRetire[p.id]) || p.retire_date || '';
-    const md = (dd && String(dd).length>=10) ? (String(dd).slice(5,7)+'/'+String(dd).slice(8,10)) : '';
+  } else if (forceResign || (window.__sp && window.__sp.place && window.__sp.place[p.id]===SP_RESIGN) || ri) {
+    const md = mmdd(ri ? ri.date : spEffRetire(p.id));   // 매장 잔류 퇴사예정 포함 — 유효 퇴사일 표기
     dateTxt = (md ? md+' ' : '') + '퇴사예정';
   } else if (hi) {   // 실제 미래 입사자(매장 듀얼 or 입사예정 풀)
-    dateTxt = hi.date.slice(5,7)+'/'+hi.date.slice(8,10)+' 입사예정';
+    dateTxt = mmdd(hi.date)+' 입사예정';
   }
+  // 소속 이동(발령) 날짜 배지 — DB 소속과 다른 매장에 배치된 실제 직원
+  const curB = window.__sp && window.__sp.place ? window.__sp.place[p.id] : null;
+  const movedStore = (!p.__dummy && curB && curB!==SP_WAIT && curB!==SP_HIRE && curB!==SP_RESIGN && curB!==(p.store||''));
+  const moveD = movedStore ? ((window.__sp.moveDate && window.__sp.moveDate[p.id]) || window.__sp.planDate) : '';
+  const moveTag = (movedStore && mmdd(moveD)) ? '<span style="background:#FEF3C7;color:#92400E;border-radius:5px;padding:0 5px;font-size:9px;font-weight:700;margin-left:2px">'+mmdd(moveD)+' 이동</span>' : '';
   // 매장에 남은 듀얼노출 뱃지: 퇴사='N일 후 퇴사'(빨강) / 입사='N일 후 입사'(파랑)
   const retBadge = retiringInStore ? '<span style="background:#FEE2E2;color:#B91C1C;border-radius:5px;padding:0 5px;font-size:9px;font-weight:700;margin-left:2px">'+ri.days+'일 후 퇴사</span>' : '';
   const hireBadge = hiringInStore ? '<span style="background:#DBEAFE;color:#1E40AF;border-radius:5px;padding:0 5px;font-size:9px;font-weight:700;margin-left:2px">'+hi.days+'일 후 입사</span>' : '';
   // 3줄 세로 표기: 1) 이름(볼드) 2) 직책 3) 날짜
   const line1 = '<span style="display:inline-flex;align-items:center;gap:3px;font-weight:700;font-size:12px">'+dummyTag+esc(p.name)+hist+(locked?'':delBtn)+'</span>';
-  const line2 = '<span style="font-size:10px;opacity:.8;font-weight:600;line-height:1.3">'+(pos?esc(pos):'&nbsp;')+retBadge+hireBadge+'</span>';
+  const line2 = '<span style="font-size:10px;opacity:.8;font-weight:600;line-height:1.3">'+(pos?esc(pos):'&nbsp;')+retBadge+hireBadge+moveTag+'</span>';
   const line3 = '<span style="font-size:9px;opacity:.75;font-weight:600;line-height:1.2">'+(dateTxt||'&nbsp;')+(tag?' '+tag:'')+'</span>';
   const drag = locked ? '' : 'draggable="true" ondragstart="spDragStart(event,\''+p.id+'\')" onclick="spCardMenu(event,\''+p.id+'\')"';
   const border = retiringInStore ? '1.5px solid #EF4444' : (hiringInStore ? '1.5px solid #3B82F6' : '0.5px solid rgba(0,0,0,.12)');
@@ -17736,7 +17772,12 @@ function spCardHtml(key, opts){
 
 function spKeysIn(bucket){
   const sp = window.__sp; const keys = [];
-  Object.keys(sp.place).forEach(k => { if (sp.place[k] === bucket) keys.push(k); });
+  const isStore = (bucket!==SP_WAIT && bucket!==SP_HIRE && bucket!==SP_RESIGN);
+  Object.keys(sp.place).forEach(k => {
+    if (sp.place[k] !== bucket) return;
+    if (isStore && spIsGone(k)) return;   // 적용일자에 퇴사 도래 → 매장/집계에서 제외(미도래는 잔류)
+    keys.push(k);
+  });
   keys.sort((a,b)=>{
     const pa=spPerson(a), pb=spPerson(b);
     const ra=spPosRank(pa||{}), rb=spPosRank(pb||{});
@@ -17758,8 +17799,10 @@ function spChangeList(){
     const bucket = sp.place[key];
     const parts = [];
     // 매장 이동 / 미배치
+    const mvd = (sp.moveDate && sp.moveDate[key]) ? String(sp.moveDate[key]).slice(0,10) : '';
+    const mvTxt = (mvd && mvd.length>=10) ? ' ('+mvd.slice(5,7)+'/'+mvd.slice(8,10)+' 이동)' : '';
     if (bucket===SP_WAIT) parts.push('소속 '+(u.store||'-')+' → 미배치');
-    else if (bucket && bucket!==SP_RESIGN && bucket!==SP_HIRE && bucket!==(u.store||'')) parts.push('소속 '+(u.store||'-')+' → '+bucket);
+    else if (bucket && bucket!==SP_RESIGN && bucket!==SP_HIRE && bucket!==(u.store||'')) parts.push('소속 '+(u.store||'-')+' → '+bucket+mvTxt);
     // 직책 변경(시뮬)
     const ov = (sp.posOverride && sp.posOverride[key]!=null) ? String(sp.posOverride[key]) : '';
     if (ov && ov!==(u.position||'')) parts.push('직책 '+(u.position||'-')+' → '+ov);
@@ -18041,8 +18084,14 @@ function spDrop(e, bucket){
   if (spLocked()) return;
   if (window.__spRowDrag){ spReorderStore(window.__spRowDrag, bucket); window.__spRowDrag = null; return; }
   const key = window.__spDrag || (e.dataTransfer && e.dataTransfer.getData('text/plain')); if (!key) return;
-  // 실제 직원을 퇴사예정 버킷으로 드래그 시 예정일(없으면 공란) 유지
-  window.__sp.place[key] = bucket; window.__spDrag = null; window.__spDirty = true; spRenderSim();
+  const sp = window.__sp;
+  const isStore = (bucket!==SP_WAIT && bucket!==SP_HIRE && bucket!==SP_RESIGN);
+  if (isStore){
+    const p = spPerson(key);
+    if (p && !p.__dummy && bucket!==(p.store||'')){ if(!sp.moveDate) sp.moveDate={}; if(!sp.moveDate[key]) sp.moveDate[key]=sp.planDate; }   // 드래그 발령 → 기본 적용일자 기록
+    else if (p && !p.__dummy && bucket===(p.store||'') && sp.moveDate){ delete sp.moveDate[key]; }
+  }
+  sp.place[key] = bucket; window.__spDrag = null; window.__spDirty = true; spRenderSim();
 }
 function spReorderStore(src, dest){
   if (spLocked()) return;
@@ -18057,12 +18106,15 @@ function spReorderStore(src, dest){
 }
 function spSetTO(store, delta){ const sp = window.__sp; sp.storeTo[store] = Math.max(0, (sp.storeTo[store]||0) + delta); window.__spDirty = true; spRenderSim(); }
 function spToggleTOEdit(){ window.__sp.toEdit = !window.__sp.toEdit; spRenderSim(); }
+// 적용일자 변경 — 계획을 다시 불러오지 않고, 현재 배치 그대로 두고 '입사 합류·퇴사 도래·매장 T.O 과부족'만 재계산
 function spChangeDate(v){
-  if (!v || v === window.__sp.planDate) { return; }
-  if (window.__spDirty && !confirm('저장되지 않은 편집 내역은 초기화되고 현재 계정 정보로 복구됩니다.\n기준일을 변경할까요?')) {
-    const el = document.getElementById('spPlanDate'); if (el) el.value = window.__sp.planDate; return;
-  }
-  window.__sp.planDate = v; spInit();
+  const sp = window.__sp; if (!sp) return;
+  if (!v || v === sp.planDate) { return; }
+  sp.planDate = v;
+  // 월별 글로벌 T.O 설정이 있는 매장만 그 달 기준으로 갱신(수동/폴백값은 유지)
+  sp.stores.forEach(s=>{ const g=spToForDate(s, v); if(g!=null) sp.storeTo[s]=g; });
+  window.__spDirty = true;
+  spRenderSim();
 }
 // 최신 계정 정보로 복구(저장된 계획 무시)
 function spResetToLive(){
@@ -18141,18 +18193,38 @@ function spCardMenu(e, key){
   setTimeout(()=>{ document.addEventListener('click', spCloseCardMenu, { once:true }); }, 0);
 }
 function spCloseCardMenu(){ const m = document.getElementById('spCardMenu'); if (m) m.remove(); }
-function spCardMove(key, bucket){ if (!bucket || spLocked()) return; window.__sp.place[key] = bucket; window.__spDirty = true; spCloseCardMenu(); spRenderSim(); }
+function spCardMove(key, bucket){
+  if (!bucket || spLocked()) return;
+  const sp = window.__sp;
+  const isStore = (bucket!==SP_WAIT && bucket!==SP_HIRE && bucket!==SP_RESIGN);
+  if (isStore){
+    const p = spPerson(key);
+    if (p && !p.__dummy && bucket!==(p.store||'')){   // 실제 직원의 타 매장 발령 → 기준일 입력
+      const cur = (sp.moveDate && sp.moveDate[key]) || sp.planDate;
+      const d = prompt(p.name+' 님 소속 이동(발령) 기준 일자를 입력하세요 (YYYY-MM-DD):', cur);
+      if (d===null){ spCloseCardMenu(); return; }
+      if (!sp.moveDate) sp.moveDate = {};
+      sp.moveDate[key] = (d||'').trim() || sp.planDate;
+    } else if (p && !p.__dummy && bucket===(p.store||'')){
+      if (sp.moveDate) delete sp.moveDate[key];   // 원 소속 복귀 → 이동 표기 해제
+    }
+  }
+  sp.place[key] = bucket; window.__spDirty = true; spCloseCardMenu(); spRenderSim();
+}
 // 퇴사 예정 처리 — 예정일 입력 후 우측 퇴사예정 패널로 이동 (실제 users.retire_date 는 건드리지 않음)
 function spRetireUser(key){
   if (spLocked()) return;
   const sp = window.__sp; const p = spPerson(key); if (!p) { return; }
   if (p.__dummy) { sp.place[key] = SP_RESIGN; window.__spDirty = true; spCloseCardMenu(); spRenderSim(); return; }
-  const def = (sp.simRetire && sp.simRetire[key]) || p.retire_date || sp.planDate;
-  const d = prompt('퇴사 예정 일자를 입력하세요 (YYYY-MM-DD):', def);
+  const def = (sp.simRetire && sp.simRetire[key]) || (p.retire_date?String(p.retire_date).slice(0,10):'') || sp.planDate;
+  const d = prompt('퇴사 예정 일자를 입력하세요 (YYYY-MM-DD).\n(매장 인원에는 그대로 남고, 적용일자가 이 날짜에 도달하면 매장에서 빠집니다)', def);
   if (d === null) { return; }   // 취소
   if (!sp.simRetire) sp.simRetire = {};
   sp.simRetire[key] = (d||'').trim();
-  sp.place[key] = SP_RESIGN;
+  // 실제 직원은 퇴사 버킷으로 빼지 않는다 — 소속 매장 유지(퇴사예정 패널엔 자동 듀얼 노출)
+  if (sp.place[key]===SP_RESIGN || sp.place[key]===SP_WAIT || sp.place[key]===SP_HIRE || sp.place[key]==null){
+    sp.place[key] = (sp.stores.includes(p.store) ? p.store : (p.store||SP_WAIT));
+  }
   window.__spDirty = true; spCloseCardMenu(); spRenderSim();
 }
 
@@ -18331,7 +18403,7 @@ async function spSave(){
   const assign = {}; Object.keys(sp.place).forEach(k => { assign[k] = sp.place[k]; });
   // 예정자 풀(dummies)은 글로벌이라 계획에 저장하지 않음. 계획엔 배치(assign)·매장순서(rows)·시뮬퇴사일(simRetire)만.
   const payload = { plan_date: sp.planDate, title: sp.title || ('배치계획 '+sp.planDate),
-    store_to: sp.storeTo, placements: { assign, rows: sp.stores, simRetire: sp.simRetire||{}, posOverride: sp.posOverride||{} } };
+    store_to: sp.storeTo, placements: { assign, rows: sp.stores, simRetire: sp.simRetire||{}, posOverride: sp.posOverride||{}, moveDate: sp.moveDate||{} } };
   const { data, error } = await sb.rpc('sp_save', { p_token: getSessionToken(), p_id: sp.planId || null, p_payload: payload });
   if (error) { alert('저장 오류: ' + error.message); return { ok:false }; }
   if (data && data.ok) { sp.planId = data.id || sp.planId; window.__spDirty = false; return { ok:true }; }
