@@ -6182,7 +6182,7 @@ async function deleteInterview(id) {
   alert('삭제가 완료되었습니다.');
   
   // 수정됨: 삭제 후 화면 목록을 확실하게 갱신하기 위해 새로고침 또는 이동
-  goPage('interviews');
+  goInterviewBack();
 }
 
 // 보수 내역 삭제 (총괄/부총괄만)
@@ -11569,6 +11569,15 @@ async function deleteIvOpt(id, label) {
   openIvOptModal();
 }
 // ── 상세 ──────────────────────────────────────────────────
+// 면담 상세 → 목록 복귀: 출발지(scope) 우선, 유실 시 면담 작성자 속성으로 폴백(이중 방어)
+function goInterviewBack() {
+  let dest = window.__ivReturnScope;
+  if (dest !== 'interviews' && dest !== 'opsinterviews') {
+    // 출발지 유실 → 면담 객체 자체 속성으로 판정 (운영파트 작성분이면 운영 메뉴)
+    dest = (curInterview && ivAuthorIsFull(curInterview)) ? 'opsinterviews' : 'interviews';
+  }
+  goPage(dest);
+}
 async function openInterviewById(id) {
   try{ await ivLoadAllowed(); }catch(e){}
   let data;
@@ -11585,12 +11594,14 @@ async function openInterviewById(id) {
     if (!canSeeInterview(data)) { alert('이 면담을 열람할 권한이 없습니다.'); return; }
   }
   curInterview = data;
+  // 뒤로가기 복귀용: 상세 진입 시점의 출발지 메뉴(scope) 저장
+  window.__ivReturnScope = (window.__ivScope === 'ops') ? 'opsinterviews' : 'interviews';
   goPage('interviewDetail');
 }
 
 async function renderInterviewDetail(area) {
   const r = curInterview;
-  if (!r) { goPage('interviews'); return; }
+  if (!r) { goInterviewBack(); return; }
   try{ await ivLoadAllowed(); }catch(e){}
   if(!window.__ivPeople || !window.__ivPeople.length){ try{ const {data}=await sb.from('users').select('id,name,is_master,role,part,store,sub_stores,active').eq('active',true).order('name'); window.__ivPeople=data||[]; }catch(e){ window.__ivPeople=window.__ivPeople||[]; } }
   const isAdmin    = isInterviewAdmin();
@@ -11616,7 +11627,7 @@ async function renderInterviewDetail(area) {
   area.innerHTML = `
     ${viewerStrip}
     <div style="margin-bottom:10px">
-      <button class="btn-cancel-sm" onclick="goPage('interviews')"><i class="ti ti-arrow-left"></i> 목록</button>
+      <button class="btn-cancel-sm" onclick="goInterviewBack()"><i class="ti ti-arrow-left"></i> 목록</button>
       ${(currentUser.is_master || currentUser.is_vice_master) ? '<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:8px" onclick="deleteInterview('+r.id+')"><i class="ti ti-trash"></i> 삭제</button>' : ''}
     </div>
     <div class="post-detail">
@@ -11905,7 +11916,7 @@ async function renderInterviewNew(area, ex) {
 
   area.innerHTML = `
     <div style="margin-bottom:10px">
-      <button class="btn-cancel-sm" onclick="goPage('interviews')"><i class="ti ti-arrow-left"></i> 취소</button>
+      <button class="btn-cancel-sm" onclick="goInterviewBack()"><i class="ti ti-arrow-left"></i> 취소</button>
     </div>
     <div class="form-section">
       <div class="page-title" style="margin-bottom:18px">${ex ? '면담 기록 수정' : '면담 기록 등록'}</div>
@@ -11938,7 +11949,7 @@ async function renderInterviewNew(area, ex) {
           placeholder="면담 내용을 상세히 기록해 주세요.&#10;(업무 태도, 건의사항, 컨디션, 특이사항 등)">${ex ? (ex.content||'') : ''}</textarea>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">
-        <button class="btn-cancel-sm" onclick="goPage('interviews')">취소</button>
+        <button class="btn-cancel-sm" onclick="goInterviewBack()">취소</button>
         <button class="btn-submit" onclick="submitInterview()"><i class="ti ti-check"></i> ${ex ? '수정 완료' : '등록'}</button>
       </div>
     </div>`;
@@ -11992,8 +12003,10 @@ async function submitInterview() {
     if (error) { alert((editingInterviewId?'수정':'등록')+' 오류: ' + error.message); return; }
     const saved = (typeof __d==='string') ? JSON.parse(__d) : __d;
     if (!editingInterviewId && saved && saved.id) {
-      await notifyCoaches(finalStore, 'interview_new', saved.id, 'interview',
-        `[면담 등록] ${finalStore} · ${(await sb.from('users').select('name').eq('id',staffId).single()).data?.name||''} 면담 기록이 등록되었습니다.`);
+      const __sName = (await sb.from('users').select('name').eq('id',staffId).single()).data?.name||'';
+      await notifyInterviewTargets(saved.id, 'interview',
+        `[신규 면담서 등록] ${finalStore} · ${__sName} 면담 기록이 등록되었습니다.`,
+        __sName, finalStore);
     }
   } else if (editingInterviewId) {
     const { error } = await sb.from('interviews').update({
@@ -12010,13 +12023,15 @@ async function submitInterview() {
     }).select().single();
     if (error) { alert('등록 오류: ' + error.message); return; }
     if (newIv) {
-      await notifyCoaches(finalStore, 'interview_new', newIv.id, 'interview',
-        `[면담 등록] ${finalStore} · ${(await sb.from('users').select('name').eq('id',staffId).single()).data?.name||''} 면담 기록이 등록되었습니다.`);
+      const __sName = (await sb.from('users').select('name').eq('id',staffId).single()).data?.name||'';
+      await notifyInterviewTargets(newIv.id, 'interview',
+        `[신규 면담서 등록] ${finalStore} · ${__sName} 면담 기록이 등록되었습니다.`,
+        __sName, finalStore);
     }
   }
   window.__ivFilterStore = ''; window.__ivFilterStaff = '';
   window.__ivFilterType = ''; window.__ivFilterPeriod = '';
-  goPage('interviews');
+  goInterviewBack();
 }
 
 // ── 면담 유형/방식 관리 (reqAdmin에 탭으로 통합) ──────────
@@ -17020,6 +17035,72 @@ async function triggerSheetSync(scheduleId) {
 // ══════════════════════════════════════════════════════════
 
 // 코치 알림 발송 헬퍼 (면담/업무신청 등록 시 호출)
+// ── 면담 신규 등록 알림 전용 발송 ─────────────────────────────
+// 대상: 면담 열람 권한자 전원(총괄/부총괄/운영파트/예외권한자) − 제외권한자, 작성자 본인 제외.
+//       기존 notifyCoaches 는 coach_stores 매핑 + 앱내 알림(createNotification)만 써서
+//       운영파트/총괄에게 슬랙이 가지 않던 문제를 바로잡음(createNotificationWithSlack 사용).
+async function notifyInterviewTargets(refId, refType, message, staffName, storeName) {
+  try { await ivLoadAllowed(); } catch(e) {}
+
+  // 활성 사용자 조회 (권한 판정에 필요한 필드 포함)
+  const { data: users } = await sb.from('users')
+    .select('id, is_master, is_vice_master, role, part, active')
+    .eq('active', true);
+
+  const currentUserId = currentUser && currentUser.id;
+  const allowed  = (window.__ivAllowed  || []).map(String);
+  const excluded = (window.__ivExcluded || []).map(String);
+
+  // ① 총괄/부총괄  ② 운영파트(운영/운영팀/admin)  ③ 예외 허용자(interview_allowed_users)
+  //    − 제외권한자(interview_excluded_users)  − 작성자 본인
+  const seen = new Set();
+  const targetIds = (users || []).filter(u => {
+    const id = String(u.id);
+    if (excluded.includes(id)) return false;                 // 제외권한자
+    const isFull = !!u.is_master || !!u.is_vice_master
+      || ['운영', '운영팀'].includes(u.part) || u.role === 'admin'
+      || allowed.includes(id);
+    return isFull;
+  }).map(u => String(u.id))
+    .filter(id => id !== String(currentUserId))              // 작성자 본인 제외
+    .filter(id => { if (seen.has(id)) return false; seen.add(id); return true; }); // 중복 제거
+
+  console.log('[Interview Notify] Target user IDs:', targetIds);
+
+  // 웹훅(슬랙 채널) URL 조회 — 설정 시 채널에도 1건 발송 (방어적)
+  let webhookUrl = '';
+  try {
+    const { data: ns } = await sb.from('notification_settings')
+      .select('slack_enabled, slack_webhook_url').maybeSingle();
+    if (ns && ns.slack_enabled && ns.slack_webhook_url) webhookUrl = ns.slack_webhook_url;
+  } catch(e) {}
+  console.log('[Interview Notify] Webhook URL exists:', !!webhookUrl);
+
+  // 개인별 앱내 알림 + 슬랙 DM
+  window.__notifBatchLog = true;
+  let sent = 0;
+  for (const id of targetIds) {
+    try { await createNotificationWithSlack(id, 'interview_new', refId, refType, message); sent++; }
+    catch(e) { console.warn('[Interview Notify] 개별 발송 실패:', id, e); }
+  }
+  window.__notifBatchLog = false;
+  try { await logNotifSend('interview_new', refType, refId, message, sent); } catch(e) {}
+
+  // 슬랙 채널 웹훅(설정된 경우) — 채널 공지용 1건
+  if (webhookUrl) {
+    const BASE = 'https://bnzcoffee.github.io/bonanza-ops/';
+    const link = BASE + '?interview=' + refId;
+    const text = '[신규 면담서 등록 알림]\n'
+      + '매장: ' + (storeName || '-') + '\n'
+      + '대상 직원: ' + (staffName || '-') + '\n'
+      + '작성자: ' + ((currentUser && currentUser.name) || '-') + '\n'
+      + '바로가기: ' + link;
+    try { await sendSlackNotify(webhookUrl, text); } catch(e) {}
+  }
+
+  console.log('[Interview Notify] Payload sent successfully');
+}
+
 async function notifyCoaches(store, type, refId, refType, message) {
   if (!store) return;
   const { data: cs } = await sb.from('coach_stores')
