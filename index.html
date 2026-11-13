@@ -1354,6 +1354,8 @@ async function saveSlackId(){
 // ── 서버 세션 토큰 (마이그레이션 1단계 기반) ──
 function setSessionToken(tok){ window.__sessionToken = tok || null; try{ tok ? localStorage.setItem('bnz_session', tok) : localStorage.removeItem('bnz_session'); }catch(e){} }
 function getSessionToken(){ if(window.__sessionToken) return window.__sessionToken; try{ return localStorage.getItem('bnz_session'); }catch(e){ return null; } }
+// PDC 사내카페는 운영 앱 대상에서 제외(계정 미발급, 집계/드롭다운/요약 배제)
+function isPdcStore(s){ return ['PDC사내카페','PDC 사내카페','사내카페','PDC'].includes(String(s||'').trim()); }
 async function clearSession(){ const t=getSessionToken(); if(t){ try{ await sb.rpc('revoke_session',{ p_token: t }); }catch(e){} } window.__sessionToken=null; try{ localStorage.removeItem('bnz_session'); }catch(e){} }
 
 async function doLogout() {
@@ -9460,8 +9462,11 @@ function applyMenuPermissions() {
     show('nav-opsguide', __canOps);
     show('nav-opsinterviews', __full);                 // 총괄 지정(full viewer)만 노출 = 블라인드
     show('nav-staffingPlan', __sp);                    // 인원 배치 관리: 관리자 + 지정(추가 허용) 계정 − 제외 계정
-    // 월말 정산 도우미: 피처플래그/권한은 closing_helper.js 가 비동기로 로드 후 직접 토글
-    if (window.ClosingHelper) { ClosingHelper.loadFlags().then(function(){ var cv=ClosingHelper.navVisible(); if(cv){ var on=(document.getElementById('opsNav')); if(on) on.style.display=''; } }); }
+    // 월말 정산 도우미: 로드 순서와 무관하게 안전 마운트(로드 전이면 잠시 후 재시도)
+    (function mountClosing(n){
+      if (window.ClosingHelper) { ClosingHelper.loadFlags().then(function(){ if(ClosingHelper.navVisible()){ var on=document.getElementById('opsNav'); if(on) on.style.display=''; } }); }
+      else if (n < 40) { setTimeout(function(){ mountClosing(n+1); }, 250); }
+    })(0);
   };
   __applyOpsIv();
   // 인원 배치 관리 열람권한 로드 후 메뉴 재적용 (지정/제외 계정 반영)
@@ -17566,7 +17571,7 @@ async function spDashLoadList(){
 // ── 매장별 T.O 설정 (글로벌: 기본 + 월별 예외) ──
 async function spOpenToSettings(){
   const { data } = await sb.from('store_options').select('name,sort_order').order('sort_order');
-  const stores = (data||[]).map(s=>s.name).filter(n=>n && n!=='본사');
+  const stores = (data||[]).map(s=>s.name).filter(n=>n && n!=='본사' && !isPdcStore(n));
   window.__spToEdit = JSON.parse(JSON.stringify(window.__spToCfg || { base:{}, monthly:{} }));
   if(!window.__spToEdit.base) window.__spToEdit.base={}; if(!window.__spToEdit.monthly) window.__spToEdit.monthly={};
   window.__spToStores = stores; window.__spToMonth = '';
@@ -17697,7 +17702,7 @@ async function spInit(opts){
   users.forEach(u => {
     place[u.id] = (stores.includes(u.store) ? u.store : (u.store ? u.store : SP_WAIT));
   });
-  users.forEach(u=>{ if(u.store && u.store!=='본사' && !stores.includes(u.store)) stores.push(u.store); });
+  users.forEach(u=>{ if(u.store && u.store!=='본사' && !isPdcStore(u.store) && !stores.includes(u.store)) stores.push(u.store); });
   // [자동연동] DB hire_date 가 기준일 이후인 '미래 입사자' → 소속 매장이 없으면 입사예정 풀로 자동 분류
   //           (소속 매장이 있으면 위에서 이미 매장 슬롯에 배치됨 → 매장+입사예정 듀얼 노출)
   users.forEach(u=>{
@@ -20709,6 +20714,6 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="closing_helper.js?v=20261113"></script>
+<script src="closing_helper.js?v=2026111302"></script>
 </body>
 </html>
