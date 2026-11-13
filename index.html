@@ -17836,7 +17836,15 @@ function spCardHtml(key, opts){
   const curB = window.__sp && window.__sp.place ? window.__sp.place[p.id] : null;
   const movedStore = (!p.__dummy && curB && curB!==SP_WAIT && curB!==SP_HIRE && curB!==SP_RESIGN && curB!==(p.store||''));
   const moveD = movedStore ? ((window.__sp.moveDate && window.__sp.moveDate[p.id]) || window.__sp.planDate) : '';
-  const moveTag = (movedStore && mmdd(moveD)) ? '<span style="background:#FEF3C7;color:#92400E;border-radius:5px;padding:0 5px;font-size:9px;font-weight:700;margin-left:2px">'+mmdd(moveD)+' 이동</span>' : '';
+  const pendingTransfer = !!(movedStore && mmdd(moveD) && String(moveD).slice(0,10) > String(window.__sp.planDate) && window.__sp.stores.includes(p.store||''));  // 발령 미도래
+  let moveTag = '';
+  if (opts.preview) {           // 대상 매장 미리보기(점선) 카드
+    moveTag = '<span style="background:#FEF3C7;color:#92400E;border-radius:5px;padding:0 5px;font-size:9px;font-weight:700;margin-left:2px">'+mmdd(moveD)+' 이동예정</span>';
+  } else if (pendingTransfer) { // 원 매장 잔류 카드 — '00/00 →대상매장 이동예정'
+    moveTag = '<span style="background:#FEF3C7;color:#92400E;border-radius:5px;padding:0 5px;font-size:9px;font-weight:700;margin-left:2px">'+mmdd(moveD)+' →'+esc(curB)+' 이동예정</span>';
+  } else if (movedStore && mmdd(moveD)) {   // 발령 도래(실제 이동 완료)
+    moveTag = '<span style="background:#FEF3C7;color:#92400E;border-radius:5px;padding:0 5px;font-size:9px;font-weight:700;margin-left:2px">'+mmdd(moveD)+' 이동</span>';
+  }
   // 매장에 남은 듀얼노출 뱃지: 퇴사='N일 후 퇴사'(빨강) / 입사='N일 후 입사'(파랑)
   const retBadge = retiringInStore ? '<span style="background:#FEE2E2;color:#B91C1C;border-radius:5px;padding:0 5px;font-size:9px;font-weight:700;margin-left:2px">'+ri.days+'일 후 퇴사</span>' : '';
   const hireBadge = hiringInStore ? '<span style="background:#DBEAFE;color:#1E40AF;border-radius:5px;padding:0 5px;font-size:9px;font-weight:700;margin-left:2px">'+hi.days+'일 후 입사</span>' : '';
@@ -17844,19 +17852,47 @@ function spCardHtml(key, opts){
   const line1 = '<span style="display:inline-flex;align-items:center;gap:3px;font-weight:700;font-size:12px">'+dummyTag+esc(p.name)+hist+(locked?'':delBtn)+'</span>';
   const line2 = '<span style="font-size:10px;opacity:.8;font-weight:600;line-height:1.3">'+(pos?esc(pos):'&nbsp;')+retBadge+hireBadge+moveTag+'</span>';
   const line3 = '<span style="font-size:9px;opacity:.75;font-weight:600;line-height:1.2">'+(dateTxt||'&nbsp;')+(tag?' '+tag:'')+'</span>';
-  const drag = locked ? '' : 'draggable="true" ondragstart="spDragStart(event,\''+p.id+'\')" onclick="spCardMenu(event,\''+p.id+'\')"';
-  const border = retiringInStore ? '1.5px solid #EF4444' : (hiringInStore ? '1.5px solid #3B82F6' : '0.5px solid rgba(0,0,0,.12)');
+  // 미리보기(대상 매장 예정) 카드는 드래그 불가 — 실제 카드는 원 매장에 있음
+  const drag = (locked || opts.preview) ? '' : 'draggable="true" ondragstart="spDragStart(event,\''+p.id+'\')" onclick="spCardMenu(event,\''+p.id+'\')"';
+  const border = opts.preview ? '1.5px dashed #F59E0B'
+    : (retiringInStore ? '1.5px solid #EF4444' : (hiringInStore ? '1.5px solid #3B82F6' : '0.5px solid rgba(0,0,0,.12)'));
   return '<div class="sp-card" '+drag+' '
-    + 'style="display:inline-flex;flex-direction:column;align-items:flex-start;background:'+c.bg+';color:'+c.fg+';border:'+border+';border-radius:8px;padding:5px 9px;margin:3px;cursor:'+(locked?'default':'pointer')+';white-space:nowrap">'
+    + 'style="display:inline-flex;flex-direction:column;align-items:flex-start;background:'+c.bg+';color:'+c.fg+';border:'+border+';border-radius:8px;padding:5px 9px;margin:3px;cursor:'+(locked||opts.preview?'default':'pointer')+';white-space:nowrap;opacity:'+(opts.preview?'.62':'1')+'">'
     + line1 + line2 + line3 + '</div>';
 }
 
+// 적용일자 기준 '실제 소속 매장' — 타 매장 발령(moveDate)이 아직 미도래면 원 소속에 잔류
+function spEffStore(key){
+  const sp = window.__sp;
+  const target = sp.place[key];
+  if (target===SP_WAIT || target===SP_HIRE || target===SP_RESIGN) return target;
+  const p = spPerson(key); if (!p || p.__dummy) return target;
+  const origin = p.store || '';
+  const md = (sp.moveDate && sp.moveDate[key]) ? String(sp.moveDate[key]).slice(0,10) : '';
+  if (md && target!==origin && md > String(sp.planDate) && sp.stores.includes(origin)) return origin;   // 발령 전 → 원 소속
+  return target;   // 발령 도래(적용일자>=발령일) or 발령 없음 → 배정 매장
+}
+// 해당 매장으로 '이동 예정(발령 미도래)'인 미리보기 대상 키 — 대상 매장 슬롯에 점선 카드로만 표기(T.O 합산 제외)
+function spPreviewKeys(store){
+  const sp = window.__sp; const keys=[];
+  Object.keys(sp.place).forEach(k=>{
+    if (sp.place[k]!==store) return;       // 최종 배정이 이 매장
+    if (spIsGone(k)) return;
+    if (spEffStore(k)===store) return;      // 이미 실소속 → 실근무(미리보기 아님)
+    keys.push(k);
+  });
+  return keys;
+}
 function spKeysIn(bucket){
   const sp = window.__sp; const keys = [];
   const isStore = (bucket!==SP_WAIT && bucket!==SP_HIRE && bucket!==SP_RESIGN);
   Object.keys(sp.place).forEach(k => {
-    if (sp.place[k] !== bucket) return;
-    if (isStore && spIsGone(k)) return;   // 적용일자에 퇴사 도래 → 매장/집계에서 제외(미도래는 잔류)
+    if (isStore){
+      if (spEffStore(k) !== bucket) return;   // 적용일자 기준 실소속 매장만 실근무로 집계
+      if (spIsGone(k)) return;                // 적용일자에 퇴사 도래 → 제외
+    } else {
+      if (sp.place[k] !== bucket) return;
+    }
     keys.push(k);
   });
   keys.sort((a,b)=>{
@@ -17952,6 +17988,8 @@ function spRenderSim(){
     const diffStr = diff === 0 ? '0' : (diff > 0 ? '+'+diff : String(diff));
     const diffColor = diff > 0 ? '#1E40AF' : (diff < 0 ? '#B91C1C' : 'var(--th)');
     const cards = keys.map(k=>spCardHtml(k)).join('');
+    // 이동 예정(발령 미도래) 인원 — 점선 미리보기 카드(실근무/T.O 합산 제외)
+    const previewCards = spPreviewKeys(store).map(k=>spCardHtml(k,{preview:true})).join('');
     let empties = '';
     if (actual < to) { for (let i=0;i<(to-actual);i++) empties += '<span style="display:inline-flex;align-items:center;justify-content:center;width:62px;height:34px;margin:3px;border:1px dashed var(--crd);border-radius:8px;color:var(--th);font-size:10px">빈자리</span>'; }
     // 세로형: 매장명(상단 1행) → 바로 아래 카드 가로 정렬(폭 초과 시 다음 줄로 wrap). T.O 편집은 글로벌 설정으로 이동.
@@ -17971,7 +18009,7 @@ function spRenderSim(){
       +   '<span style="font-size:11px;color:var(--th)">'+actual+' / '+to+' <span style="color:'+diffColor+';font-weight:600">('+diffStr+')</span></span>'
       +   toCtrl
       + '</div>'
-      + '<div style="display:flex;flex-wrap:wrap;align-items:center;min-height:40px">'+cards+empties+'</div>'
+      + '<div style="display:flex;flex-wrap:wrap;align-items:center;min-height:40px">'+cards+previewCards+empties+'</div>'
       + '</div>';
   }).join('');
 
@@ -18169,8 +18207,12 @@ function spDrop(e, bucket){
   const isStore = (bucket!==SP_WAIT && bucket!==SP_HIRE && bucket!==SP_RESIGN);
   if (isStore){
     const p = spPerson(key);
-    if (p && !p.__dummy && bucket!==(p.store||'')){ if(!sp.moveDate) sp.moveDate={}; if(!sp.moveDate[key]) sp.moveDate[key]=sp.planDate; }   // 드래그 발령 → 기본 적용일자 기록
-    else if (p && !p.__dummy && bucket===(p.store||'') && sp.moveDate){ delete sp.moveDate[key]; }
+    if (p && !p.__dummy && bucket!==(p.store||'')){
+      const cur = (sp.moveDate && sp.moveDate[key]) || sp.planDate;
+      const d = prompt(p.name+' → '+bucket+' 이동 발령일자 (YYYY-MM-DD)\n(적용일자가 이 날짜 전이면 원 매장 잔류 + 대상 매장에 예정 표기, 도달하면 실제 이동)', cur);
+      if (d===null){ window.__spDrag=null; return; }
+      if(!sp.moveDate) sp.moveDate={}; sp.moveDate[key]=(d||'').trim()||sp.planDate;
+    } else if (p && !p.__dummy && bucket===(p.store||'') && sp.moveDate){ delete sp.moveDate[key]; }
   }
   sp.place[key] = bucket; window.__spDrag = null; window.__spDirty = true; spRenderSim();
 }
@@ -18565,7 +18607,9 @@ async function spOpenAnnounce(){
     const asStore = u.store || '';
     if (toBucket && ![SP_WAIT,SP_RESIGN,SP_HIRE].includes(toBucket) && toBucket !== asStore) {
       const pos = spPos(u) || '-';
-      changed.push({ no:0, name:u.name, posFrom:pos, posTo:pos, storeFrom:asStore, storeTo:toBucket, remark:'' });
+      const md = (sp.moveDate && sp.moveDate[u.id]) ? String(sp.moveDate[u.id]).slice(0,10) : '';
+      const mdTxt = (md && md.length>=10) ? (md.slice(5,7)+'/'+md.slice(8,10)+' 발령') : '';   // 지정 발령일자 자동 반영
+      changed.push({ no:0, name:u.name, posFrom:pos, posTo:pos, storeFrom:asStore, storeTo:toBucket, remark:mdTxt });
     }
   });
   changed.forEach((c,i)=>c.no=i+1);
