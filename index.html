@@ -615,6 +615,7 @@ table.g-tbl th{background:var(--crm);font-weight:700}
       <button class="nav-btn" onclick="goPage('opsguide')" id="nav-opsguide"><i class="ti ti-book-2"></i> 운영팀 가이드</button>
       <button class="nav-btn" onclick="goPage('opsinterviews')" id="nav-opsinterviews" style="display:none"><i class="ti ti-lock"></i> 직원 면담(운영)</button>
       <button class="nav-btn" onclick="goPage('staffingPlan')" id="nav-staffingPlan" style="display:none"><i class="ti ti-layout-grid"></i> 인원 배치 관리</button>
+      <button class="nav-btn" onclick="goPage('closingHelper')" id="nav-closingHelper" style="display:none"><i class="ti ti-calculator"></i> 월말 정산 도우미</button>
     </div>
     <div class="sidebar-section" id="adminNav" style="display:none">
       <div class="sidebar-label">관리</div>
@@ -1921,6 +1922,12 @@ function goPage(page) {
     if (!(__base || window.__spCanSee)) { area.innerHTML = '<div style="text-align:center;padding:50px;color:var(--th)">접근 권한이 없습니다. (관리자·지정 계정 전용)</div>'; return; }
     const nb = document.getElementById('nav-staffingPlan'); if (nb) nb.classList.add('active');
     renderStaffingPlan(area);
+  } else if (page === 'closingHelper') {
+    // 월말 정산 도우미 — 피처플래그 숨김 + 엄격 권한(총괄/매장관리자/허용 부서담당/예외 허용자)
+    if (!window.ClosingHelper) { area.innerHTML = '<div style="text-align:center;padding:50px;color:var(--th)">모듈 로딩 중입니다. 잠시 후 다시 시도해주세요.</div>'; return; }
+    if (!ClosingHelper.canAccess() || !ClosingHelper.navVisible()) { area.innerHTML = '<div style="text-align:center;padding:50px;color:var(--th)">접근 권한이 없습니다.</div>'; return; }
+    const nb = document.getElementById('nav-closingHelper'); if (nb) nb.classList.add('active');
+    ClosingHelper.render(area);
   }
 }
 
@@ -6658,7 +6665,7 @@ async function deleteDraft(id){
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
 let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
-const APP_BUILD_DATE = '2026-10-23';   // 배포 시 갱신 (표시는 app_settings.updated_at 과 비교해 더 최근값 노출)
+const APP_BUILD_DATE = '2026-11-13';   // 배포 시 갱신 (표시는 app_settings.updated_at 과 비교해 더 최근값 노출)
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
@@ -9453,6 +9460,8 @@ function applyMenuPermissions() {
     show('nav-opsguide', __canOps);
     show('nav-opsinterviews', __full);                 // 총괄 지정(full viewer)만 노출 = 블라인드
     show('nav-staffingPlan', __sp);                    // 인원 배치 관리: 관리자 + 지정(추가 허용) 계정 − 제외 계정
+    // 월말 정산 도우미: 피처플래그/권한은 closing_helper.js 가 비동기로 로드 후 직접 토글
+    if (window.ClosingHelper) { ClosingHelper.loadFlags().then(function(){ var cv=ClosingHelper.navVisible(); if(cv){ var on=(document.getElementById('opsNav')); if(on) on.style.display=''; } }); }
   };
   __applyOpsIv();
   // 인원 배치 관리 열람권한 로드 후 메뉴 재적용 (지정/제외 계정 반영)
@@ -20696,5 +20705,10 @@ document.addEventListener('DOMContentLoaded', () => {
   } catch(e) {}
 });
 </script>
+<!-- 월말 정산 도우미 모듈 (SheetJS / JSZip / Chart.js 필요) -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="closing_helper.js?v=20261113"></script>
 </body>
 </html>
