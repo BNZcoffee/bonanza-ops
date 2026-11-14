@@ -173,9 +173,9 @@
       + (window.__closingVisible !== true ? '<span style="font-size:11px;background:#FEF3C7;color:#92400E;border-radius:6px;padding:2px 8px;font-weight:700">개발중 · 총괄 전용</span>' : '')
       + '<span style="font-size:11px;color:var(--th)">' + (CH.isHQ() ? '본사 관리자' : '매장 관리자') + '</span>'
       + '<span style="margin-left:auto">' + settingsBtn + '</span></div>'
-      + '<div style="display:flex;border-bottom:0.5px solid var(--crd);margin:8px 0 14px">' + tb(1, '서류 자동검수', 'ti-file-search') + tb(2, '발주 추이 & 원가', 'ti-chart-line') + tb(3, '품목·단가 & 보관함', 'ti-database') + tb(4, '법인카드', 'ti-credit-card') + '</div>'
+      + '<div style="display:flex;border-bottom:0.5px solid var(--crd);margin:8px 0 14px;flex-wrap:wrap">' + tb(1, '서류 자동검수', 'ti-file-search') + tb(2, '발주 추이 & 원가', 'ti-chart-line') + tb(3, '품목·단가 & 보관함', 'ti-database') + tb(4, '법인카드', 'ti-credit-card') + (CH.isHQ() ? tb(5, '거래처', 'ti-truck') : '') + '</div>'
       + '<div id="chTabBody"></div></div>';
-    if (tab === 1) CH.renderTab1(); else if (tab === 2) CH.renderTab2(); else if (tab === 3) CH.renderTab3(); else CH.renderTab4();
+    if (tab === 1) CH.renderTab1(); else if (tab === 2) CH.renderTab2(); else if (tab === 3) CH.renderTab3(); else if (tab === 4) CH.renderTab4(); else CH.renderTab5();
   };
   CH.goTab = function (n) { CH.state.tab = n; CH.render(document.getElementById('contentArea')); };
 
@@ -760,6 +760,81 @@
         catch (e) { alert('오류: ' + (e.missing ? '보안 SQL 미실행' : e.message)); return false; }
         toast('저장 완료'); CH.renderTab4(); return true;
       });
+  };
+
+  /* ======================================================================
+   * [탭 5] 거래처 관리 (본사) — vendor_master 확장 + 파일첨부 + 매장지정
+   * ==================================================================== */
+  async function vendorUpload(file, slug, kind) {
+    const path = 'vendor/' + slug + '/' + kind + '_' + Date.now() + '_' + file.name;
+    const up = await sbc().storage.from('closing-statements').upload(path, file, { upsert: true });
+    if (up.error) throw up.error; return path;
+  }
+  CH.renderTab5 = async function () {
+    const b = document.getElementById('chTabBody'); if (!b) return;
+    if (!CH.isHQ()) { b.innerHTML = '<div style="padding:24px;text-align:center;color:var(--th)">본사 관리자 전용입니다.</div>'; return; }
+    b.innerHTML = '<div style="padding:20px;text-align:center;color:var(--th)">불러오는 중…</div>';
+    let vs = [];
+    try { vs = await rpc('ch_vendors', {}) || []; } catch (e) { b.innerHTML = '<div style="padding:24px;text-align:center;color:#B91C1C">' + (e.missing ? '보안 SQL 미실행 (closing_vendors.sql)' : '오류: ' + esc(e.message)) + '</div>'; return; }
+    window.__chVendorMap = {}; vs.forEach(v => { window.__chVendorMap[v.slug] = v; });
+    const scopeTxt = v => v.scope === 'store' ? ('매장지정(' + ((v.scope_stores || []).length) + ')') : '전사공통';
+    const rows = vs.map(v => '<tr>'
+      + '<td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);font-weight:600">' + esc(v.canonical || v.slug) + '</td>'
+      + '<td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(v.biz_no || '-') + '</td>'
+      + '<td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(v.settle_day || '-') + '</td>'
+      + '<td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(scopeTxt(v)) + '</td>'
+      + '<td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(v.tax_type || '-') + '</td>'
+      + '<td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);white-space:nowrap"><button class="btn-cancel-sm" style="font-size:11px;padding:3px 7px" onclick="ClosingHelper.openVendorEdit(\'' + esc(v.slug).replace(/'/g, "\\'") + '\')">수정</button> <button class="btn-cancel-sm" style="font-size:11px;padding:3px 7px;color:#B91C1C;border-color:#FCA5A5" onclick="ClosingHelper.delVendor(\'' + esc(v.slug).replace(/'/g, "\\'") + '\')">삭제</button></td></tr>').join('');
+    b.innerHTML = '<div style="display:flex;align-items:center;margin-bottom:10px"><span style="font-size:14px;font-weight:800"><i class="ti ti-truck"></i> 거래처 관리 <span style="font-size:11px;color:var(--th)">(' + vs.length + ')</span></span><button class="btn-submit" style="font-size:12px;margin-left:auto" onclick="ClosingHelper.openVendorEdit(null)"><i class="ti ti-plus"></i> 거래처 등록</button></div>'
+      + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:6px 8px;text-align:left">업체명</th><th style="padding:6px 8px;text-align:left">사업자번호</th><th style="padding:6px 8px;text-align:left">정산시점</th><th style="padding:6px 8px;text-align:left">거래구분</th><th style="padding:6px 8px;text-align:left">과세</th><th style="padding:6px 8px">관리</th></tr></thead><tbody>' + (rows || '<tr><td colspan="6" style="padding:14px;text-align:center;color:var(--th)">등록된 거래처 없음</td></tr>') + '</tbody></table></div>';
+  };
+  CH.openVendorEdit = async function (slug) {
+    const v = slug ? (window.__chVendorMap || {})[slug] : null;
+    const opts = await loadStoreOptions();
+    const selStores = (v && v.scope_stores) || [];
+    const storeChks = opts.map(s => '<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;margin:2px 6px 2px 0"><input type="checkbox" class="vdStore" value="' + esc(s) + '"' + (selStores.indexOf(s) >= 0 ? ' checked' : '') + '> ' + esc(s) + '</label>').join('');
+    CH.modal((v ? '거래처 수정' : '거래처 등록'),
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+      + '<div><label style="font-size:11px;color:var(--th)">업체명(정식)</label><input id="vdName" class="form-input" value="' + esc(v ? v.canonical || '' : '') + '"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">코드(slug·영문)</label><input id="vdSlug" class="form-input" value="' + esc(v ? v.slug : '') + '"' + (v ? ' disabled' : '') + ' placeholder="예: delishop"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">사업자등록번호</label><input id="vdBiz" class="form-input" value="' + esc(v ? v.biz_no || '' : '') + '"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">기본 과세구분</label><select id="vdTax" class="form-input"><option value="">(선택)</option><option' + (v && v.tax_type === '과세' ? ' selected' : '') + '>과세</option><option' + (v && v.tax_type === '면세' ? ' selected' : '') + '>면세</option></select></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">정산 은행</label><input id="vdBank" class="form-input" value="' + esc(v ? v.settle_bank || '' : '') + '"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">정산 계좌번호</label><input id="vdAcct" class="form-input" value="' + esc(v ? v.settle_acct || '' : '') + '"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">정산 시점</label><input id="vdDay" class="form-input" value="' + esc(v ? v.settle_day || '' : '') + '" placeholder="예: 10 / 25 / 말일"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">담당자 이름</label><input id="vdMgr" class="form-input" value="' + esc(v ? v.mgr_name || '' : '') + '"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">담당자 연락처</label><input id="vdPhone" class="form-input" value="' + esc(v ? v.mgr_phone || '' : '') + '"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">담당자 이메일</label><input id="vdEmail" class="form-input" value="' + esc(v ? v.mgr_email || '' : '') + '"></div>'
+      + '</div>'
+      + '<div style="margin-top:8px"><label style="font-size:11px;color:var(--th)">거래 구분</label><select id="vdScope" class="form-input" onchange="document.getElementById(\'vdStores\').style.display=this.value===\'store\'?\'\':\'none\'"><option value="common"' + (!v || v.scope !== 'store' ? ' selected' : '') + '>전사 공통</option><option value="store"' + (v && v.scope === 'store' ? ' selected' : '') + '>특정 매장 지정</option></select></div>'
+      + '<div id="vdStores" style="margin-top:6px;' + (v && v.scope === 'store' ? '' : 'display:none') + '">' + storeChks + '</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">'
+      + '<div><label style="font-size:11px;color:var(--th)">사업자등록증' + (v && v.biz_file ? ' <span style="color:#15803D">(등록됨)</span>' : '') + '</label><input id="vdBizFile" type="file" class="form-input" style="font-size:11px"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">통장사본' + (v && v.bankbook_file ? ' <span style="color:#15803D">(등록됨)</span>' : '') + '</label><input id="vdBankFile" type="file" class="form-input" style="font-size:11px"></div>'
+      + '</div>'
+      + '<div style="margin-top:8px"><label style="font-size:11px;color:var(--th)">비고</label><input id="vdMemo" class="form-input" value="' + esc(v ? v.memo || '' : '') + '"></div>'
+      + '<div id="vdMsg" style="font-size:12px;color:#B91C1C;margin-top:6px;min-height:14px"></div>',
+      '저장', async function () {
+        const name = document.getElementById('vdName').value.trim();
+        const vslug = (v ? v.slug : document.getElementById('vdSlug').value.trim());
+        if (!name || !vslug) { document.getElementById('vdMsg').textContent = '업체명/코드를 입력하세요'; return false; }
+        let bizFile = null, bankFile = null;
+        try {
+          const bf = document.getElementById('vdBizFile').files[0]; if (bf) bizFile = await vendorUpload(bf, vslug, 'biz');
+          const kf = document.getElementById('vdBankFile').files[0]; if (kf) bankFile = await vendorUpload(kf, vslug, 'bank');
+        } catch (e) { document.getElementById('vdMsg').textContent = '파일 업로드 오류: ' + (e.message || e); return false; }
+        const scope = document.getElementById('vdScope').value;
+        const scopeStores = scope === 'store' ? Array.from(document.querySelectorAll('.vdStore:checked')).map(x => x.value) : [];
+        try {
+          await rpc('ch_vendor_save_full', { p_slug: vslug, p_canonical: name, p_aliases: (v && v.aliases) || [], p_biz_no: document.getElementById('vdBiz').value.trim() || null, p_biz_file: bizFile, p_settle_bank: document.getElementById('vdBank').value.trim() || null, p_settle_acct: document.getElementById('vdAcct').value.trim() || null, p_bankbook_file: bankFile, p_mgr_name: document.getElementById('vdMgr').value.trim() || null, p_mgr_phone: document.getElementById('vdPhone').value.trim() || null, p_mgr_email: document.getElementById('vdEmail').value.trim() || null, p_settle_day: document.getElementById('vdDay').value.trim() || null, p_scope: scope, p_scope_stores: scopeStores, p_tax_type: document.getElementById('vdTax').value || null, p_memo: document.getElementById('vdMemo').value.trim() || null, p_active: true });
+        } catch (e) { document.getElementById('vdMsg').textContent = e.missing ? '보안 SQL 미실행' : (/ACCESS_DENIED/.test(e.message || '') ? '본사 관리자만 가능' : '오류: ' + e.message); return false; }
+        toast('거래처 저장 완료'); CH.renderTab5(); return true;
+      });
+  };
+  CH.delVendor = function (slug) {
+    const v = (window.__chVendorMap || {})[slug] || {};
+    if (!confirm((v.canonical || slug) + ' 거래처를 삭제할까요?')) return;
+    rpc('ch_vendor_del', { p_slug: slug }).then(() => { toast('삭제 완료'); CH.renderTab5(); }).catch(e => alert('오류: ' + (e.missing ? '보안 SQL 미실행' : (/ACCESS_DENIED/.test(e.message || '') ? '본사 관리자만 가능' : e.message))));
   };
 
   /* ======================================================================
