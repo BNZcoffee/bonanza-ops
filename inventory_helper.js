@@ -95,6 +95,85 @@
     window.OpsGuide = G;
   })();
 
+  /* ===================================================================
+   * 모듈 B 공용 미디어 유틸 — WebP 경량화 / Tesseract OCR / PDF 분할
+   *   window.OpsMedia.compressWebP / ocr / pdfToImages / parseReceipt
+   *   무거운 라이브러리(Tesseract/PDF.js)는 최초 사용 시 동적 로드
+   * =================================================================== */
+  (function () {
+    const M = {}; const loaded = {};
+    function loadScript(src) {
+      if (loaded[src]) return loaded[src];
+      loaded[src] = new Promise(function (res, rej) {
+        const s = document.createElement('script'); s.src = src; s.async = true;
+        s.onload = res; s.onerror = function () { loaded[src] = null; rej(new Error('load fail: ' + src)); };
+        document.head.appendChild(s);
+      });
+      return loaded[src];
+    }
+    // 이미지/캔버스 → 1200px WebP Blob
+    M.compressWebP = function (source, maxPx, quality) {
+      maxPx = maxPx || 1200; quality = quality || 0.8;
+      return new Promise(function (res, rej) {
+        const draw = function (img, w, h) {
+          const scale = Math.min(1, maxPx / Math.max(w, h));
+          const cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+          const c = document.createElement('canvas'); c.width = cw; c.height = ch;
+          c.getContext('2d').drawImage(img, 0, 0, cw, ch);
+          c.toBlob(function (b) { b ? res({ blob: b, canvas: c }) : rej(new Error('compress fail')); }, 'image/webp', quality);
+        };
+        if (source instanceof HTMLCanvasElement) { return M.compressWebP(source.toDataURL('image/png'), maxPx, quality).then(res, rej); }
+        const img = new Image();
+        img.onload = function () { draw(img, img.naturalWidth, img.naturalHeight); };
+        img.onerror = function () { rej(new Error('image load fail')); };
+        if (typeof source === 'string') img.src = source;
+        else { const u = URL.createObjectURL(source); img.src = u; }
+      });
+    };
+    // OCR: image/canvas/blob → text (lang: 'eng' 숫자/일자, 'kor+eng' 품목)
+    M.ocr = async function (source, lang, onProgress) {
+      await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js');
+      const T = window.Tesseract; if (!T) throw new Error('OCR 로드 실패');
+      const r = await T.recognize(source, lang || 'eng', onProgress ? { logger: m => { if (m.status === 'recognizing text') onProgress(Math.round((m.progress || 0) * 100)); } } : undefined);
+      return (r && r.data && r.data.text) || '';
+    };
+    // 다페이지 PDF → [canvas]
+    M.pdfToImages = async function (file, maxPages) {
+      await loadScript('https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js');
+      const pdfjs = window.pdfjsLib; if (!pdfjs) throw new Error('PDF 로드 실패');
+      try { pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; } catch (e) {}
+      const buf = await file.arrayBuffer();
+      const doc = await pdfjs.getDocument({ data: buf }).promise;
+      const out = []; const n = Math.min(doc.numPages, maxPages || 20);
+      for (let p = 1; p <= n; p++) {
+        const page = await doc.getPage(p);
+        const vp = page.getViewport({ scale: 1.6 });
+        const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+        await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+        out.push(c);
+      }
+      return out;
+    };
+    // 영수증 텍스트 → {date, amount}
+    M.parseReceipt = function (text) {
+      const t = String(text || '');
+      let date = null;
+      let dm = t.match(/(20\d{2})[.\-\/년\s]+(\d{1,2})[.\-\/월\s]+(\d{1,2})/);
+      if (dm) date = dm[1] + '-' + ('0' + dm[2]).slice(-2) + '-' + ('0' + dm[3]).slice(-2);
+      else { const d2 = t.match(/(\d{2})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/); if (d2) date = '20' + d2[1] + '-' + ('0' + d2[2]).slice(-2) + '-' + ('0' + d2[3]).slice(-2); }
+      let amount = null;
+      // 합계/금액 라벨 우선, 없으면 최대 금액
+      const label = t.match(/(합\s*계|결제금액|승인금액|총\s*액|금\s*액)[^0-9]{0,6}([0-9][0-9,]{2,})/);
+      if (label) amount = Number(label[2].replace(/,/g, ''));
+      if (!amount) {
+        const nums = (t.match(/[0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,}/g) || []).map(x => Number(x.replace(/,/g, ''))).filter(x => x >= 100 && x < 100000000);
+        if (nums.length) amount = Math.max.apply(null, nums);
+      }
+      return { date: date, amount: amount || null };
+    };
+    window.OpsMedia = M;
+  })();
+
   const guideBtn = key => '<button class="btn-cancel-sm" style="font-size:12px;color:#8a5a2b" onclick="OpsGuide.open(\'' + key + '\')"><i class="ti ti-book"></i> 작성 가이드</button>';
   IM._guideBtn = guideBtn;
 
@@ -363,7 +442,7 @@
       + '<button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.cntLookup()"><i class="ti ti-search"></i> 조회</button>'
       + '<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">'
       + guideBtn('count')
-      + (priv ? '<label class="btn-cancel-sm" style="font-size:12px;cursor:pointer"><i class="ti ti-file-invoice"></i> 거래명세서 업로드<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="InventoryMgr.openDelivery(this.files[0])"></label>' : '')
+      + (priv ? '<label class="btn-cancel-sm" style="font-size:12px;cursor:pointer"><i class="ti ti-file-invoice"></i> 거래명세서 업로드<input type="file" accept=".xlsx,.xls,.csv,image/*" style="display:none" onchange="InventoryMgr.openDelivery(this.files[0])"></label>' : '')
       + (priv ? '<button class="btn-cancel-sm" style="font-size:12px;color:#B45309;border-color:#FCD34D" onclick="InventoryMgr.openPriceChanges()"><i class="ti ti-arrows-up-down"></i> 단가 변동 내역</button>' : '')
       + '<button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.cntNewItem()"><i class="ti ti-plus"></i> 신규 품목 등록 요청</button></span></div>';
     const anom = r => { if (!priv || r.count_qty === '' || r.count_qty == null) return ''; const base = Number(r.opening_qty || 0) + Number(r.in_qty || 0); if (base < Number(r.count_qty)) return 'background:#FEF2F2'; if (Number(r.in_qty || 0) > 0 && Number(r.count_qty) === 0) return 'background:#FFFBEB'; return ''; };
@@ -474,8 +553,9 @@
   }
   IM.openDelivery = function (file) {
     if (!file) return;
-    if (typeof XLSX === 'undefined') { alert('엑셀 라이브러리 로딩 중입니다.'); return; }
     const ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (/^image\//.test(file.type) || ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'].indexOf(ext) !== -1) { IM.deliveryFromImage(file); return; }
+    if (typeof XLSX === 'undefined') { alert('엑셀 라이브러리 로딩 중입니다.'); return; }
     const reader = new FileReader();
     reader.onload = async function (e) {
       try {
@@ -502,6 +582,35 @@
       } catch (err) { alert('파싱 오류: ' + (err.message || err)); }
     };
     reader.readAsArrayBuffer(file);
+  };
+  // 거래명세서 이미지(사진) → OCR 품목/수량/단가 파싱 (원본 미저장)
+  IM.deliveryFromImage = async function (file) {
+    const ov = document.createElement('div'); ov.className = 'modal-bg open'; ov.id = 'imOcrWait';
+    ov.innerHTML = '<div class="modal-box" style="max-width:360px;text-align:center"><div style="font-size:13px;padding:10px 4px" id="imOcrMsg">명세서 사진 인식 중… 0%</div></div>';
+    document.body.appendChild(ov);
+    try {
+      const txt = await OpsMedia.ocr(file, 'kor+eng', p => { const m = document.getElementById('imOcrMsg'); if (m) m.textContent = '명세서 사진 인식 중… ' + p + '%'; });
+      const rows = [];
+      String(txt || '').split(/\r?\n/).forEach(line => {
+        const ln = line.trim(); if (ln.length < 2) return;
+        if (/합\s*계|소\s*계|부\s*가|공급가액|총\s*액|사업자|전화|대표/.test(ln)) return;
+        const nums = ln.match(/[0-9][0-9,]*\.?[0-9]*/g) || [];
+        const name = ln.replace(/[0-9,.₩\\\-]+/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!name || !/[가-힣A-Za-z]/.test(name) || !nums.length) return;
+        const vals = nums.map(x => Number(x.replace(/,/g, ''))).filter(x => !isNaN(x));
+        // 수량=작은 값, 단가=큰 값 추정
+        let qty = '', price = '';
+        if (vals.length === 1) qty = vals[0];
+        else { const sorted = vals.slice().sort((a, b) => a - b); qty = sorted[0]; price = sorted[sorted.length - 1]; }
+        if (!qty) return;
+        const pI = parseItemStr(name);
+        rows.push({ raw: name, item: pI.item, spec: pI.spec, origin: pI.origin, vendor: '', category: '', qty: qty, unit_price: price === '' ? '' : String(price), remember: false });
+      });
+      const wait = document.getElementById('imOcrWait'); if (wait) wait.remove();
+      if (!rows.length) { alert('사진에서 품목/수량을 인식하지 못했습니다. 더 선명한 사진이나 엑셀 파일로 올려 주세요.'); return; }
+      try { const al = await rpc('ch_alias_resolve', { p_raws: rows.map(x => x.raw) }) || {}; rows.forEach(x => { const a = al[x.raw]; if (a) { x.item = a.item || x.item; x.spec = a.spec || x.spec; x.vendor = a.vendor_slug || x.vendor; x.category = a.category || x.category; } }); } catch (e) {}
+      window.__delivRows = rows; IM.deliveryPreview();
+    } catch (e) { const wait = document.getElementById('imOcrWait'); if (wait) wait.remove(); alert('사진 인식 오류: ' + (e.message || e)); }
   };
   IM.deliveryPreview = function () {
     const rows = window.__delivRows || []; const hq = isHQ();
@@ -963,6 +1072,30 @@
     try { if ('serviceWorker' in navigator && Notification && Notification.permission === 'granted') navigator.serviceWorker.register('./sw.js'); } catch (e) {}
     // 로그인 시 실사 리마인드 1회 핑(서버가 D-1/초과 판단 + 일일 중복방지)
     try { IM.pushSend({ mode: 'inventory_reminders', ym: (new Date()).toISOString().slice(0, 7) }); } catch (e) {}
+    // 본사: 90일 경과 영수증 이미지 자동 정리(하루 1회)
+    try { IM.cardPurgeDaily(); } catch (e) {}
+  };
+  // 본사 관리자 로그인 시 하루 1회: 90일 경과 영수증 이미지 Storage 정리 + 팝업
+  IM.cardPurgeDaily = async function () {
+    if (!isHQ()) return;
+    const today = (new Date()).toISOString().slice(0, 10);
+    try { if (localStorage.getItem('card_purge_day') === today) return; } catch (_) {}
+    let cands = [];
+    try { cands = await rpc('ch_card_purge_candidates', {}) || []; } catch (e) { return; }
+    try { localStorage.setItem('card_purge_day', today); } catch (_) {}
+    if (!cands.length) return;
+    const okIds = []; const bucket = (window.STORAGE_BUCKET_CARD || 'closing-statements');
+    const paths = cands.map(c => c.path).filter(Boolean);
+    try { await sbc().storage.from(bucket).remove(paths); } catch (e) {}
+    cands.forEach(c => okIds.push(c.id));
+    let purged = 0;
+    try { const r = await rpc('ch_card_purge_commit', { p_ids: okIds }); purged = (r && r.purged) || 0; } catch (e) { return; }
+    if (purged > 0) {
+      const ov = document.createElement('div'); ov.className = 'modal-bg open';
+      ov.innerHTML = '<div class="modal-box" style="max-width:400px"><div class="modal-title">영수증 자동 정리 완료</div><div style="font-size:13px;padding:6px 2px;line-height:1.6">업로드 후 90일이 지난 일반 영수증 이미지 <b>' + purged + '건</b>을 정리했습니다.<br><span style="font-size:12px;color:var(--th)">금액/내역 등 텍스트 기록과 [필수 보관 서류]는 영구 보존됩니다.</span></div><div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn-submit" onclick="this.closest(\'.modal-bg\').remove()">확인</button></div></div>';
+      ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+      document.body.appendChild(ov);
+    }
   };
   (function waitUser(n) {
     if (curUser() && sbc()) { IM.boot(); }

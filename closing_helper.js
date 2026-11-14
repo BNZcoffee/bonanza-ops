@@ -721,7 +721,7 @@
     const RB = { matched: '<span style="font-size:10px;background:#DCFCE7;color:#15803D;border-radius:5px;padding:1px 6px">일치·마감</span>', need_input: '<span style="font-size:10px;background:#FEF3C7;color:#B45309;border-radius:5px;padding:1px 6px">입력필요</span>', review: '<span style="font-size:10px;background:#FEE2E2;color:#B91C1C;border-radius:5px;padding:1px 6px">확인필요</span>', pending: '<span style="font-size:10px;background:#F1F5F9;color:#64748B;border-radius:5px;padding:1px 6px">대기</span>' };
     const accName = code => { const a = (window.__chAccounts || []).find(x => x.code === code); return a ? a.name : (code || '-'); };
     const rows = txs.map(t => '<tr><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(String(t.tx_date || '').slice(5)) + '</td><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:right;font-weight:600">' + won(t.total_amount) + '</td><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(accName(t.account_code)) + '</td><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee);font-size:11px;color:var(--th)">' + esc(t.memo || '') + '</td><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">' + (RB[t.recon_status] || RB.pending) + (t.source === 'accounting' && t.recon_status === 'need_input' ? ' <button class="btn-cancel-sm" style="font-size:10px;padding:1px 6px" onclick="ClosingHelper.classifyTx(' + t.id + ')">입력</button>' : '') + '</td></tr>').join('');
-    b.innerHTML = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' + sel + '<input type="month" class="form-input" style="width:140px" value="' + ym + '" onchange="ClosingHelper.state.ym=this.value;ClosingHelper.renderTab4()"><span style="margin-left:auto;display:flex;gap:6px"><button class="btn-cancel-sm" style="font-size:12px" onclick="ClosingHelper.exportAccountingExcel(\'' + esc(store).replace(/'/g, "\\'") + '\')"><i class="ti ti-file-spreadsheet"></i> 내 매장 엑셀</button><button class="btn-submit" style="font-size:12px" onclick="ClosingHelper.openCardTxAdd(\'' + esc(store).replace(/'/g, "\\'") + '\')"><i class="ti ti-plus"></i> 수시 등록</button></span></div>'
+    b.innerHTML = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' + sel + '<input type="month" class="form-input" style="width:140px" value="' + ym + '" onchange="ClosingHelper.state.ym=this.value;ClosingHelper.renderTab4()"><span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap"><button class="btn-cancel-sm" style="font-size:12px;color:#8a5a2b" onclick="window.OpsGuide&&OpsGuide.open(\'card\')"><i class="ti ti-book"></i> 작성 가이드</button><button class="btn-cancel-sm" style="font-size:12px" onclick="ClosingHelper.openEvidenceBook(\'' + esc(store).replace(/'/g, "\\'") + '\')"><i class="ti ti-printer"></i> 증빙철 출력</button><button class="btn-cancel-sm" style="font-size:12px" onclick="ClosingHelper.exportAccountingExcel(\'' + esc(store).replace(/'/g, "\\'") + '\')"><i class="ti ti-file-spreadsheet"></i> 내 매장 엑셀</button><button class="btn-submit" style="font-size:12px" onclick="ClosingHelper.openCardTxAdd(\'' + esc(store).replace(/'/g, "\\'") + '\')"><i class="ti ti-plus"></i> 수시 등록</button></span></div>'
       + bar
       + '<div style="font-size:12px;font-weight:700;margin:12px 0 4px">' + ym + ' 카드 사용내역 <span style="font-size:11px;color:var(--th)">(' + txs.length + '건)</span></div>'
       + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:5px 8px;text-align:left">일자</th><th style="padding:5px 8px;text-align:right">금액</th><th style="padding:5px 8px;text-align:left">계정과목</th><th style="padding:5px 8px;text-align:left">내역</th><th style="padding:5px 8px">상태</th></tr></thead><tbody>' + (rows || '<tr><td colspan="5" style="padding:14px;text-align:center;color:var(--th)">등록된 내역 없음</td></tr>') + '</tbody></table></div>';
@@ -737,18 +737,162 @@
       + '<div style="grid-column:1/3"><label style="font-size:11px;color:var(--th)">계정과목</label><select id="txAcc" class="form-input">' + accOpts + '</select></div>'
       + '<div style="grid-column:1/3"><label style="font-size:11px;color:var(--th)">사용내역(인원/목적)</label><input id="txMemo" class="form-input" placeholder="예: 매장 비품 구입 / 3인"></div>'
       + '</div>'
-      + '<div style="margin-top:8px"><label style="font-size:11px;color:var(--th)">영수증 사진(선택)</label><input id="txFile" type="file" accept="image/*" capture="environment" class="form-input" style="font-size:12px"></div>'
-      + '<div id="txMsg" style="font-size:12px;color:#B91C1C;margin-top:6px;min-height:14px"></div>',
+      + '<div style="margin-top:8px"><label style="font-size:11px;color:var(--th)">영수증 사진(선택) — 촬영/첨부 시 일자·금액 자동 인식</label><input id="txFile" type="file" accept="image/*" capture="environment" class="form-input" style="font-size:12px" onchange="ClosingHelper.cardOcrPrefill(this)"><div id="txOcr" style="font-size:11px;color:#2563EB;margin-top:3px;min-height:14px"></div></div>'
+      + '<label style="font-size:12px;display:flex;align-items:center;gap:6px;margin-top:6px"><input id="txKeep" type="checkbox"> <span>필수 보관 서류 (수선비/비품 명세서·견적서 — 90일 후에도 보존)</span></label>'
+      + '<div id="txMsg" style="font-size:12px;color:#B91C1C;margin-top:6px;min-height:14px"></div>'
+      + '<div style="font-size:11px;color:var(--th);margin-top:4px">여러 장/다페이지 PDF는 <button class="btn-cancel-sm" style="font-size:11px;padding:2px 8px" onclick="document.getElementById(\'chModal\')&&document.getElementById(\'chModal\').remove();ClosingHelper.openCardBatch(\'' + esc(store).replace(/'/g, "\\'") + '\')">📷 영수증 일괄 등록</button> 을 이용하세요.</div>',
       '등록', async function () {
         const date = document.getElementById('txDate').value, amt = Number(document.getElementById('txAmt').value || 0);
         if (!date || !amt) { document.getElementById('txMsg').textContent = '결제일자/금액을 입력하세요'; return false; }
-        let evid = null; const f = document.getElementById('txFile').files[0];
-        if (f) { try { const path = 'card/' + date.slice(0, 7) + '/' + store + '/' + Date.now() + '_' + f.name; const up = await sbc().storage.from(STORAGE_BUCKET).upload(path, f, { upsert: true }); if (!up.error) evid = path; } catch (e) {} }
-        try { await rpc('ch_card_tx_add', { p_store: store, p_tx_date: date, p_total: amt, p_account: document.getElementById('txAcc').value || null, p_memo: document.getElementById('txMemo').value.trim() || null, p_card_last: null, p_evidence: evid }); }
-        catch (e) { document.getElementById('txMsg').textContent = /MONTH_LOCKED/.test(e.message || '') ? '월마감 잠금 상태' : (e.missing ? '보안 SQL 미실행' : '오류: ' + e.message); return false; }
+        let evid = null, etype = null; const f = document.getElementById('txFile').files[0];
+        if (f) {
+          try {
+            document.getElementById('txMsg').style.color = '#2563EB'; document.getElementById('txMsg').textContent = '영수증 저장 중…';
+            let blob = f, ext = 'webp';
+            try { const r = await OpsMedia.compressWebP(f, 1200, 0.8); blob = r.blob; } catch (e2) { ext = (f.name.split('.').pop() || 'jpg'); }
+            const path = 'card/' + date.slice(0, 7) + '/' + store + '/' + Date.now() + '.' + ext;
+            const up = await sbc().storage.from(STORAGE_BUCKET).upload(path, blob, { upsert: true, contentType: ext === 'webp' ? 'image/webp' : f.type });
+            if (!up.error) { evid = path; etype = 'image'; }
+          } catch (e) {}
+          document.getElementById('txMsg').style.color = '#B91C1C'; document.getElementById('txMsg').textContent = '';
+        }
+        try { await rpc('ch_card_tx_add', { p_store: store, p_tx_date: date, p_total: amt, p_account: document.getElementById('txAcc').value || null, p_memo: document.getElementById('txMemo').value.trim() || null, p_card_last: null, p_evidence: evid, p_evidence_type: etype, p_must_keep: document.getElementById('txKeep').checked }); }
+        catch (e) { document.getElementById('txMsg').textContent = /MONTH_LOCKED/.test(e.message || '') ? '월마감 잠금 상태' : (e.missing ? '보안 SQL 미실행 (closing_module10.sql)' : '오류: ' + e.message); return false; }
         toast('등록 완료'); CH.renderTab4(); return true;
       });
   };
+  // 단건 영수증 OCR → 일자/금액 프리필
+  CH.cardOcrPrefill = async function (input) {
+    const f = input.files && input.files[0]; if (!f || !/^image\//.test(f.type)) return;
+    const box = document.getElementById('txOcr'); if (box) box.textContent = '영수증 인식 중… 0%';
+    try {
+      const txt = await OpsMedia.ocr(f, 'eng', p => { if (box) box.textContent = '영수증 인식 중… ' + p + '%'; });
+      const r = OpsMedia.parseReceipt(txt);
+      if (r.date) { const d = document.getElementById('txDate'); if (d) d.value = r.date; }
+      if (r.amount) { const a = document.getElementById('txAmt'); if (a) a.value = r.amount; }
+      if (box) box.textContent = (r.date || r.amount) ? '자동 인식 완료 — 값이 다르면 수정하세요.' : '인식된 일자/금액이 없습니다. 직접 입력하세요.';
+    } catch (e) { if (box) box.textContent = '자동 인식 실패 — 직접 입력하세요.'; }
+  };
+  /* ───────── 영수증 일괄 등록 (다중 이미지 / 다페이지 PDF + OCR) ───────── */
+  CH.openCardBatch = function (store) {
+    window.__cardBatch = [];
+    CH.modal(esc(store) + ' 영수증 일괄 등록',
+      '<div style="font-size:12px;color:var(--th);margin-bottom:8px">여러 장의 영수증 사진이나 다페이지 PDF를 한 번에 올리면, 일자/금액을 자동 인식해 아래 목록으로 만듭니다. 값 확인/수정 후 [일괄 등록]하세요.</div>'
+      + '<input id="cbFiles" type="file" accept="image/*,application/pdf" multiple class="form-input" style="font-size:12px" onchange="ClosingHelper.cardBatchFiles(this.files)">'
+      + '<div id="cbProg" style="font-size:11px;color:#2563EB;margin-top:4px;min-height:14px"></div>'
+      + '<div id="cbList" style="margin-top:8px"></div>',
+      '일괄 등록', async function () {
+        const arr = window.__cardBatch || []; if (!arr.length) { alert('먼저 영수증을 올려 주세요.'); return false; }
+        const accs = window.__chAccounts || [];
+        let ok = 0, fail = 0;
+        for (let i = 0; i < arr.length; i++) {
+          const r = arr[i];
+          const date = (document.getElementById('cb_d_' + i) || {}).value || r.date;
+          const amt = Number((document.getElementById('cb_a_' + i) || {}).value || r.amount || 0);
+          if (!date || !amt) { fail++; continue; }
+          const acc = (document.getElementById('cb_c_' + i) || {}).value || null;
+          const memo = ((document.getElementById('cb_m_' + i) || {}).value || '').trim() || null;
+          const keep = !!(document.getElementById('cb_k_' + i) || {}).checked;
+          let evid = null;
+          try { const path = 'card/' + date.slice(0, 7) + '/' + store + '/' + Date.now() + '_' + i + '.webp'; const up = await sbc().storage.from(STORAGE_BUCKET).upload(path, r.blob, { upsert: true, contentType: 'image/webp' }); if (!up.error) evid = path; } catch (e) {}
+          try { await rpc('ch_card_tx_add', { p_store: store, p_tx_date: date, p_total: amt, p_account: acc, p_memo: memo, p_card_last: null, p_evidence: evid, p_evidence_type: 'image', p_must_keep: keep }); ok++; } catch (e) { fail++; }
+        }
+        toast('일괄 등록 완료 — ' + ok + '건' + (fail ? ' / 실패 ' + fail : '')); CH.renderTab4(); return true;
+      });
+  };
+  CH.cardBatchFiles = async function (files) {
+    const prog = document.getElementById('cbProg'); const list = document.getElementById('cbList');
+    window.__cardBatch = []; const imgs = [];
+    try {
+      for (const f of Array.from(files || [])) {
+        if (f.type === 'application/pdf') { if (prog) prog.textContent = 'PDF 페이지 분할 중…'; const pages = await OpsMedia.pdfToImages(f, 20); pages.forEach(c => imgs.push(c)); }
+        else if (/^image\//.test(f.type)) imgs.push(f);
+      }
+    } catch (e) { if (prog) prog.textContent = 'PDF 처리 오류 — 이미지로 올려 주세요.'; }
+    for (let i = 0; i < imgs.length; i++) {
+      if (prog) prog.textContent = '영수증 인식 중… (' + (i + 1) + '/' + imgs.length + ')';
+      let blob = null, thumb = '';
+      try { const r = await OpsMedia.compressWebP(imgs[i], 1200, 0.8); blob = r.blob; thumb = r.canvas.toDataURL('image/webp', 0.5); } catch (e) {}
+      let parsed = { date: '', amount: '' };
+      try { const txt = await OpsMedia.ocr(imgs[i], 'eng'); parsed = OpsMedia.parseReceipt(txt); } catch (e) {}
+      window.__cardBatch.push({ blob: blob, thumb: thumb, date: parsed.date || '', amount: parsed.amount || '' });
+    }
+    if (prog) prog.textContent = imgs.length ? (imgs.length + '건 인식 완료 — 값 확인 후 [일괄 등록]') : '인식할 이미지가 없습니다.';
+    CH.cardBatchRender();
+  };
+  CH.cardBatchRender = function () {
+    const list = document.getElementById('cbList'); if (!list) return;
+    const accs = window.__chAccounts || [];
+    const accOpts = i => '<option value="">(계정)</option>' + accs.map(a => '<option value="' + esc(a.code) + '">' + esc(a.name) + '</option>').join('');
+    const rows = (window.__cardBatch || []).map((r, i) => '<div style="display:flex;gap:6px;align-items:center;border:0.5px solid var(--crd);border-radius:8px;padding:6px;margin-bottom:5px">'
+      + (r.thumb ? '<img src="' + r.thumb + '" style="width:38px;height:38px;object-fit:cover;border-radius:5px">' : '<div style="width:38px;height:38px;background:var(--cr,#faf7f2);border-radius:5px"></div>')
+      + '<div style="flex:1;display:grid;grid-template-columns:1.1fr 1fr;gap:4px">'
+      + '<input id="cb_d_' + i + '" type="date" class="form-input" style="font-size:11px;padding:3px" value="' + esc(r.date) + '">'
+      + '<input id="cb_a_' + i + '" type="number" class="form-input" style="font-size:11px;padding:3px" placeholder="금액" value="' + esc(r.amount) + '">'
+      + '<select id="cb_c_' + i + '" class="form-input" style="font-size:11px;padding:3px">' + accOpts(i) + '</select>'
+      + '<input id="cb_m_' + i + '" class="form-input" style="font-size:11px;padding:3px" placeholder="사용내역">'
+      + '</div><label style="font-size:10px;white-space:nowrap;display:flex;flex-direction:column;align-items:center"><input id="cb_k_' + i + '" type="checkbox">필수<br>보관</label>'
+      + '</div>').join('');
+    list.innerHTML = rows;
+  };
+
+  /* ───────── 법인카드 영수증 증빙철 (출력 + 월간 일괄 PDF) ───────── */
+  CH.openEvidenceBook = async function (store) {
+    const ym = CH.state.ym;
+    let txs = []; try { txs = await rpc('ch_card_tx_list', { p_store: store, p_ym: ym }) || []; } catch (e) {}
+    let bulk = []; try { bulk = await rpc('ch_card_bulk_list', { p_store: store, p_ym: ym }) || []; } catch (e) {}
+    window.__evidStore = store;
+    const withImg = txs.filter(t => t.evidence_path);
+    const accName = code => { const a = (window.__chAccounts || []).find(x => x.code === code); return a ? a.name : (code || '-'); };
+    const rows = txs.map((t, i) => '<tr><td style="padding:3px 6px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">' + (i + 1) + '</td><td style="padding:3px 6px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(String(t.tx_date || '').slice(5)) + '</td><td style="padding:3px 6px;border-bottom:0.5px solid var(--crm,#eee);text-align:right">' + won(t.total_amount) + '</td><td style="padding:3px 6px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(accName(t.account_code)) + '</td><td style="padding:3px 6px;border-bottom:0.5px solid var(--crm,#eee);font-size:11px">' + esc(t.memo || '') + '</td><td style="padding:3px 6px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">' + (t.evidence_path ? '🧾' : (t.must_keep ? '📌' : '')) + '</td></tr>').join('');
+    const bulkHtml = bulk.map(x => '<div style="font-size:11px;display:flex;gap:6px;align-items:center;padding:2px 0"><span style="flex:1">📄 ' + esc(String(x.path).split('/').pop()) + '</span><button class="btn-cancel-sm" style="font-size:10px;padding:1px 6px" onclick="ClosingHelper.openVendorFileCH(\'' + esc(x.path).replace(/'/g, "\\'") + '\')">열기</button><button class="btn-cancel-sm" style="font-size:10px;padding:1px 6px;color:#B91C1C" onclick="ClosingHelper.cardBulkDel(' + x.id + ')">삭제</button></div>').join('');
+    CH.modal(ym + ' ' + esc(store) + ' 법인카드 증빙철',
+      '<div style="font-size:12px;color:var(--th);margin-bottom:8px">당월 카드 사용 ' + txs.length + '건 (영수증 첨부 ' + withImg.length + '건). 결제일순으로 자동 조판됩니다.</div>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"><button class="btn-submit" style="font-size:12px" onclick="ClosingHelper.printEvidenceBook()"><i class="ti ti-printer"></i> 증빙철 출력(PDF/인쇄)</button>'
+      + '<label class="btn-cancel-sm" style="font-size:12px;cursor:pointer"><i class="ti ti-file-upload"></i> 월간 일괄 증빙 PDF 업로드<input type="file" accept="application/pdf" style="display:none" onchange="ClosingHelper.uploadBulkPdf(this.files[0])"></label></div>'
+      + (bulk.length ? '<div style="background:var(--cr,#faf7f2);border-radius:8px;padding:6px 10px;margin-bottom:8px">' + bulkHtml + '</div>' : '')
+      + '<div style="max-height:46vh;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:4px 6px">No</th><th style="padding:4px 6px;text-align:left">일자</th><th style="padding:4px 6px;text-align:right">금액</th><th style="padding:4px 6px;text-align:left">계정과목</th><th style="padding:4px 6px;text-align:left">내역</th><th style="padding:4px 6px">증빙</th></tr></thead><tbody>' + (rows || '<tr><td colspan="6" style="padding:12px;text-align:center;color:var(--th)">내역 없음</td></tr>') + '</tbody></table></div>',
+      '닫기', function () { return true; });
+  };
+  CH.openVendorFileCH = async function (path) {
+    try { const { data, error } = await sbc().storage.from(STORAGE_BUCKET).createSignedUrl(path, 120); if (error || !data) { alert('파일을 열 수 없습니다.'); return; } window.open(data.signedUrl, '_blank'); } catch (e) { alert('열기 오류'); }
+  };
+  CH.cardBulkDel = async function (id) {
+    if (!confirm('이 일괄 증빙 PDF를 삭제할까요?')) return;
+    try { await rpc('ch_card_bulk_del', { p_id: id }); toast('삭제 완료'); CH.openEvidenceBook(window.__evidStore); } catch (e) { alert('오류: ' + (e.message || e)); }
+  };
+  CH.uploadBulkPdf = async function (file) {
+    if (!file) return; const store = window.__evidStore, ym = CH.state.ym;
+    try {
+      const path = 'card/' + ym + '/' + store + '/bulk_' + Date.now() + '.pdf';
+      const up = await sbc().storage.from(STORAGE_BUCKET).upload(path, file, { upsert: true, contentType: 'application/pdf' });
+      if (up.error) { alert('업로드 오류'); return; }
+      await rpc('ch_card_bulk_add', { p_ym: ym, p_store: store, p_path: path, p_size: file.size });
+      toast('일괄 증빙 업로드 완료'); CH.openEvidenceBook(store);
+    } catch (e) { alert('오류: ' + (e.missing ? '보안 SQL 미실행 (closing_module10.sql)' : (e.message || e))); }
+  };
+  CH.printEvidenceBook = async function () {
+    const store = window.__evidStore, ym = CH.state.ym;
+    let txs = []; try { txs = await rpc('ch_card_tx_list', { p_store: store, p_ym: ym }) || []; } catch (e) {}
+    const accName = code => { const a = (window.__chAccounts || []).find(x => x.code === code); return a ? a.name : (code || '-'); };
+    const esc2 = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    // 영수증 이미지 서명 URL 미리 확보
+    const imgUrls = {};
+    for (const t of txs) { if (t.evidence_path) { try { const { data } = await sbc().storage.from(STORAGE_BUCKET).createSignedUrl(t.evidence_path, 600); if (data) imgUrls[t.id] = data.signedUrl; } catch (e) {} } }
+    const rows = txs.map((t, i) => '<tr><td class="c">' + (i + 1) + '</td><td>' + esc2(t.tx_date) + '</td><td class="r">' + Number(t.total_amount || 0).toLocaleString('ko-KR') + '</td><td>' + esc2(accName(t.account_code)) + '</td><td>' + esc2(t.memo || '') + '</td></tr>').join('');
+    const cards = txs.filter(t => imgUrls[t.id]).map((t, i) => '<div class="rc"><div class="rc-h">No.' + (txs.indexOf(t) + 1) + ' · ' + esc2(t.tx_date) + ' · ' + Number(t.total_amount || 0).toLocaleString('ko-KR') + '원 · ' + esc2(accName(t.account_code)) + '</div><img src="' + imgUrls[t.id] + '"></div>').join('');
+    const total = txs.reduce((s, t) => s + Number(t.total_amount || 0), 0);
+    const html = '<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>' + ym + ' ' + esc2(store) + ' 법인카드 증빙철</title>'
+      + '<style>body{font-family:-apple-system,"Malgun Gothic",sans-serif;padding:18px;color:#111}h1{font-size:18px;margin:0 0 4px}.sub{color:#666;font-size:12px;margin-bottom:12px}table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px}th,td{border:1px solid #ccc;padding:5px 7px}th{background:#f3f3f3}td.r{text-align:right}td.c{text-align:center}.tot{text-align:right;font-weight:700;font-size:13px;margin-bottom:18px}.rc{page-break-inside:avoid;border:1px solid #ddd;border-radius:8px;padding:8px;margin-bottom:10px}.rc-h{font-size:12px;font-weight:700;margin-bottom:6px}.rc img{max-width:100%;max-height:560px;display:block;margin:0 auto}@media print{.noprint{display:none}}</style></head><body>'
+      + '<h1>' + ym + ' ' + esc2(store) + ' 법인카드 영수증 증빙철</h1><div class="sub">보난자커피 · 출력일 ' + new Date().toISOString().slice(0, 10) + '</div>'
+      + '<table><thead><tr><th>No</th><th>일자</th><th>금액</th><th>계정과목</th><th>내역</th></tr></thead><tbody>' + rows + '</tbody></table>'
+      + '<div class="tot">당월 합계 ' + total.toLocaleString('ko-KR') + '원 · 총 ' + txs.length + '건</div>'
+      + (cards ? '<h2 style="font-size:14px">첨부 영수증</h2>' + cards : '')
+      + '<div class="noprint" style="margin-top:16px"><button onclick="window.print()" style="padding:8px 16px;font-size:14px">인쇄 / PDF 저장</button></div></body></html>';
+    const w = window.open('', '_blank'); if (!w) { alert('팝업이 차단되었습니다. 팝업 허용 후 다시 시도하세요.'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+  };
+
   CH.classifyTx = function (id) {
     const accs = window.__chAccounts || [];
     const accOpts = '<option value="">(계정과목 선택)</option>' + accs.map(a => '<option value="' + esc(a.code) + '">' + esc(a.name) + '</option>').join('');
