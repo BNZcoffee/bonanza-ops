@@ -588,6 +588,10 @@ table.g-tbl th{background:var(--crm);font-weight:700}
       <button class="nav-btn" onclick="goPage('manual')" id="nav-manual"><i class="ti ti-book"></i> 사용 설명서</button>
       <div id="catNavArea"></div>
     </div>
+    <div class="sidebar-section" id="inventoryNav">
+      <div class="sidebar-label">매장 재고</div>
+      <button class="nav-btn" onclick="goPage('inventory')" id="nav-inventory"><i class="ti ti-building-warehouse"></i> 매장 재고 관리</button>
+    </div>
     <div class="sidebar-section" id="requestNav" style="display:none">
       <div class="sidebar-label">업무 신청</div>
       <button class="nav-btn" onclick="goPage('requests')" id="nav-requests"><i class="ti ti-clipboard-list"></i> 업무 신청<span class="nav-new" id="reqNavBadge" style="display:none">N</span></button>
@@ -616,10 +620,6 @@ table.g-tbl th{background:var(--crm);font-weight:700}
       <button class="nav-btn" onclick="goPage('opsinterviews')" id="nav-opsinterviews" style="display:none"><i class="ti ti-lock"></i> 직원 면담(운영)</button>
       <button class="nav-btn" onclick="goPage('staffingPlan')" id="nav-staffingPlan" style="display:none"><i class="ti ti-layout-grid"></i> 인원 배치 관리</button>
       <button class="nav-btn" onclick="goPage('closingHelper')" id="nav-closingHelper" style="display:none"><i class="ti ti-calculator"></i> 월말 정산 도우미</button>
-    </div>
-    <div class="sidebar-section" id="inventoryNav">
-      <div class="sidebar-label">매장 재고</div>
-      <button class="nav-btn" onclick="goPage('inventory')" id="nav-inventory"><i class="ti ti-building-warehouse"></i> 매장 재고 관리</button>
     </div>
     <div class="sidebar-section" id="adminNav" style="display:none">
       <div class="sidebar-label">관리</div>
@@ -1765,7 +1765,7 @@ async function usrFull(userId){
 // ── PAGES ─────────────────────────────────────────
 function goPage(page) {
   // 숨겨진 기능 접근 방지 (총괄/부총괄/운영팀 제외)
-  const hiddenKeys = ['requests','reqarchive','reports','interviews','handover','repairs','schedules','attendance','manual'];
+  const hiddenKeys = ['requests','reqarchive','reports','interviews','handover','repairs','schedules','attendance','manual','inventory'];
   if (hiddenKeys.includes(page) && !isFeatureEnabled(page)) {
     alert('이 기능은 현재 준비 중입니다.');
     return;
@@ -5296,6 +5296,7 @@ function applyFeatureFlagsToUI() {
     'sch_confirm': 'nav-sch-confirm',
     'attendance':  'nav-attendance',
     'leave_settings':'nav-leave-settings',
+    'inventory':   'nav-inventory',
     // manual은 항상 표시 — Feature Flags 대상 아님
   };
   Object.entries(menuMap).forEach(([key, id]) => {
@@ -5329,6 +5330,10 @@ function applyFeatureFlagsToUI() {
       el.style.display = 'none';
     }
   });
+
+  // 매장 재고 섹션: 버튼 숨김 상태에 맞춰 섹션 전체 동기화
+  const invSec = document.getElementById('inventoryNav'), invBtn = document.getElementById('nav-inventory');
+  if (invSec && invBtn) invSec.style.display = (invBtn.style.display === 'none') ? 'none' : '';
 }
 
 // 관리자용 — 기능 표시/숨김 설정 화면
@@ -5356,7 +5361,9 @@ async function openFeatureFlagsAdmin() {
     {key:'sch_confirm',   label:'  컨펌 대기 목록', desc:'운영팀 컨펌 대기'},
     {key:'attendance',    label:'  근태 마감 현황', desc:'인사팀 근태 확인'},
     {key:'leave_settings',label:'  휴무 기준 설정', desc:'휴무 일수 기준'},
-    {key:'annual_leave',  label:'  연차 관리',      desc:'연차잔여 표시·연차/반차 입력 (숨기면 스케줄·인원현황에서 연차 관련 숨김)'}
+    {key:'annual_leave',  label:'  연차 관리',      desc:'연차잔여 표시·연차/반차 입력 (숨기면 스케줄·인원현황에서 연차 관련 숨김)'},
+    {key:'sec_inventory', label:'── 매장 재고 ──', desc:'섹션 전체', isSection:true},
+    {key:'inventory',     label:'  매장 재고 관리', desc:'전 직원 폐기/이관/월말 실사 (개발·검수 중 — 기본 숨김)'}
   ];
   // 사용 설명서는 항상 표시 (Feature Flags 대상 아님)
   // 숨겨진 기능의 매뉴얼 내용은 manual_sections에서 자동 필터

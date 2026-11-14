@@ -36,7 +36,9 @@
   IM.modal = modal;
 
   /* ───────── 권한 / 매장 스코프 ───────── */
-  function cu() { return window.currentUser || {}; }
+  // currentUser 는 index.html 의 전역 let(바인딩 공유). window.currentUser 는 미부착이라 직접 참조.
+  function curUser() { try { if (typeof currentUser !== 'undefined' && currentUser) return currentUser; } catch (e) {} return window.currentUser || null; }
+  function cu() { return curUser() || {}; }
   function isHQ() { const u = cu(); return !!(u.is_master || u.is_vice_master || u.role === 'admin' || u.role === 'dept' || u.store === '본사'); }
   function isPriv() { const u = cu(); return !!(u.is_master || u.is_vice_master || u.position === '매니저' || u.position === '매니저B' || isHQ()); }
   function myStores() {
@@ -51,8 +53,12 @@
   IM.state = { tab: 'loss', store: '', ym: (new Date()).toISOString().slice(0, 7) };
   function ensureStore() { const sts = myStores(); if (!IM.state.store || sts.indexOf(IM.state.store) === -1) IM.state.store = sts.length ? sts[0] : ''; }
 
-  IM.canAccess = function () { return !!window.currentUser; };
-  IM.navVisible = function () { return !!window.currentUser; };
+  IM.canAccess = function () { return !!curUser(); };
+  IM.navVisible = function () {
+    if (!curUser()) return false;
+    try { if (typeof isFeatureEnabled === 'function') return isFeatureEnabled('inventory'); } catch (e) {}
+    return true;
+  };
   IM.applyNav = function () { const el = document.getElementById('nav-inventory'); if (el) el.style.display = IM.navVisible() ? '' : 'none'; };
 
   /* ───────── 메인 렌더 ───────── */
@@ -329,7 +335,7 @@
     try { IM.pushSend({ mode: 'inventory_reminders', ym: (new Date()).toISOString().slice(0, 7) }); } catch (e) {}
   };
   (function waitUser(n) {
-    if (window.currentUser && sbc()) { IM.boot(); }
+    if (curUser() && sbc()) { IM.boot(); }
     else if (n < 60) { setTimeout(function () { waitUser(n + 1); }, 250); }
   })(0);
   IM.remount = function () { try { IM.boot(); } catch (e) {} };
