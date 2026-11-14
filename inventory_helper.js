@@ -304,6 +304,7 @@
       + '<button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.cntLookup()"><i class="ti ti-search"></i> 조회</button>'
       + '<span style="margin-left:auto;display:flex;gap:6px">'
       + (priv ? '<label class="btn-cancel-sm" style="font-size:12px;cursor:pointer"><i class="ti ti-file-invoice"></i> 거래명세서 업로드<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="InventoryMgr.openDelivery(this.files[0])"></label>' : '')
+      + (priv ? '<button class="btn-cancel-sm" style="font-size:12px;color:#B45309;border-color:#FCD34D" onclick="InventoryMgr.openPriceChanges()"><i class="ti ti-arrows-up-down"></i> 단가 변동 내역</button>' : '')
       + '<button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.cntNewItem()"><i class="ti ti-plus"></i> 신규 품목 등록 요청</button></span></div>';
     const anom = r => { if (!priv || r.count_qty === '' || r.count_qty == null) return ''; const base = Number(r.opening_qty || 0) + Number(r.in_qty || 0); if (base < Number(r.count_qty)) return 'background:#FEF2F2'; if (Number(r.in_qty || 0) > 0 && Number(r.count_qty) === 0) return 'background:#FFFBEB'; return ''; };
     const fv = c.fVendor, fc = c.fCat, fs = (c.fSearch || '').toLowerCase();
@@ -534,6 +535,7 @@
       + '<button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.downloadBackdataTemplate()"><i class="ti ti-file-download"></i> 백데이터 양식</button>'
       + '<label class="btn-cancel-sm" style="font-size:12px;cursor:pointer"><i class="ti ti-upload"></i> 백데이터 업로드<input type="file" accept=".xlsx,.xls" style="display:none" onchange="InventoryMgr.uploadBackdata(this.files[0])"></label>'
       + (bundleCan ? '<button class="btn-cancel-sm" style="font-size:12px;color:#6D28D9;border-color:#DDD6FE" onclick="InventoryMgr.openBundle()"><i class="ti ti-packages"></i> 품목 꾸러미</button>' : '')
+      + '<button class="btn-cancel-sm" style="font-size:12px;color:#0F766E;border-color:#99F6E4" onclick="InventoryMgr.openSettlement()"><i class="ti ti-cash-banknote"></i> 정산·이체 리스트</button>'
       + '</div>'
       + '<table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:6px 8px;text-align:left">매장</th><th style="padding:6px 8px;text-align:left">상태</th><th style="padding:6px 8px;text-align:left">제출/확정 일시</th><th style="padding:6px 8px;text-align:center">반려</th></tr></thead><tbody>' + (rows || '<tr><td colspan="4" style="padding:14px;text-align:center;color:var(--th)">매장 없음</td></tr>') + '</tbody></table>';
   };
@@ -763,6 +765,96 @@
   IM.bundleAccessSet = async function (uid, grant) {
     try { await rpc('ch_bundle_access_set', { p_user_id: uid, p_grant: grant }); toast(grant ? '권한 부여' : '권한 해제'); IM.openBundleAccess(); } catch (e) { alert('오류: ' + (e.message || e)); }
   };
+  /* ───────── 거래처 첨부파일(통장사본/사업자등록증) 서명 URL 열기 ───────── */
+  IM.openVendorFile = async function (path) {
+    if (!path) { alert('등록된 파일이 없습니다.'); return; }
+    try {
+      const { data, error } = await sbc().storage.from('closing-statements').createSignedUrl(path, 120);
+      if (error || !data) { alert('파일을 열 수 없습니다.'); return; }
+      window.open(data.signedUrl, '_blank');
+    } catch (e) { alert('파일 열기 오류: ' + (e.message || e)); }
+  };
+
+  /* ───────── 본사: 월말 거래처 정산·이체 리스트 ───────── */
+  IM.openSettlement = async function () {
+    if (!isHQ()) return;
+    let list = [];
+    try { list = await rpc('ch_vendor_settlement', { p_ym: IM.state.ym }) || []; }
+    catch (e) {
+      if (e.missing) { alert('보안 SQL(closing_module9.sql)을 먼저 실행해 주세요.'); return; }
+      if (/ACCESS_DENIED/.test(e.message || '')) { alert('본사 관리자만 조회할 수 있습니다.'); return; }
+      alert('오류: ' + (e.message || e)); return;
+    }
+    window.__settle = list; window.__settleDay = '';
+    IM._settleRender();
+  };
+  IM._settleRender = function () {
+    const all = window.__settle || [], fday = window.__settleDay || '';
+    const days = Array.from(new Set(all.map(v => v.settle_day).filter(Boolean)));
+    const rows = all.filter(v => (v.amount || 0) > 0 && (!fday || (v.settle_day || '') === fday));
+    const totalAmt = rows.reduce((s, v) => s + Number(v.amount || 0), 0);
+    const dayBtns = '<button class="btn-cancel-sm" style="font-size:11px;padding:3px 9px' + (fday === '' ? ';background:#0F766E;color:#fff' : '') + '" onclick="InventoryMgr.settleFilter(\'\')">전체</button>'
+      + days.map(d => '<button class="btn-cancel-sm" style="font-size:11px;padding:3px 9px' + (fday === d ? ';background:#0F766E;color:#fff' : '') + '" onclick="InventoryMgr.settleFilter(\'' + esc(d).replace(/'/g, "\\'") + '\')">' + esc(d) + (/^\d+$/.test(d) ? '일' : '') + '</button>').join('');
+    const tr = rows.map(v => '<tr>'
+      + '<td style="padding:5px 7px;border-bottom:0.5px solid var(--crm,#eee);font-weight:600">' + esc(v.vendor || v.slug) + (v.settle_day ? ' <span style="font-size:10px;color:#0F766E">(' + esc(v.settle_day) + (/^\d+$/.test(v.settle_day) ? '일' : '') + ')</span>' : '') + '</td>'
+      + '<td style="padding:5px 7px;border-bottom:0.5px solid var(--crm,#eee);font-size:11px;color:var(--th)">' + (v.settle_bank ? esc(v.settle_bank) + ' ' : '') + esc(v.settle_acct || '-') + '</td>'
+      + '<td style="padding:5px 7px;border-bottom:0.5px solid var(--crm,#eee);text-align:right;font-weight:700">' + won(v.amount) + '원</td>'
+      + '<td style="padding:5px 7px;border-bottom:0.5px solid var(--crm,#eee);text-align:center;white-space:nowrap">'
+      + (v.bankbook_file ? '<button class="btn-cancel-sm" style="font-size:10px;padding:2px 6px" onclick="InventoryMgr.openVendorFile(\'' + esc(v.bankbook_file).replace(/'/g, "\\'") + '\')">통장</button> ' : '')
+      + (v.biz_file ? '<button class="btn-cancel-sm" style="font-size:10px;padding:2px 6px" onclick="InventoryMgr.openVendorFile(\'' + esc(v.biz_file).replace(/'/g, "\\'") + '\')">사업자</button>' : '')
+      + '</td></tr>').join('');
+    modal(IM.state.ym + ' 거래처 정산·이체 리스트',
+      '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;align-items:center"><span style="font-size:11px;font-weight:700;color:var(--th)">정산시점</span>' + dayBtns
+      + '<button class="btn-submit" style="font-size:11px;padding:3px 10px;margin-left:auto" onclick="InventoryMgr.exportSettlement()"><i class="ti ti-file-spreadsheet"></i> 엑셀</button></div>'
+      + '<div style="font-size:12px;color:var(--th);margin-bottom:6px">대상 ' + rows.length + '개 거래처 · 합계 <b style="color:#0F766E">' + won(totalAmt) + '원</b> <span style="color:var(--th)">(금액 = 당월 입고량 × 공급가)</span></div>'
+      + '<div style="max-height:56vh;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:6px 7px;text-align:left">거래처</th><th style="padding:6px 7px;text-align:left">정산 계좌</th><th style="padding:6px 7px;text-align:right">당월 매입액</th><th style="padding:6px 7px;text-align:center">서류</th></tr></thead><tbody>' + (tr || '<tr><td colspan="4" style="padding:14px;text-align:center;color:var(--th)">당월 매입 내역이 있는 거래처가 없습니다.</td></tr>') + '</tbody></table></div>',
+      '닫기', function () { return true; });
+  };
+  IM.settleFilter = function (d) { window.__settleDay = d; IM._settleRender(); };
+  IM.exportSettlement = function () {
+    if (typeof XLSX === 'undefined') { alert('엑셀 라이브러리 로딩 중입니다.'); return; }
+    const all = window.__settle || [], fday = window.__settleDay || '';
+    const rows = all.filter(v => (v.amount || 0) > 0 && (!fday || (v.settle_day || '') === fday));
+    const aoa = [['거래처', '정산시점', '은행', '계좌번호', '사업자번호', '담당자', '연락처', '매장수', '품목수', '당월 매입액']];
+    rows.forEach(v => aoa.push([v.vendor || v.slug, v.settle_day || '', v.settle_bank || '', v.settle_acct || '', v.biz_no || '', v.mgr_name || '', v.mgr_phone || '', v.store_cnt || 0, v.item_cnt || 0, Math.round(Number(v.amount || 0))]));
+    aoa.push(['합계', '', '', '', '', '', '', '', '', rows.reduce((s, v) => s + Math.round(Number(v.amount || 0)), 0)]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), '정산이체');
+    XLSX.writeFile(wb, '거래처_정산이체_' + IM.state.ym + (fday ? '_' + fday : '') + '.xlsx');
+  };
+
+  /* ───────── 단가 변동(인상·인하) 대시보드 — 매니저/본사 ───────── */
+  IM.openPriceChanges = async function () {
+    let d = {};
+    try { d = await rpc('ch_price_changes', {}) || {}; }
+    catch (e) {
+      if (e.missing) { alert('보안 SQL(closing_module9.sql)을 먼저 실행해 주세요.'); return; }
+      if (/ACCESS_DENIED/.test(e.message || '')) { alert('매니저·본사만 조회할 수 있습니다.'); return; }
+      alert('오류: ' + (e.message || e)); return;
+    }
+    const isHq = !!d.is_hq, pend = d.pending || [], rec = d.recent || [];
+    const arrow = diff => diff > 0 ? '<span style="color:#B91C1C;font-weight:700">▲</span>' : '<span style="color:#1D4ED8;font-weight:700">▼</span>';
+    const diffTxt = (diff, rate) => (diff > 0 ? '+' : '') + won(diff) + '원 ' + arrow(diff) + (rate != null ? ' <span style="font-size:10px;color:var(--th)">(' + (rate > 0 ? '+' : '') + rate + '%)</span>' : '');
+    const pHtml = pend.map(c => '<div style="border:0.5px solid var(--crd);border-radius:8px;padding:8px 10px;margin-bottom:6px;background:#fff"><div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px"><b style="font-size:12px">' + esc(c.item) + '</b> <span style="font-size:10px;color:var(--th)">' + esc(c.vendor || '') + (c.spec ? ' / ' + esc(c.spec) : '') + '</span>'
+      + '<span style="margin-left:auto;font-size:10px;color:#B45309;background:#FEF3C7;border-radius:4px;padding:1px 6px">' + esc(c.source || '') + '</span></div>'
+      + '<div style="font-size:13px;margin-top:4px">' + won(c.base_price) + '원 → <b>' + won(c.new_price) + '원</b> · ' + diffTxt(c.diff, c.rate) + '</div>'
+      + (isHq ? '<div style="display:flex;gap:4px;margin-top:6px"><button class="btn-submit" style="font-size:10px;padding:3px 9px" onclick="InventoryMgr.priceApply(' + c.id + ')">기준단가로 갱신</button><button class="btn-cancel-sm" style="font-size:10px;padding:3px 9px" onclick="InventoryMgr.priceDismiss(' + c.id + ')">무시</button></div>' : '')
+      + '</div>').join('');
+    const rHtml = rec.map(c => '<div style="font-size:11px;color:var(--th);padding:3px 0;border-bottom:0.5px solid var(--crm,#eee)">' + esc(c.item) + ' <span style="color:var(--th)">' + esc(c.vendor || '') + '</span> — ' + won(c.base_price) + ' → ' + won(c.new_price) + ' ' + ((c.diff || 0) > 0 ? '▲' : '▼') + ' <span style="font-size:10px">' + esc(c.source || '') + '</span></div>').join('');
+    modal('단가 변동 내역' + (isHq ? ' (전사)' : ' (내 매장 품목)'),
+      '<div style="font-size:11px;color:var(--th);margin-bottom:8px">거래명세서 업로드 또는 품목 단가 수정으로 기준단가와 달라진 품목입니다.' + (isHq ? ' [기준단가로 갱신]을 누르면 품목 마스터 단가가 새 값으로 바뀝니다.' : ' (기준단가 갱신은 본사에서 처리합니다.)') + '</div>'
+      + '<div style="font-size:12px;font-weight:800;margin:4px 0 5px">미반영 변동 (' + pend.length + ')</div><div style="max-height:40vh;overflow:auto">' + (pHtml || '<div style="font-size:12px;color:var(--th);padding:8px">미반영 단가 변동이 없습니다.</div>') + '</div>'
+      + (rec.length ? '<div style="font-size:12px;font-weight:800;margin:12px 0 5px">최근 반영 이력 (30일)</div><div style="max-height:24vh;overflow:auto">' + rHtml + '</div>' : ''),
+      '닫기', function () { return true; });
+  };
+  IM.priceApply = async function (id) {
+    try { const r = await rpc('ch_price_apply', { p_id: id }); if (r && r.ok) toast('기준단가 갱신 완료'); else { alert('이미 처리된 항목입니다.'); } IM.openPriceChanges(); } catch (e) { alert('오류: ' + (e.message || e)); }
+  };
+  IM.priceDismiss = async function (id) {
+    if (!confirm('이 단가 변동을 무시할까요? (기준단가는 그대로 유지됩니다)')) return;
+    try { await rpc('ch_price_dismiss', { p_id: id }); toast('무시 처리'); IM.openPriceChanges(); } catch (e) { alert('오류: ' + (e.message || e)); }
+  };
+
   IM.downloadBackdataTemplate = function () {
     if (typeof XLSX === 'undefined') { alert('엑셀 라이브러리 로딩 중입니다.'); return; }
     const wb = XLSX.utils.book_new();
