@@ -740,7 +740,7 @@ table.g-tbl th{background:var(--crm);font-weight:700}
 const SUPABASE_URL = 'https://fhwiihbtlspeckmgnlax.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZod2lpaGJ0bHNwZWNrbWdubGF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MzQxMjcsImV4cCI6MjA5NjMxMDEyN30.izRHlmKaKLBSY78eSNMpyt-mGw0Whlt6XIAoNjp5Aqo';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-window.SUPABASE_URL = SUPABASE_URL; window.SUPABASE_KEY = SUPABASE_KEY;
+window.sb = sb; window.SUPABASE_URL = SUPABASE_URL; window.SUPABASE_KEY = SUPABASE_KEY;
 
 // ── PWA 홈화면 아이콘: 정적 파일(manifest.json + icon-192/512 + apple-touch-icon)로 일원화.
 //    과거에는 app_settings.logo_url 을 읽어 blob manifest 로 동적 교체했으나,
@@ -20732,7 +20732,7 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-<script src="closing_helper.js?v=2026111402"></script>
-<script src="inventory_helper.js?v=2026111402"></script>
+<script src="closing_helper.js?v=2026111403"></script>
+<script src="inventory_helper.js?v=2026111403"></script>
 </body>
 </html>

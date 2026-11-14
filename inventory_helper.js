@@ -11,7 +11,7 @@
   if (window.InventoryMgr) return;
   const IM = (window.InventoryMgr = {});
   const esc = (s) => (window.esc ? window.esc(s) : String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
-  const sbc = () => window.sb;
+  const sbc = () => window.sb || (typeof sb !== 'undefined' ? sb : null);
   const won = (n) => (Math.round(Number(n) || 0)).toLocaleString('ko-KR');
   const token = () => (typeof getSessionToken === 'function' ? getSessionToken() : (window.__sessionToken || null));
   const VAPID_PUBLIC = 'BIp3aHtVad0aurIhoZZyg22vPQPi4IjrKDSqjAIHnvEggZYObS_zK2Qw4UQAZ3U3-lvdoZFApxS6mU63fdImesY';
