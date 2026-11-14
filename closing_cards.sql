@@ -42,7 +42,7 @@ alter table store_card_master add column if not exists card_number_enc bytea;   
 alter table store_card_master add column if not exists expiry_enc      bytea;         -- 유효기간 MM/YY(암호화)
 alter table store_card_master add column if not exists cvc_enc         bytea;         -- CVC(암호화)
 alter table store_card_master add column if not exists card_pw_enc     bytea;         -- 결제 PIN(암호화)
-alter table store_card_master add column if not exists created_by      bigint;
+alter table store_card_master add column if not exists created_by      uuid;
 
 -- 4) closing_card_tx 컬럼 확장 (수시등록/자동대사) ───────────────────────────
 alter table closing_card_tx add column if not exists source          text default 'store';  -- store(매장수시) / accounting(회계엑셀)
@@ -52,7 +52,7 @@ alter table closing_card_tx add column if not exists evidence_path   text;      
 
 -- 5) 총괄 보안 PIN · 감사로그 테이블 ─────────────────────────────────────────
 create table if not exists admin_security_pin (
-  user_id      bigint primary key,
+  user_id      uuid primary key,
   pin_hash     text not null,                 -- crypt(pin, gen_salt('bf')) · 단방향
   fail_count   int default 0,
   locked_until timestamptz,
@@ -61,7 +61,7 @@ create table if not exists admin_security_pin (
 
 create table if not exists closing_card_audit_logs (
   id         bigint generated always as identity primary key,
-  user_id    bigint,
+  user_id    uuid,
   user_name  text,
   store      text,
   card_id    bigint,

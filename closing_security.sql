@@ -58,7 +58,7 @@ create table if not exists closing_orders (
   id bigint generated always as identity primary key,
   store text not null, ym text not null, category text not null,
   vendor text not null default '(미지정)', amount numeric default 0,
-  is_corp_card boolean default false, updated_by bigint, updated_at timestamptz default now(),
+  is_corp_card boolean default false, updated_by uuid, updated_at timestamptz default now(),
   unique (store, ym, category, vendor, is_corp_card)
 );
 create index if not exists idx_closing_orders_store on closing_orders (store, ym);
@@ -66,7 +66,7 @@ create index if not exists idx_closing_orders_store on closing_orders (store, ym
 create table if not exists closing_statements (
   id bigint generated always as identity primary key,
   ym text not null, vendor text not null, file_path text not null,
-  size_bytes bigint default 0, uploaded_by bigint, uploaded_at timestamptz default now(),
+  size_bytes bigint default 0, uploaded_by uuid, uploaded_at timestamptz default now(),
   unique (ym, vendor)
 );
 

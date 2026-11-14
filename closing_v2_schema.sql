@@ -42,7 +42,7 @@ $$ language sql security definer stable;
 create table if not exists closing_locks (
   ym         text primary key,              -- 귀속월 'YYYY-MM' (전사 잠금)
   locked     boolean default false,
-  locked_by  bigint,
+  locked_by  uuid,
   locked_at  timestamptz,
   note       text
 );
@@ -175,7 +175,7 @@ create table if not exists closing_card_tx (
   memo          text,                       -- 인원/목적
   status        text default 'pending',     -- pending/classified
   cancelled     boolean default false,      -- 취소 전표 여부
-  created_by    bigint, updated_at timestamptz default now(),
+  created_by    uuid, updated_at timestamptz default now(),
   import_key    text                        -- 중복 import 방지 키(옵션)
 );
 create index if not exists idx_card_tx_store_ym on closing_card_tx (store, ym);
@@ -228,7 +228,7 @@ create table if not exists closing_evidence (
   drive_link text,
   file_name  text,
   meta       jsonb default '{}'::jsonb,      -- {amount,date,ocr,warn:[...]}
-  uploaded_by bigint, uploaded_at timestamptz default now()
+  uploaded_by uuid, uploaded_at timestamptz default now()
 );
 create index if not exists idx_evidence_ref on closing_evidence (ref_type, ref_id);
 
@@ -264,7 +264,7 @@ create table if not exists closing_loss (
   store text not null, ym text not null, loss_date date,
   loss_cat text, vendor_slug text, item text, qty numeric(10,2) default 0,
   is_inventory_item boolean default true,    -- 재고 마스터 품목 여부(아니면 기타/비재고)
-  memo text, created_by bigint, created_at timestamptz default now()
+  memo text, created_by uuid, created_at timestamptz default now()
 );
 create index if not exists idx_loss_store_ym on closing_loss (store, ym);
 
@@ -274,7 +274,7 @@ create table if not exists closing_transfer (
   ym text not null, tr_date date,
   from_store text not null, to_store text not null,
   vendor_slug text, item text, qty numeric(10,2) default 0,
-  created_by bigint, created_at timestamptz default now()
+  created_by uuid, created_at timestamptz default now()
 );
 create index if not exists idx_transfer_ym on closing_transfer (ym);
 
@@ -288,7 +288,7 @@ create table if not exists closing_inventory (
   count_qty numeric(10,2),                    -- 실사 수량(팀원/매니저 입력)
   unit_price numeric(14,2),                   -- 매니저 확정 시 산정(블라인드엔 숨김)
   status text default 'draft',                -- draft/submitted/confirmed
-  counted_by bigint, confirmed_by bigint, updated_at timestamptz default now(),
+  counted_by uuid, confirmed_by uuid, updated_at timestamptz default now(),
   unique (store, ym, vendor_slug, item)
 );
 create index if not exists idx_inv_store_ym on closing_inventory (store, ym);

@@ -18,7 +18,7 @@ create table if not exists closing_seasons (
   inv_start  timestamptz,                   -- 실사 입력 시작일시
   inv_end    timestamptz,                   -- 실사 입력 마감일시
   note       text,
-  set_by     bigint,
+  set_by     uuid,
   updated_at timestamptz default now()
 );
 
@@ -38,7 +38,7 @@ create table if not exists closing_inv_status (
 -- 3) 웹푸시 구독(기기별) ─────────────────────────────────────────────────────
 create table if not exists push_subscriptions (
   id         bigint generated always as identity primary key,
-  user_id    bigint not null,
+  user_id    uuid not null,
   store      text,
   endpoint   text not null unique,
   p256dh     text not null,
