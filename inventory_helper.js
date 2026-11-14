@@ -456,14 +456,16 @@
       + '</tr>').join('');
     modal('거래명세서 입고 반영 (' + rows.length + '건)',
       '<div style="font-size:12px;color:var(--th);margin-bottom:6px">슬래시(/) 복합 표기를 자동 분리했습니다. 필요 시 수정하세요.' + (hq ? ' "기억" 체크 시 다음 업로드부터 자동 적용됩니다.' : '') + ' 원본 파일은 저장하지 않습니다.</div>'
+      + '<div style="font-size:12px;margin-bottom:8px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;background:var(--cr,#faf7f2);padding:7px 10px;border-radius:8px"><b style="font-size:11px">반영 방식:</b><label><input type="radio" name="delivMode" value="add" checked> 기존 입고량에 합산 (추가 업로드용)</label><label><input type="radio" name="delivMode" value="set"> 기존 입고량 덮어쓰기 (재업로드용)</label></div>'
       + '<div style="max-height:46vh;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:4px">품명</th><th style="padding:4px">규격</th><th style="padding:4px">공급사</th><th style="padding:4px">구분</th><th style="padding:4px">원산지</th><th style="padding:4px">입고량</th>' + (hq ? '<th style="padding:4px">기억</th>' : '') + '</tr></thead><tbody>' + trs + '</tbody></table></div>'
       + '<button class="btn-submit" style="font-size:13px;margin-top:10px;width:100%" onclick="InventoryMgr.ingestDelivery()"><i class="ti ti-check"></i> 입고 반영 (실사 리스트 연동)</button>', '닫기', function () { return true; });
   };
   IM.delivInput = function (i, f, v) { if (window.__delivRows && window.__delivRows[i]) window.__delivRows[i][f] = v; };
   IM.ingestDelivery = async function () {
     const rows = window.__delivRows || []; if (!rows.length) return;
-    let res; try { res = await rpc('ch_delivery_ingest', { p_store: IM.state.store, p_ym: IM.state.ym, p_rows: rows }); }
-    catch (e) { alert('오류: ' + (e.missing ? '보안 SQL 미실행 (closing_module7.sql)' : (/MONTH_LOCKED/.test(e.message || '') ? '월마감 잠금' : (/ACCESS_DENIED/.test(e.message || '') ? '매니저/본사만 가능' : e.message)))); return; }
+    const mode = (document.querySelector('input[name=delivMode]:checked') || {}).value || 'add';
+    let res; try { res = await rpc('ch_delivery_ingest', { p_store: IM.state.store, p_ym: IM.state.ym, p_rows: rows, p_mode: mode }); }
+    catch (e) { alert('오류: ' + (e.missing ? '보안 SQL 미실행 (closing_module8.sql)' : (/MONTH_LOCKED/.test(e.message || '') ? '월마감 잠금' : (/ACCESS_DENIED/.test(e.message || '') ? '매니저/본사만 가능' : e.message)))); return; }
     IM.mergeDelivery(res.items || []);
     const mm = document.getElementById('imModal'); if (mm) mm.remove();
     toast('입고 반영 완료 — ' + res.rows + '건 (실사 입고량 자동 연동)');
@@ -520,6 +522,7 @@
     const stores = d.stores || [];
     const done = stores.filter(s => s.status === 'confirmed').length;
     let pendN = 0; try { pendN = (await rpc('ch_item_pending', {}) || []).length; } catch (e) {}
+    let bundleCan = false; try { const bc = await rpc('ch_bundle_can', {}); bundleCan = !!(bc && bc.can); } catch (e) {}
     const dt = t => t ? String(t).replace('T', ' ').slice(0, 16) : '-';
     const rows = stores.map(s => '<tr><td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);font-weight:600">' + esc(s.store) + '</td><td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + (SB[s.status] || SB.none) + (s.reject_note ? ' <span style="font-size:11px;color:#B91C1C">(' + esc(s.reject_note) + ')</span>' : '') + '</td><td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);font-size:11px;color:var(--th);white-space:nowrap">' + dt(s.confirmed_at || s.submitted_at) + '</td><td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">' + (s.status === 'confirmed' ? '' : '<button class="btn-cancel-sm" style="font-size:11px;padding:2px 8px" onclick="InventoryMgr.rejectStore(\'' + esc(s.store).replace(/'/g, "\\'") + '\')">보완요청</button>') + '</td></tr>').join('');
     b.innerHTML =
@@ -529,7 +532,9 @@
       + '<button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.openItemMaster()"><i class="ti ti-list-details"></i> 품목 마스터</button>'
       + '<button class="btn-cancel-sm" style="font-size:12px' + (pendN ? ';color:#B45309;border-color:#FCD34D' : '') + '" onclick="InventoryMgr.openPending()"><i class="ti ti-inbox"></i> 신규 분류대기' + (pendN ? ' (' + pendN + ')' : '') + '</button>'
       + '<button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.downloadBackdataTemplate()"><i class="ti ti-file-download"></i> 백데이터 양식</button>'
-      + '<label class="btn-cancel-sm" style="font-size:12px;cursor:pointer"><i class="ti ti-upload"></i> 백데이터 업로드<input type="file" accept=".xlsx,.xls" style="display:none" onchange="InventoryMgr.uploadBackdata(this.files[0])"></label></div>'
+      + '<label class="btn-cancel-sm" style="font-size:12px;cursor:pointer"><i class="ti ti-upload"></i> 백데이터 업로드<input type="file" accept=".xlsx,.xls" style="display:none" onchange="InventoryMgr.uploadBackdata(this.files[0])"></label>'
+      + (bundleCan ? '<button class="btn-cancel-sm" style="font-size:12px;color:#6D28D9;border-color:#DDD6FE" onclick="InventoryMgr.openBundle()"><i class="ti ti-packages"></i> 품목 꾸러미</button>' : '')
+      + '</div>'
       + '<table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:6px 8px;text-align:left">매장</th><th style="padding:6px 8px;text-align:left">상태</th><th style="padding:6px 8px;text-align:left">제출/확정 일시</th><th style="padding:6px 8px;text-align:center">반려</th></tr></thead><tbody>' + (rows || '<tr><td colspan="4" style="padding:14px;text-align:center;color:var(--th)">매장 없음</td></tr>') + '</tbody></table>';
   };
   IM.rejectStore = async function (store) {
@@ -659,6 +664,104 @@
   IM.rejectItem = function (id) {
     if (!confirm('이 신규 품목 요청을 반려(삭제)할까요?')) return;
     rpc('ch_item_reject', { p_id: id }).then(() => { toast('반려 완료'); IM.openPending(); }).catch(e => alert('오류: ' + (e.message || e)));
+  };
+  /* ───────── 본사(+예외권한): 품목 꾸러미 (사입 동일품목 그룹핑) ───────── */
+  const won2 = n => (n == null ? '-' : won(n) + '원');
+  IM.openBundle = async function () {
+    let cans = [], bundles = [];
+    try { cans = await rpc('ch_bundle_candidates', {}) || []; }
+    catch (e) {
+      if (e.missing) { alert('보안 SQL(closing_module8.sql)을 먼저 실행해 주세요.'); return; }
+      if (/ACCESS_DENIED/.test(e.message || '')) { alert('품목 꾸러미 접근 권한이 없습니다.'); return; }
+    }
+    try { bundles = await rpc('ch_bundle_list', {}) || []; } catch (e) {}
+    window.__bundleCand = cans;
+    const bHtml = bundles.map(b => {
+      const mem = (b.members || []).map(m => '<div style="font-size:11px;color:var(--th);padding:1px 0">· ' + esc(m.vendor || '') + ' · ' + esc(m.item) + (m.spec ? ' (' + esc(m.spec) + ')' : '') + ' — ' + won2(m.unit_price) + ' / 입고 ' + (m.in_qty || 0) + '</div>').join('');
+      return '<div style="border:0.5px solid var(--crd);border-radius:8px;padding:8px 10px;margin-bottom:6px;background:#fff"><div style="display:flex;align-items:center;margin-bottom:3px"><b style="font-size:12px">' + esc(b.std_item || b.name || '꾸러미') + (b.std_spec ? ' / ' + esc(b.std_spec) : '') + '</b><button class="btn-cancel-sm" style="margin-left:auto;font-size:10px;padding:2px 7px;color:#B91C1C;border-color:#FCA5A5" onclick="InventoryMgr.bundleDel(' + b.id + ')">해제</button></div>' + mem + '<div style="font-size:12px;margin-top:5px;color:#15803D;font-weight:700">단순평균 ' + won2(b.simple_avg) + ' · 입고량 가중평균 ' + won2(b.weighted_avg) + '</div></div>';
+    }).join('');
+    const cHtml = cans.map((g, i) => '<div style="border:0.5px dashed #FBBF24;border-radius:8px;padding:8px 10px;margin-bottom:6px;background:#FFFBEB"><div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px"><b style="font-size:12px">' + esc(g.item) + (g.spec ? ' / ' + esc(g.spec) : '') + '</b> <span style="font-size:10px;color:#B45309">(' + g.cnt + '개 거래처)</span><span style="margin-left:auto;display:flex;gap:4px"><button class="btn-submit" style="font-size:10px;padding:3px 9px" onclick="InventoryMgr.bundleApprove(' + i + ')">승인(묶기)</button><button class="btn-cancel-sm" style="font-size:10px;padding:3px 9px" onclick="InventoryMgr.bundleReject(' + i + ')">반려</button></span></div>' + (g.members || []).map(m => '<div style="font-size:11px;color:var(--th);padding:1px 0">· ' + esc(m.vendor || '') + ' — ' + won2(m.unit_price) + '</div>').join('') + '</div>').join('');
+    const masterBtn = cu().is_master ? '<button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.openBundleAccess()"><i class="ti ti-key"></i> 접근 권한 관리</button>' : '';
+    modal('품목 꾸러미 · 사입 동일품목 그룹핑',
+      '<div style="font-size:11px;color:var(--th);margin-bottom:8px">여러 거래처에서 들여오는 동일 원재료를 하나로 묶어 거래처별 공급가와 평균 단가(제조원가 기준)를 산출합니다. 사입 품목만 대상입니다.</div>'
+      + '<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap"><button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.bundleManual()"><i class="ti ti-plus"></i> 수동 묶기</button>' + masterBtn + '</div>'
+      + '<div style="font-size:12px;font-weight:800;margin:4px 0 5px">자동 후보 제안 (' + cans.length + ')</div><div style="max-height:30vh;overflow:auto">' + (cHtml || '<div style="font-size:12px;color:var(--th);padding:8px">제안할 동일품목 후보가 없습니다.</div>') + '</div>'
+      + '<div style="font-size:12px;font-weight:800;margin:12px 0 5px">등록된 꾸러미 (' + bundles.length + ')</div><div style="max-height:32vh;overflow:auto">' + (bHtml || '<div style="font-size:12px;color:var(--th);padding:8px">등록된 꾸러미가 없습니다.</div>') + '</div>',
+      '닫기', function () { return true; });
+  };
+  IM.bundleApprove = function (i) {
+    const g = (window.__bundleCand || [])[i]; if (!g) return;
+    modal('꾸러미 승인 · ' + esc(g.item),
+      '<div style="font-size:12px;color:var(--th);margin-bottom:8px">아래 거래처 품목을 하나의 표준 꾸러미로 통합합니다.</div>'
+      + '<label style="font-size:11px;font-weight:700">표준 품명</label><input id="bkItem" class="form-input" value="' + esc(g.item) + '" style="margin:3px 0 8px">'
+      + '<label style="font-size:11px;font-weight:700">표준 규격</label><input id="bkSpec" class="form-input" value="' + esc(g.spec || '') + '" style="margin:3px 0 8px">'
+      + '<div style="font-size:11px;color:var(--th);background:var(--cr,#faf7f2);border-radius:6px;padding:7px 9px">' + (g.members || []).map(m => '· ' + esc(m.vendor || '') + ' (' + won2(m.unit_price) + ')').join('<br>') + '</div>',
+      '승인(묶기)', async function () {
+        try { await rpc('ch_bundle_create', { p_name: null, p_std_item: (document.getElementById('bkItem').value || '').trim(), p_std_spec: (document.getElementById('bkSpec').value || '').trim() || null, p_member_ids: (g.members || []).map(m => m.id) }); }
+        catch (e) { alert('오류: ' + (e.message || e)); return false; }
+        toast('꾸러미 승인 완료'); IM.openBundle(); return true;
+      });
+  };
+  IM.bundleReject = async function (i) {
+    const g = (window.__bundleCand || [])[i]; if (!g) return;
+    if (!confirm("'" + g.item + "' 를 일치하지 않는 품목으로 반려하면 다시 제안되지 않습니다. 계속할까요?")) return;
+    try { await rpc('ch_bundle_reject', { p_sig: g.sig }); toast('반려 완료'); IM.openBundle(); } catch (e) { alert('오류: ' + (e.message || e)); }
+  };
+  IM.bundleDel = async function (id) {
+    if (!confirm('이 꾸러미를 해제할까요? (개별 품목으로 되돌아갑니다)')) return;
+    try { await rpc('ch_bundle_del', { p_id: id }); toast('해제 완료'); IM.openBundle(); } catch (e) { alert('오류: ' + (e.message || e)); }
+  };
+  IM.bundleManual = function () {
+    window.__bmPicks = [];
+    modal('수동 묶기 · 사입 품목 검색',
+      '<input id="bmKw" class="form-input" placeholder="품명으로 검색" oninput="InventoryMgr.bmSearch(this.value)" style="margin-bottom:6px">'
+      + '<div id="bmResult" style="max-height:28vh;overflow:auto"></div>'
+      + '<div style="font-size:12px;font-weight:800;margin-top:10px">선택됨 (<span id="bmCount">0</span>)</div><div id="bmPicked" style="max-height:16vh;overflow:auto;margin-top:3px"></div>'
+      + '<label style="font-size:11px;font-weight:700;display:block;margin-top:8px">표준 품명</label><input id="bmItem" class="form-input" style="margin-top:3px">'
+      + '<button class="btn-submit" style="font-size:13px;margin-top:10px;width:100%" onclick="InventoryMgr.bmCreate()">꾸러미 생성</button>',
+      '닫기', function () { return true; });
+    IM.bmSearch('');
+  };
+  IM.bmSearch = async function (kw) {
+    const box = document.getElementById('bmResult'); if (!box) return;
+    let list = []; try { list = await rpc('ch_bundle_search', { p_kw: kw || '' }) || []; } catch (e) {}
+    window.__bmList = list;
+    box.innerHTML = list.length ? list.map((m, i) => '<div onclick="InventoryMgr.bmPick(' + i + ')" style="padding:6px 8px;border:0.5px solid var(--crd);border-radius:6px;margin-bottom:3px;cursor:pointer;font-size:12px">' + esc(m.vendor || '') + ' · ' + esc(m.item) + (m.spec ? ' (' + esc(m.spec) + ')' : '') + (m.unit_price != null ? ' — ' + won(m.unit_price) + '원' : '') + '</div>').join('') : '<div style="font-size:12px;color:var(--th);padding:8px">검색 결과 없음(미묶음 사입 품목만 표시)</div>';
+  };
+  IM.bmPick = function (i) {
+    const m = (window.__bmList || [])[i]; if (!m) return;
+    if ((window.__bmPicks || []).some(x => x.id === m.id)) return;
+    window.__bmPicks.push(m); IM.bmRenderPicked();
+    const it = document.getElementById('bmItem'); if (it && !it.value) it.value = m.item;
+  };
+  IM.bmRenderPicked = function () {
+    const el = document.getElementById('bmPicked'), c = document.getElementById('bmCount'), p = window.__bmPicks || [];
+    if (c) c.textContent = p.length;
+    if (el) el.innerHTML = p.map((m, i) => '<div style="font-size:11px;padding:2px 0">· ' + esc(m.vendor || '') + ' ' + esc(m.item) + ' <span onclick="InventoryMgr.bmUnpick(' + i + ')" style="color:#B91C1C;cursor:pointer;font-weight:700">✕</span></div>').join('');
+  };
+  IM.bmUnpick = function (i) { (window.__bmPicks || []).splice(i, 1); IM.bmRenderPicked(); };
+  IM.bmCreate = async function () {
+    const p = window.__bmPicks || []; if (p.length < 2) { alert('2개 이상 선택하세요.'); return; }
+    const item = (document.getElementById('bmItem').value || '').trim();
+    try { await rpc('ch_bundle_create', { p_name: null, p_std_item: item || p[0].item, p_std_spec: p[0].spec || null, p_member_ids: p.map(m => m.id) }); }
+    catch (e) { alert('오류: ' + (e.message || e)); return; }
+    const mm = document.getElementById('imModal'); if (mm) mm.remove();
+    toast('꾸러미 생성 완료'); IM.openBundle();
+  };
+  IM.openBundleAccess = async function () {
+    if (!cu().is_master) return;
+    let granted = [], users = [];
+    try { granted = await rpc('ch_bundle_access_list', {}) || []; } catch (e) {}
+    try { users = await rpc('ch_bundle_users', {}) || []; } catch (e) {}
+    const gset = {}; granted.forEach(g => { gset[g.user_id] = true; });
+    const rows = users.map(u => '<tr><td style="padding:4px 6px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(u.name) + ' <span style="font-size:10px;color:var(--th)">' + esc(u.store || '') + (u.position ? ' / ' + esc(u.position) : '') + '</span></td><td style="padding:4px 6px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">' + (gset[u.id] ? '<button class="btn-cancel-sm" style="font-size:10px;padding:2px 9px;color:#B91C1C;border-color:#FCA5A5" onclick="InventoryMgr.bundleAccessSet(\'' + u.id + '\',false)">해제</button>' : '<button class="btn-submit" style="font-size:10px;padding:2px 9px" onclick="InventoryMgr.bundleAccessSet(\'' + u.id + '\',true)">부여</button>') + '</td></tr>').join('');
+    modal('꾸러미 접근 권한 관리',
+      '<div style="font-size:12px;color:var(--th);margin-bottom:8px">총괄(본사)은 기본 접근됩니다. 아래에서 계정별 예외 권한을 부여/해제하세요.</div>'
+      + '<div style="max-height:54vh;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>' + (rows || '<tr><td style="padding:12px;text-align:center;color:var(--th)">직원이 없습니다</td></tr>') + '</tbody></table></div>',
+      '닫기', function () { return true; });
+  };
+  IM.bundleAccessSet = async function (uid, grant) {
+    try { await rpc('ch_bundle_access_set', { p_user_id: uid, p_grant: grant }); toast(grant ? '권한 부여' : '권한 해제'); IM.openBundleAccess(); } catch (e) { alert('오류: ' + (e.message || e)); }
   };
   IM.downloadBackdataTemplate = function () {
     if (typeof XLSX === 'undefined') { alert('엑셀 라이브러리 로딩 중입니다.'); return; }
