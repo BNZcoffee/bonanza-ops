@@ -496,7 +496,8 @@
     const pinWarn = (master && !pin.set) ? '<div style="font-size:12px;background:#FEF3C7;color:#92400E;border-radius:8px;padding:8px 12px;margin-bottom:10px"><i class="ti ti-alert-triangle"></i> 보안 PIN 미설정 — 민감정보 열람/수정 전에 [보안 PIN 설정]을 먼저 완료하세요.</div>' : '';
     const head = '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
       + '<span style="font-size:14px;font-weight:800"><i class="ti ti-credit-card"></i> 법인카드 마스터 <span style="font-size:11px;color:var(--th)">(' + cards.length + '매장)</span></span>'
-      + '<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">' + pinBtn + auditBtn
+      + '<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">'
+      + '<button class="btn-cancel-sm" style="font-size:12px;color:#8a5a2b" onclick="window.OpsGuide&&OpsGuide.open(\'card\')"><i class="ti ti-book"></i> 작성 가이드</button>' + pinBtn + auditBtn
       + '<button class="btn-cancel-sm" style="font-size:12px" onclick="ClosingHelper.exportAccountingExcel(\'all\')"><i class="ti ti-file-spreadsheet"></i> 회계 통합엑셀</button>'
       + '<button class="btn-submit" style="font-size:12px" onclick="ClosingHelper.openCardEdit(null)"><i class="ti ti-plus"></i> 카드 등록</button></span></div>';
     b.innerHTML = head + pinWarn + CH.cardTableHtml(cards) + CH.reconcileBoxHtml();

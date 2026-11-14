@@ -39,6 +39,65 @@
   // currentUser 는 index.html 의 전역 let(바인딩 공유). window.currentUser 는 미부착이라 직접 참조.
   function curUser() { try { if (typeof currentUser !== 'undefined' && currentUser) return currentUser; } catch (e) {} return window.currentUser || null; }
   function cu() { return curUser() || {}; }
+
+  /* ===================================================================
+   * 작성 가이드(공용) — 폐기/이관/실사/명세서/법인카드 Step 예시 팝업
+   *   window.OpsGuide.open('loss'|'transfer'|'count'|'delivery'|'card')
+   * =================================================================== */
+  (function () {
+    const G = {};
+    const fld = (label, val, hint) => '<div style="margin:5px 0"><div style="font-size:10px;color:var(--th);margin-bottom:2px">' + label + '</div><div style="border:1px solid var(--crd);border-radius:6px;padding:6px 9px;font-size:12px;background:#fff;color:#111">' + val + '</div>' + (hint ? '<div style="font-size:10px;color:#15803D;margin-top:2px">' + hint + '</div>' : '') + '</div>';
+    const sel = (label, val) => '<div style="margin:5px 0"><div style="font-size:10px;color:var(--th);margin-bottom:2px">' + label + '</div><div style="border:1px solid var(--crd);border-radius:6px;padding:6px 9px;font-size:12px;background:#fff;color:#111;display:flex;justify-content:space-between"><span>' + val + '</span><span style="color:var(--th)">▾</span></div></div>';
+    const radio = (opts, selIdx) => '<div style="display:flex;flex-direction:column;gap:4px;margin:5px 0">' + opts.map((o, i) => '<div style="border:1px solid ' + (i === selIdx ? '#8a5a2b' : 'var(--crd)') + ';border-radius:6px;padding:6px 9px;font-size:12px;background:' + (i === selIdx ? '#FAF5EF' : '#fff') + ';color:#111"><span style="color:' + (i === selIdx ? '#8a5a2b' : 'var(--th)') + '">' + (i === selIdx ? '◉' : '○') + '</span> ' + o + '</div>').join('') + '</div>';
+    const grid2 = inner => '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">' + inner + '</div>';
+    const step = (n, title, body) => '<div style="border:0.5px solid var(--crd);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--cr,#faf7f2)"><div style="display:flex;align-items:center;gap:6px;margin-bottom:7px"><span style="background:#8a5a2b;color:#fff;border-radius:999px;font-size:10px;font-weight:700;padding:2px 9px">STEP ' + n + '</span><b style="font-size:12.5px">' + title + '</b></div>' + body + '</div>';
+    const warn = t => '<div style="background:#FEF3C7;border:1px solid #FDE68A;border-radius:8px;padding:8px 11px;margin-bottom:10px;font-size:12px;color:#92400E;line-height:1.5"><b>⚠ 핵심 주의</b><br>' + t + '</div>';
+    const mock = inner => '<div style="border:0.5px dashed var(--crd);border-radius:8px;padding:8px 10px;background:#fff">' + inner + '</div>';
+
+    G.DATA = {
+      loss: { title: '폐기(Loss) 작성 가이드', html:
+        warn('폐기는 발생 즉시 그날 등록합니다. 월말에 몰아서 입력하면 원인 분석과 발주 조정이 어렵습니다.')
+        + step(1, '일자 / 분류 선택', mock(grid2(fld('일자', '2026-11-15') + sel('분류', '유통기한 경과'))) )
+        + step(2, '구분 / 품목 / 수량 입력', mock(grid2(sel('구분', '재고 마스터 품목') + fld('수량', '2')) + fld('품목명', '매일 생크림 1L', '재고 품목은 마스터명과 동일하게')) )
+        + step(3, '사유 메모 후 [등록]', mock(fld('사유 메모', '오픈 검수 중 유통기한 1일 경과 확인')) + '<div style="font-size:11px;color:var(--th);margin-top:6px">재고 마스터 품목은 품목별로 자동 합산되고, 기타/비재고는 별도 누적됩니다.</div>') },
+      transfer: { title: '타매장 이관 작성 가이드', html:
+        warn('이관은 보내는 매장에서만 등록합니다. 받는 매장은 알림만 받으며 중복 등록하면 수량이 이중 반영됩니다.')
+        + step(1, '받는 매장 선택', mock(sel('받는 매장', '성수점')) )
+        + step(2, '품목 / 수량 입력', mock(grid2(fld('품목명', '에스프레소 원두 1kg') + fld('수량', '3'))) )
+        + step(3, '메모 후 [이관 등록]', mock(fld('메모(선택)', '주말 물량 부족분 지원')) + '<div style="font-size:11px;color:var(--th);margin-top:6px">등록 즉시 양쪽 매장 재고에 반영되고, 받는 매장에 슬랙/푸시 알림이 갑니다.</div>') },
+      count: { title: '월말 실사 작성 가이드', html:
+        warn('본사 취합 기간에만 열립니다. 품목은 자동으로 떠 있으니 수량 칸에 숫자만 정확히 입력하세요. 팀원/PT는 실사수량만, 매니저는 단가까지 검수합니다.')
+        + step(1, '품목 확인 / 필터', mock('<div style="display:flex;gap:4px;flex-wrap:wrap"><span style="border:1px solid var(--crd);border-radius:6px;padding:4px 8px;font-size:11px;background:#fff;color:#111">구분 전체 ▾</span><span style="border:1px solid var(--crd);border-radius:6px;padding:4px 8px;font-size:11px;background:#fff;color:#111">공급사 전체 ▾</span><span style="border:1px solid var(--crd);border-radius:6px;padding:4px 8px;font-size:11px;background:#fff;color:#111">품목명 🔍 조회</span></div>') )
+        + step(2, '실사수량 입력', mock('<table style="width:100%;border-collapse:collapse;font-size:11px"><tr style="background:var(--cr,#faf7f2)"><th style="padding:4px;text-align:left">품명</th><th style="padding:4px">입고량</th><th style="padding:4px">실사수량</th></tr><tr><td style="padding:4px">매일 생크림 1L</td><td style="padding:4px;text-align:center;color:var(--th)">12</td><td style="padding:4px"><span style="border:1px solid #8a5a2b;border-radius:4px;padding:2px 10px;background:#fff;color:#111">9</span></td></tr></table>') )
+        + step(3, '[실사 제출] / 매니저 [최종 제출]', '<div style="font-size:11px;color:var(--th)">사용량이 마이너스거나 입고가 있는데 실사 0인 행은 자동으로 빨강/노랑 표시됩니다. 수정 후 제출하세요. 중간 저장은 자동(임시저장)됩니다.</div>') },
+      delivery: { title: '거래명세서 업로드 작성 가이드', html:
+        warn('엑셀(.xlsx) 또는 CSV만 올립니다. 원본 파일은 저장하지 않고 파싱 후 즉시 파기합니다.')
+        + step(1, '파일 선택 → 미리보기', mock('<div style="border:1px dashed var(--crd);border-radius:6px;padding:10px;text-align:center;font-size:11px;color:var(--th)">거래명세서.xlsx 선택됨 — 품목/수량/단가 자동 파싱</div>') )
+        + step(2, '합산 / 덮어쓰기 선택', mock(radio(['기존 입고량에 합산 (주간/반기 반복 업로드용)', '기존 입고량 덮어쓰기 (잘못 올려 재업로드)'], 0)) )
+        + step(3, '확인 후 [입고 반영]', mock('<table style="width:100%;border-collapse:collapse;font-size:11px"><tr style="background:var(--cr,#faf7f2)"><th style="padding:4px;text-align:left">품명</th><th style="padding:4px">수량</th><th style="padding:4px">단가</th></tr><tr><td style="padding:4px">매일 생크림 1L</td><td style="padding:4px;text-align:center">12</td><td style="padding:4px;text-align:right">3,200</td></tr></table>') + '<div style="font-size:11px;color:var(--th);margin-top:6px">반영 즉시 월말 실사 입고량에 자동 연동됩니다. 슬래시(/)로 묶인 품목은 자동 분리됩니다.</div>') },
+      card: { title: '법인카드 수시 등록 가이드', html:
+        warn('결제가 끝나면 바로 등록하세요. 끝4자리/결제일/금액으로 월말 회계 승인건과 자동 대사됩니다.')
+        + step(1, '결제일 / 금액 / 계정과목', mock(grid2(fld('결제일', '2026-11-15') + fld('금액', '48,000')) + sel('계정과목', '소모품비')) )
+        + step(2, '사용내역 / 영수증 첨부', mock(fld('사용내역', '매장 비품(행주/세제) 구입') + '<div style="border:1px dashed var(--crd);border-radius:6px;padding:8px;text-align:center;font-size:11px;color:var(--th);margin-top:4px">📷 영수증 사진 촬영/첨부</div>') )
+        + step(3, '[저장] → 한도바 반영', '<div style="font-size:11px;color:var(--th)">저장하면 상단 한도 바의 당월 사용액/잔여에 즉시 반영됩니다. 수선비/비품 등 보관 필요 서류는 [필수 보관 서류]로 구분됩니다.</div>') }
+    };
+
+    G.open = function (key) {
+      const g = G.DATA[key]; if (!g) return;
+      const old = document.getElementById('opsGuideModal'); if (old) old.remove();
+      const m = document.createElement('div'); m.id = 'opsGuideModal'; m.className = 'modal-bg open';
+      m.innerHTML = '<div class="modal-box" style="max-width:520px;width:95%"><div class="modal-title" style="display:flex;align-items:center;gap:6px">📖 ' + g.title + '</div>'
+        + '<div style="max-height:66vh;overflow:auto;padding:2px 2px 8px">' + g.html + '</div>'
+        + '<div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn-submit" onclick="document.getElementById(\'opsGuideModal\').remove()">닫기</button></div></div>';
+      m.addEventListener('click', e => { if (e.target === m) m.remove(); });
+      document.body.appendChild(m);
+    };
+    window.OpsGuide = G;
+  })();
+
+  const guideBtn = key => '<button class="btn-cancel-sm" style="font-size:12px;color:#8a5a2b" onclick="OpsGuide.open(\'' + key + '\')"><i class="ti ti-book"></i> 작성 가이드</button>';
+  IM._guideBtn = guideBtn;
+
   function isHQ() { const u = cu(); return !!(u.is_master || u.is_vice_master || u.role === 'admin' || u.role === 'dept' || u.store === '본사'); }
   function isPriv() { const u = cu(); return !!(u.is_master || u.is_vice_master || u.position === '매니저' || u.position === '매니저B' || isHQ()); }
   function myStores() {
@@ -188,7 +247,7 @@
     const tbl = (title, arr) => '<div style="font-size:12px;font-weight:700;margin:10px 0 4px">' + title + ' <span style="font-size:11px;color:var(--th)">(' + arr.length + '건)</span></div>' + '<table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:5px 8px;text-align:left">일자</th><th style="padding:5px 8px;text-align:left">분류</th><th style="padding:5px 8px;text-align:left">품목</th><th style="padding:5px 8px;text-align:right">수량</th><th style="padding:5px 8px;text-align:left">사유</th><th style="padding:5px 8px"></th></tr></thead><tbody>' + (arr.length ? arr.map(rowHtml).join('') : '<tr><td colspan="6" style="padding:12px;text-align:center;color:var(--th)">내역 없음</td></tr>') + '</tbody></table>';
     b.innerHTML =
       '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap"><div style="background:var(--cr,#faf7f2);border:0.5px solid var(--crd);border-radius:8px;padding:8px 14px;font-size:13px">' + IM.state.ym + ' 우리 매장 총 폐기 <b style="color:#B91C1C">' + won(res.total_qty) + '</b> 건(수량 합)</div>'
-      + '<button class="btn-submit" style="font-size:12px;margin-left:auto" onclick="InventoryMgr.openLossAdd()"><i class="ti ti-plus"></i> 폐기 등록</button></div>'
+      + '<span style="margin-left:auto;display:flex;gap:6px">' + guideBtn('loss') + '<button class="btn-submit" style="font-size:12px" onclick="InventoryMgr.openLossAdd()"><i class="ti ti-plus"></i> 폐기 등록</button></span></div>'
       + tbl('재고 마스터 품목 폐기', invItems) + tbl('기타 / 비재고 폐기', etcItems);
   };
   IM.openLossAdd = function () {
@@ -228,7 +287,7 @@
       : '<span style="font-size:11px;background:#DCFCE7;color:#15803D;border-radius:5px;padding:2px 7px">📝 ' + esc(String(t.date || '').slice(5)) + ' ' + esc(t.from_store) + '점 수령(+' + t.qty + ')</span>';
     const rows = list.map(t => '<tr><td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + badge(t) + '</td><td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(t.item) + '</td><td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:right">' + t.qty + '</td></tr>').join('');
     b.innerHTML =
-      '<div style="display:flex;align-items:center;margin-bottom:8px"><div style="font-size:12px;color:var(--th)">보내는 매장이 등록하면 받는 매장 입재고 사용량에 자동 반영되고, 받는 매장에 알림이 갑니다.</div><button class="btn-submit" style="font-size:12px;margin-left:auto" onclick="InventoryMgr.openTransferAdd()"><i class="ti ti-plus"></i> 이관 등록</button></div>'
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap"><div style="font-size:12px;color:var(--th);flex:1;min-width:180px">보내는 매장이 등록하면 받는 매장 입재고 사용량에 자동 반영되고, 받는 매장에 알림이 갑니다.</div>' + guideBtn('transfer') + '<button class="btn-submit" style="font-size:12px" onclick="InventoryMgr.openTransferAdd()"><i class="ti ti-plus"></i> 이관 등록</button></div>'
       + '<table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:5px 8px;text-align:left">이관/수령</th><th style="padding:5px 8px;text-align:left">품목</th><th style="padding:5px 8px;text-align:right">수량</th></tr></thead><tbody>' + (rows || '<tr><td colspan="3" style="padding:12px;text-align:center;color:var(--th)">내역 없음</td></tr>') + '</tbody></table>';
   };
   IM.openTransferAdd = async function () {
@@ -302,7 +361,8 @@
       + '<select id="cntFVendor" class="form-input" style="width:140px;font-size:12px" onchange="InventoryMgr.cntFilter()">' + vOpt + '</select>'
       + '<input id="cntFSearch" class="form-input" style="width:150px;font-size:12px" placeholder="품목명 (키워드 일부)" value="' + esc(c.fSearch) + '" onkeydown="if(event.key===\'Enter\')InventoryMgr.cntLookup()">'
       + '<button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.cntLookup()"><i class="ti ti-search"></i> 조회</button>'
-      + '<span style="margin-left:auto;display:flex;gap:6px">'
+      + '<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">'
+      + guideBtn('count')
       + (priv ? '<label class="btn-cancel-sm" style="font-size:12px;cursor:pointer"><i class="ti ti-file-invoice"></i> 거래명세서 업로드<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="InventoryMgr.openDelivery(this.files[0])"></label>' : '')
       + (priv ? '<button class="btn-cancel-sm" style="font-size:12px;color:#B45309;border-color:#FCD34D" onclick="InventoryMgr.openPriceChanges()"><i class="ti ti-arrows-up-down"></i> 단가 변동 내역</button>' : '')
       + '<button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.cntNewItem()"><i class="ti ti-plus"></i> 신규 품목 등록 요청</button></span></div>';
@@ -456,7 +516,8 @@
       + (hq ? '<td style="padding:2px;text-align:center"><input type="checkbox" onclick="InventoryMgr.delivInput(' + i + ',\'remember\',this.checked)"></td>' : '')
       + '</tr>').join('');
     modal('거래명세서 입고 반영 (' + rows.length + '건)',
-      '<div style="font-size:12px;color:var(--th);margin-bottom:6px">슬래시(/) 복합 표기를 자동 분리했습니다. 필요 시 수정하세요.' + (hq ? ' "기억" 체크 시 다음 업로드부터 자동 적용됩니다.' : '') + ' 원본 파일은 저장하지 않습니다.</div>'
+      '<div style="display:flex;justify-content:flex-end;margin-bottom:4px">' + guideBtn('delivery') + '</div>'
+      + '<div style="font-size:12px;color:var(--th);margin-bottom:6px">슬래시(/) 복합 표기를 자동 분리했습니다. 필요 시 수정하세요.' + (hq ? ' "기억" 체크 시 다음 업로드부터 자동 적용됩니다.' : '') + ' 원본 파일은 저장하지 않습니다.</div>'
       + '<div style="font-size:12px;margin-bottom:8px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;background:var(--cr,#faf7f2);padding:7px 10px;border-radius:8px"><b style="font-size:11px">반영 방식:</b><label><input type="radio" name="delivMode" value="add" checked> 기존 입고량에 합산 (추가 업로드용)</label><label><input type="radio" name="delivMode" value="set"> 기존 입고량 덮어쓰기 (재업로드용)</label></div>'
       + '<div style="max-height:46vh;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:4px">품명</th><th style="padding:4px">규격</th><th style="padding:4px">공급사</th><th style="padding:4px">구분</th><th style="padding:4px">원산지</th><th style="padding:4px">입고량</th>' + (hq ? '<th style="padding:4px">기억</th>' : '') + '</tr></thead><tbody>' + trs + '</tbody></table></div>'
       + '<button class="btn-submit" style="font-size:13px;margin-top:10px;width:100%" onclick="InventoryMgr.ingestDelivery()"><i class="ti ti-check"></i> 입고 반영 (실사 리스트 연동)</button>', '닫기', function () { return true; });
