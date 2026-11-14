@@ -302,7 +302,9 @@
       + '<select id="cntFVendor" class="form-input" style="width:140px;font-size:12px" onchange="InventoryMgr.cntFilter()">' + vOpt + '</select>'
       + '<input id="cntFSearch" class="form-input" style="width:150px;font-size:12px" placeholder="품목명 (키워드 일부)" value="' + esc(c.fSearch) + '" onkeydown="if(event.key===\'Enter\')InventoryMgr.cntLookup()">'
       + '<button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.cntLookup()"><i class="ti ti-search"></i> 조회</button>'
-      + '<button class="btn-cancel-sm" style="font-size:12px;margin-left:auto" onclick="InventoryMgr.cntNewItem()"><i class="ti ti-plus"></i> 신규 품목 등록 요청</button></div>';
+      + '<span style="margin-left:auto;display:flex;gap:6px">'
+      + (priv ? '<label class="btn-cancel-sm" style="font-size:12px;cursor:pointer"><i class="ti ti-file-invoice"></i> 거래명세서 업로드<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="InventoryMgr.openDelivery(this.files[0])"></label>' : '')
+      + '<button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.cntNewItem()"><i class="ti ti-plus"></i> 신규 품목 등록 요청</button></span></div>';
     const anom = r => { if (!priv || r.count_qty === '' || r.count_qty == null) return ''; const base = Number(r.opening_qty || 0) + Number(r.in_qty || 0); if (base < Number(r.count_qty)) return 'background:#FEF2F2'; if (Number(r.in_qty || 0) > 0 && Number(r.count_qty) === 0) return 'background:#FFFBEB'; return ''; };
     const fv = c.fVendor, fc = c.fCat, fs = (c.fSearch || '').toLowerCase();
     const trs = c.rows.map((r, i) => {
@@ -315,6 +317,9 @@
         + '<td style="padding:4px 6px;border-bottom:0.5px solid var(--crm,#eee);color:var(--th)">' + esc(r.category || '-') + '</td>'
         + '<td style="padding:4px 6px;border-bottom:0.5px solid var(--crm,#eee)">' + nameCell + '</td>'
         + '<td style="padding:4px 6px;border-bottom:0.5px solid var(--crm,#eee);font-size:11px;color:var(--th)">' + esc(r.spec || '') + (r.unit ? ' / ' + esc(r.unit) : '') + '</td>'
+        + (priv
+          ? '<td style="padding:3px;border-bottom:0.5px solid var(--crm,#eee)"><input type="number" step="0.01" class="form-input" style="font-size:12px;padding:4px;width:72px;text-align:right;background:#F8FAFC" value="' + (r.in_qty == null ? '' : r.in_qty) + '" title="당월 명세서 입고량(수정 가능)" oninput="InventoryMgr.cntInput(' + i + ',\'in_qty\',this.value)"></td>'
+          : '<td style="padding:4px 6px;border-bottom:0.5px solid var(--crm,#eee);text-align:right;color:var(--th)">' + (r.in_qty == null ? '-' : r.in_qty) + '</td>')
         + '<td style="padding:3px;border-bottom:0.5px solid var(--crm,#eee)"><input type="number" step="0.01" class="form-input" style="font-size:12px;padding:4px;width:80px;text-align:right" value="' + (r.count_qty === '' || r.count_qty == null ? '' : r.count_qty) + '" oninput="InventoryMgr.cntInput(' + i + ',\'count_qty\',this.value)"></td>'
         + (priv ? '<td style="padding:3px;border-bottom:0.5px solid var(--crm,#eee)"><input type="number" class="form-input" style="font-size:12px;padding:4px;width:90px;text-align:right" value="' + (r.unit_price === '' || r.unit_price == null ? '' : r.unit_price) + '" placeholder="개당단가" oninput="InventoryMgr.cntInput(' + i + ',\'unit_price\',this.value)"></td>' : '')
         + '<td style="padding:3px;border-bottom:0.5px solid var(--crm,#eee);text-align:center"><button onclick="InventoryMgr.cntRemove(' + i + ')" style="background:none;border:none;color:#B91C1C;cursor:pointer">✕</button></td></tr>';
@@ -323,7 +328,7 @@
     let html = (c.restored ? '<div style="background:#EFF6FF;color:#1E40AF;border-radius:8px;padding:7px 12px;margin-bottom:8px;font-size:12px"><i class="ti ti-history"></i> 임시저장(' + String(c.draftAt || '').replace('T', ' ').slice(5, 16) + ')에서 복원했습니다. 저장하려면 [저장]을 눌러주세요.</div>' : '');
     html += '<div style="font-size:12px;color:var(--th);margin-bottom:4px">' + (c.blind ? '팀원/PT 모드 — 등록된 품목에서 실사수량만 입력합니다. (단가·금액은 매니저 확정 단계)' : '매니저 모드 — 수량/단가 검수 후 [최종 제출]하세요.') + ' · 품목 ' + total + ' · 입력 ' + filled + '</div>';
     html += filterBar;
-    html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:5px 6px;text-align:left">공급처</th><th style="padding:5px 6px;text-align:left">구분</th><th style="padding:5px 6px;text-align:left">품명</th><th style="padding:5px 6px;text-align:left">규격/단위</th><th style="padding:5px 6px">실사수량</th>' + (priv ? '<th style="padding:5px 6px">개당단가</th>' : '') + '<th></th></tr></thead><tbody>' + (trs || '<tr><td colspan="' + (priv ? 7 : 6) + '" style="padding:14px;text-align:center;color:var(--th)">표시할 품목이 없습니다. [품목 추가]로 불러오세요.</td></tr>') + '</tbody></table></div>';
+    html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:5px 6px;text-align:left">공급처</th><th style="padding:5px 6px;text-align:left">구분</th><th style="padding:5px 6px;text-align:left">품명</th><th style="padding:5px 6px;text-align:left">규격/단위</th><th style="padding:5px 6px">입고량</th><th style="padding:5px 6px">실사수량</th>' + (priv ? '<th style="padding:5px 6px">개당단가</th>' : '') + '<th></th></tr></thead><tbody>' + (trs || '<tr><td colspan="' + (priv ? 8 : 7) + '" style="padding:14px;text-align:center;color:var(--th)">표시할 품목이 없습니다. [품목 추가]로 불러오세요.</td></tr>') + '</tbody></table></div>';
     html += '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">'
       + '<button class="btn-cancel-sm" style="font-size:13px" onclick="InventoryMgr.draftSave(true)"><i class="ti ti-clock-pause"></i> 임시저장</button>'
       + '<button class="btn-submit" style="font-size:13px" onclick="InventoryMgr.saveCount(false)"><i class="ti ti-device-floppy"></i> ' + (priv ? '저장 (부분 입력 가능)' : '저장 (매니저 검토용 제출)') + '</button>'
@@ -389,6 +394,91 @@
   };
   async function loadVendorsForStore() { try { return await rpc('ch_vendors_for_store', { p_store: IM.state.store }) || []; } catch (e) { return []; } }
 
+  /* ───────── 거래명세서 업로드(파일 미저장 파싱) → 입고량 연동 ───────── */
+  function parseItemStr(raw) {
+    const parts = String(raw).split('/').map(s => s.trim()).filter(Boolean);
+    if (!parts.length) return { item: raw, spec: '', origin: '' };
+    const item = parts[0]; let spec = '', origin = '';
+    for (let i = 1; i < parts.length; i++) {
+      if (!spec && /\d+\s*(kg|g|ml|l|ea|개|박스|줄|포|팩|병|캔|롤|말|봉|매|장)/i.test(parts[i])) spec = parts[i];
+      else if (!origin) origin = parts[i];
+    }
+    return { item: item, spec: spec, origin: origin };
+  }
+  function parseVendorStr(raw) {
+    const parts = String(raw).split('/').map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 4) return { vendor: parts[0], brand: parts[1], store: parts[2], category: parts[3] };
+    if (parts.length) return { vendor: parts[0], category: parts[parts.length - 1] || '' };
+    return { vendor: '', category: '' };
+  }
+  IM.openDelivery = function (file) {
+    if (!file) return;
+    if (typeof XLSX === 'undefined') { alert('엑셀 라이브러리 로딩 중입니다.'); return; }
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    const reader = new FileReader();
+    reader.onload = async function (e) {
+      try {
+        let aoa;
+        if (ext === 'csv') { const text = new TextDecoder('utf-8').decode(new Uint8Array(e.target.result)); const wb = XLSX.read(text, { type: 'string' }); aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }); }
+        else { const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' }); aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }); }
+        let hr = -1, ci = {};
+        for (let r = 0; r < Math.min(aoa.length, 25); r++) {
+          const row = (aoa[r] || []).map(x => String(x == null ? '' : x));
+          const find = kw => row.findIndex(v => kw.some(k => v.replace(/\s/g, '').indexOf(k) !== -1));
+          const pi = find(['품목', '품명', '상품']), qi = find(['수량', '입고수량', '납품수량']);
+          if (pi !== -1 && qi !== -1) { hr = r; ci = { item: pi, qty: qi, vendor: find(['거래처', '공급처', '업체']), spec: find(['규격']), price: find(['단가', '공급단가', '개당']), cat: find(['구분', '분류', '파트']) }; break; }
+        }
+        if (hr === -1) { alert('명세서 헤더(품목/수량)를 인식하지 못했습니다. 양식을 확인해 주세요.'); return; }
+        const rows = [];
+        for (let r = hr + 1; r < aoa.length; r++) {
+          const row = aoa[r] || []; const rawItem = String(row[ci.item] || '').trim(); const qty = Number(String(row[ci.qty] || '').replace(/[^0-9.\-]/g, '')); if (!rawItem || !qty) continue;
+          const pI = parseItemStr(rawItem); const rawV = ci.vendor !== -1 ? String(row[ci.vendor] || '').trim() : ''; const pV = parseVendorStr(rawV);
+          rows.push({ raw: rawItem, item: pI.item, spec: (ci.spec !== -1 ? String(row[ci.spec] || '').trim() : '') || pI.spec, origin: pI.origin, vendor: pV.vendor || '', category: (ci.cat !== -1 ? String(row[ci.cat] || '').trim() : '') || pV.category || '', qty: qty, unit_price: ci.price !== -1 ? String(row[ci.price] || '').replace(/[^0-9.\-]/g, '') : '', remember: false });
+        }
+        if (!rows.length) { alert('입고 데이터를 찾지 못했습니다.'); return; }
+        try { const al = await rpc('ch_alias_resolve', { p_raws: rows.map(x => x.raw) }) || {}; rows.forEach(x => { const a = al[x.raw]; if (a) { x.item = a.item || x.item; x.spec = a.spec || x.spec; x.vendor = a.vendor_slug || x.vendor; x.category = a.category || x.category; x.origin = a.origin || x.origin; } }); } catch (e2) {}
+        window.__delivRows = rows; IM.deliveryPreview();
+      } catch (err) { alert('파싱 오류: ' + (err.message || err)); }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  IM.deliveryPreview = function () {
+    const rows = window.__delivRows || []; const hq = isHQ();
+    const inp = (i, f, w) => '<input value="' + esc(rows[i][f] || '') + '" style="font-size:11px;padding:3px;width:' + w + 'px;border:0.5px solid var(--crd);border-radius:5px" oninput="InventoryMgr.delivInput(' + i + ',\'' + f + '\',this.value)">';
+    const trs = rows.map((x, i) => '<tr>'
+      + '<td style="padding:2px">' + inp(i, 'item', 110) + '</td>'
+      + '<td style="padding:2px">' + inp(i, 'spec', 90) + '</td>'
+      + '<td style="padding:2px">' + inp(i, 'vendor', 80) + '</td>'
+      + '<td style="padding:2px">' + inp(i, 'category', 70) + '</td>'
+      + '<td style="padding:2px">' + inp(i, 'origin', 70) + '</td>'
+      + '<td style="padding:2px">' + inp(i, 'qty', 56) + '</td>'
+      + (hq ? '<td style="padding:2px;text-align:center"><input type="checkbox" onclick="InventoryMgr.delivInput(' + i + ',\'remember\',this.checked)"></td>' : '')
+      + '</tr>').join('');
+    modal('거래명세서 입고 반영 (' + rows.length + '건)',
+      '<div style="font-size:12px;color:var(--th);margin-bottom:6px">슬래시(/) 복합 표기를 자동 분리했습니다. 필요 시 수정하세요.' + (hq ? ' "기억" 체크 시 다음 업로드부터 자동 적용됩니다.' : '') + ' 원본 파일은 저장하지 않습니다.</div>'
+      + '<div style="max-height:46vh;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:4px">품명</th><th style="padding:4px">규격</th><th style="padding:4px">공급사</th><th style="padding:4px">구분</th><th style="padding:4px">원산지</th><th style="padding:4px">입고량</th>' + (hq ? '<th style="padding:4px">기억</th>' : '') + '</tr></thead><tbody>' + trs + '</tbody></table></div>'
+      + '<button class="btn-submit" style="font-size:13px;margin-top:10px;width:100%" onclick="InventoryMgr.ingestDelivery()"><i class="ti ti-check"></i> 입고 반영 (실사 리스트 연동)</button>', '닫기', function () { return true; });
+  };
+  IM.delivInput = function (i, f, v) { if (window.__delivRows && window.__delivRows[i]) window.__delivRows[i][f] = v; };
+  IM.ingestDelivery = async function () {
+    const rows = window.__delivRows || []; if (!rows.length) return;
+    let res; try { res = await rpc('ch_delivery_ingest', { p_store: IM.state.store, p_ym: IM.state.ym, p_rows: rows }); }
+    catch (e) { alert('오류: ' + (e.missing ? '보안 SQL 미실행 (closing_module7.sql)' : (/MONTH_LOCKED/.test(e.message || '') ? '월마감 잠금' : (/ACCESS_DENIED/.test(e.message || '') ? '매니저/본사만 가능' : e.message)))); return; }
+    IM.mergeDelivery(res.items || []);
+    const mm = document.getElementById('imModal'); if (mm) mm.remove();
+    toast('입고 반영 완료 — ' + res.rows + '건 (실사 입고량 자동 연동)');
+  };
+  IM.mergeDelivery = function (items) {
+    if (!IM.cnt) return;
+    const byKey = {}; IM.cnt.rows.forEach(r => { byKey[(r.item || '') + '|' + (r.vendor_slug || '')] = r; });
+    items.forEach(it => {
+      const k = (it.item || '') + '|' + (it.vendor_slug || '');
+      if (byKey[k]) { byKey[k].in_qty = it.in_qty; if (it.spec && !byKey[k].spec) byKey[k].spec = it.spec; }
+      else IM.cnt.rows.push({ vendor_slug: it.vendor_slug || null, category: it.category || '', item: it.item, spec: it.spec || '', unit: '', count_qty: (it.count_qty != null ? it.count_qty : ''), unit_price: (it.unit_price != null ? it.unit_price : ''), in_qty: it.in_qty, pending: false });
+    });
+    IM.renderCountBody();
+  };
+
   /* ───────── 임시저장(자동/수동/로그아웃 훅) ───────── */
   IM.scheduleAutosave = function () { if (IM._autosaveT) clearTimeout(IM._autosaveT); IM._autosaveT = setTimeout(function () { IM.draftSave(false); }, 3000); };
   IM.draftSave = async function (manual) {
@@ -402,7 +492,7 @@
   };
   IM.saveCount = async function (confirmFinal) {
     if (!IM.cnt) return;
-    const rows = IM.cnt.rows.filter(r => r.item).map(r => ({ vendor_slug: r.vendor_slug || null, item: r.item, category: r.category || '', spec: r.spec || '', unit: r.unit || '', count_qty: (r.count_qty === '' || r.count_qty == null) ? '' : String(r.count_qty), unit_price: (r.unit_price === '' || r.unit_price == null) ? '' : String(r.unit_price) }));
+    const rows = IM.cnt.rows.filter(r => r.item).map(r => ({ vendor_slug: r.vendor_slug || null, item: r.item, category: r.category || '', spec: r.spec || '', unit: r.unit || '', count_qty: (r.count_qty === '' || r.count_qty == null) ? '' : String(r.count_qty), unit_price: (r.unit_price === '' || r.unit_price == null) ? '' : String(r.unit_price), in_qty: (r.in_qty === '' || r.in_qty == null) ? '' : String(r.in_qty) }));
     if (!rows.length) { toast('입력된 품목이 없습니다'); return; }
     const unfilled = rows.filter(r => r.count_qty === '').length;
     try {
