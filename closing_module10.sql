@@ -19,8 +19,19 @@ update closing_card_tx set evidence_at = coalesce(evidence_at, updated_at)
   where evidence_path is not null and evidence_at is null;
 
 -- 2) 수시등록 재정의 — 영수증 시점/유형/필수보관 태그 반영 ──────────────────
---   기존 8인자 호출과 호환되도록 신규 인자는 기본값과 함께 뒤에 추가.
-create or replace function ch_card_tx_add(p_token text, p_store text, p_tx_date date, p_total numeric,
+--   인자 개수가 바뀌어 create or replace 가 구버전을 교체하지 못하고 오버로드가 생김.
+--   → pg_proc 로 기존 ch_card_tx_add 오버로드를 전부 삭제한 뒤 신버전만 생성(이름만으로 GRANT 가능).
+do $$
+declare r record;
+begin
+  for r in select p.oid::regprocedure as sig from pg_proc p
+           join pg_namespace n on n.oid = p.pronamespace
+           where p.proname = 'ch_card_tx_add' and n.nspname = 'public' loop
+    execute 'drop function ' || r.sig::text;
+  end loop;
+end $$;
+
+create function ch_card_tx_add(p_token text, p_store text, p_tx_date date, p_total numeric,
   p_account text, p_memo text, p_card_last text, p_evidence text,
   p_evidence_type text default null, p_must_keep boolean default false) returns jsonb as $$
 declare u users; ym text; cl text; newid bigint;
@@ -117,7 +128,8 @@ do $$ begin
   execute 'revoke all on table closing_card_bulk from anon, authenticated';
 end $$;
 
-grant execute on function ch_card_tx_add, ch_card_tx_keep, ch_card_bulk_add, ch_card_bulk_list, ch_card_bulk_del,
+grant execute on function ch_card_tx_add(text, text, date, numeric, text, text, text, text, text, boolean) to anon, authenticated;
+grant execute on function ch_card_tx_keep, ch_card_bulk_add, ch_card_bulk_list, ch_card_bulk_del,
   ch_card_purge_candidates, ch_card_purge_commit to anon, authenticated;
 
 -- ════════════ 매뉴얼(manual_sections) 권한별 반영 — 중복 시 교체 ════════════
