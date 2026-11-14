@@ -174,6 +174,54 @@
     window.OpsMedia = M;
   })();
 
+  /* ===================================================================
+   * PWA 설치 안내 — beforeinstallprompt(안드/PC) + iOS 수동 안내
+   *   window.PwaInstall.init() / install() / dismiss()
+   * =================================================================== */
+  (function () {
+    const P = {};
+    function isStandalone() { return (window.navigator.standalone === true) || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches); }
+    function isIOS() { const ua = navigator.userAgent || ''; return /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
+    P.isStandalone = isStandalone;
+    P.dismiss = function () { try { localStorage.setItem('pwa_install_dismiss', '1'); } catch (_) {} const b = document.getElementById('pwaInstallBar'); if (b) b.remove(); };
+    P.install = async function () {
+      const e = window.__bipEvent;
+      if (!e) { toast('이 브라우저에서는 주소창의 설치 아이콘을 눌러 설치하세요.'); return; }
+      try { e.prompt(); const r = await e.userChoice; window.__bipEvent = null; const b = document.getElementById('pwaInstallBar'); if (b) b.remove(); if (r && r.outcome === 'accepted') toast('앱 설치를 시작합니다.'); }
+      catch (err) { toast('설치 실패: ' + (err.message || err)); }
+    };
+    P.render = function () {
+      if (isStandalone()) return;
+      try { if (localStorage.getItem('pwa_install_dismiss') === '1') return; } catch (_) {}
+      try { if (localStorage.getItem('pwa_installed') === '1') return; } catch (_) {}
+      const old = document.getElementById('pwaInstallBar'); if (old) old.remove();
+      const ios = isIOS(); const hasBip = !!window.__bipEvent;
+      if (!ios && !hasBip) return; // 설치 불가/이미 설치 환경이면 표시하지 않음
+      const bar = document.createElement('div'); bar.id = 'pwaInstallBar';
+      bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#3B2314;color:#fff;padding:12px 14px;box-shadow:0 -2px 12px rgba(0,0,0,.2);font-size:13px;line-height:1.5;display:flex;align-items:center;gap:10px;flex-wrap:wrap';
+      if (hasBip) {
+        bar.innerHTML = '<span style="flex:1;min-width:200px">📱 보난자 운영 앱을 홈 화면에 설치하시겠습니까? <span style="opacity:.85">(앱처럼 빠른 실행 & 마감/이관 푸시 알림 수신)</span></span>'
+          + '<span style="display:flex;gap:6px;margin-left:auto"><button onclick="InventoryMgr.pwaInstall()" style="background:#fff;color:#3B2314;border:none;border-radius:7px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">앱으로 설치하기</button>'
+          + '<button onclick="InventoryMgr.pwaDismiss()" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:7px;padding:7px 10px;font-size:12px;cursor:pointer">나중에</button></span>';
+      } else {
+        bar.innerHTML = '<span style="flex:1;min-width:200px">📱 <b>아이폰 앱 설치 방법</b>: 하단 <b>공유(□↑)</b> 버튼 → <b>홈 화면에 추가</b>를 누르면 앱으로 설치되고 푸시 알림을 받을 수 있습니다.</span>'
+          + '<button onclick="InventoryMgr.pwaDismiss()" style="background:#fff;color:#3B2314;border:none;border-radius:7px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;margin-left:auto">확인</button>';
+      }
+      document.body.appendChild(bar);
+    };
+    P.init = function () {
+      if (P._inited) return; P._inited = true;
+      if (isStandalone()) return;
+      P.render();
+      // beforeinstallprompt 가 로드 직후 늦게 도착하면 배너를 갱신
+      window.addEventListener('bip-ready', function () { P.render(); });
+      window.addEventListener('pwa-installed', function () { const b = document.getElementById('pwaInstallBar'); if (b) b.remove(); });
+    };
+    window.PwaInstall = P;
+  })();
+  IM.pwaInstall = function () { try { window.PwaInstall.install(); } catch (e) {} };
+  IM.pwaDismiss = function () { try { window.PwaInstall.dismiss(); } catch (e) {} };
+
   const guideBtn = key => '<button class="btn-cancel-sm" style="font-size:12px;color:#8a5a2b" onclick="OpsGuide.open(\'' + key + '\')"><i class="ti ti-book"></i> 작성 가이드</button>';
   IM._guideBtn = guideBtn;
 
@@ -283,17 +331,32 @@
       if (isIOS && !standalone) return '<div style="background:#EFF6FF;color:#1E40AF;border-radius:8px;padding:9px 12px;margin-bottom:8px;font-size:12.5px"><i class="ti ti-device-mobile"></i> 아이폰은 Safari 공유 → <b>홈 화면에 추가</b> 후 앱으로 열면 마감·이관 푸시 알림을 받을 수 있어요. <button onclick="InventoryMgr.dismissPush()" style="float:right;background:none;border:none;color:#1E40AF;cursor:pointer;font-size:12px">닫기</button></div>';
       return '';
     }
-    if (Notification.permission === 'granted') return '';
+    if (Notification.permission === 'granted') {
+      // 구독 완료 상태 — 사용자가 직접 수신 확인할 수 있는 테스트 버튼
+      return '<div style="background:#F0FDF4;color:#15803D;border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:12.5px;display:flex;align-items:center;gap:8px"><i class="ti ti-bell-check"></i><span style="flex:1">모바일 알림이 켜져 있습니다. 수신이 안 되면 아래 버튼으로 테스트하세요.</span><button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="InventoryMgr.pushTest()">🔔 내 기기로 테스트 푸시</button><button onclick="InventoryMgr.dismissPush()" style="background:none;border:none;color:#15803D;cursor:pointer">✕</button></div>';
+    }
     return '<div style="background:#EFF6FF;color:#1E40AF;border-radius:8px;padding:9px 12px;margin-bottom:8px;font-size:13px;display:flex;align-items:center;gap:8px"><i class="ti ti-bell-ringing"></i><span style="flex:1">🔔 모바일 마감·이관 알림 받기 — 슬랙을 안 봐도 스마트폰 푸시로 알려드려요.</span><button class="btn-submit" style="font-size:12px;padding:5px 12px" onclick="InventoryMgr.subscribePush()">알림 받기</button><button onclick="InventoryMgr.dismissPush()" style="background:none;border:none;color:#1E40AF;cursor:pointer">✕</button></div>';
+  };
+  IM.pushTest = async function () {
+    toast('테스트 푸시를 보냈습니다. 잠시 후 알림을 확인하세요.');
+    try { await IM.pushSend({ mode: 'test' }); } catch (e) {}
   };
   IM.dismissPush = function () { try { localStorage.setItem('im_push_dismiss', '1'); } catch (_) {} IM.renderBanner(); };
   function urlB64ToUint8(b) { const pad = '='.repeat((4 - b.length % 4) % 4); const s = (b + pad).replace(/-/g, '+').replace(/_/g, '/'); const raw = atob(s); const a = new Uint8Array(raw.length); for (let i = 0; i < raw.length; i++) a[i] = raw.charCodeAt(i); return a; }
   IM.subscribePush = async function () {
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const standalone = (window.navigator.standalone === true) || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    if (isIOS && !standalone) {
+      const ov = document.createElement('div'); ov.className = 'modal-bg open';
+      ov.innerHTML = '<div class="modal-box" style="max-width:400px"><div class="modal-title">아이폰 알림 설정 안내</div><div style="font-size:13px;padding:6px 2px;line-height:1.7">아이폰은 먼저 <b>홈 화면에 앱을 설치</b>한 뒤, 홈 화면의 <b>앱 아이콘으로 열어서</b> 알림을 허용해야 푸시를 받을 수 있습니다.<br><br>하단 <b>공유(□↑)</b> 버튼 → <b>홈 화면에 추가</b> → 설치된 앱 아이콘 실행 → 이 화면에서 다시 [알림 받기]를 눌러 주세요.</div><div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn-submit" onclick="this.closest(\'.modal-bg\').remove()">확인</button></div></div>';
+      ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+      document.body.appendChild(ov); return;
+    }
     if (!IM.pushSupported()) { toast('이 기기는 웹푸시를 지원하지 않습니다'); return; }
     try {
       const perm = await Notification.requestPermission();
       if (perm !== 'granted') { toast('알림 권한이 거부되었습니다'); return; }
-      await navigator.serviceWorker.register('./sw.js');
+      await navigator.serviceWorker.register('./sw.js', { scope: './' });
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8(VAPID_PUBLIC) });
       const j = sub.toJSON();
@@ -1068,8 +1131,7 @@
     IM.applyNav();
     // 30분 자동 로그아웃 직전 실사 임시저장 훅
     window.__beforeAutoLogout = async function () { try { if (IM.cnt && IM.state.tab === 'count') await IM.draftSave(false); } catch (e) {} };
-    // 기존 구독자는 조용히 SW 재등록(갱신). 신규 구독은 배너로.
-    try { if ('serviceWorker' in navigator && Notification && Notification.permission === 'granted') navigator.serviceWorker.register('./sw.js'); } catch (e) {}
+    // 서비스워커 등록 / PWA 설치 안내는 pwaBootstrap()에서 로드 즉시 처리됨(로그인 전 포함).
     // 로그인 시 실사 리마인드 1회 핑(서버가 D-1/초과 판단 + 일일 중복방지)
     try { IM.pushSend({ mode: 'inventory_reminders', ym: (new Date()).toISOString().slice(0, 7) }); } catch (e) {}
     // 본사: 90일 경과 영수증 이미지 자동 정리(하루 1회)
@@ -1097,6 +1159,11 @@
       document.body.appendChild(ov);
     }
   };
+  // 로그인 여부와 무관하게 로드 즉시 1회: 서비스워커 등록 + 설치 안내(로그인 화면에서도 표시)
+  (function pwaBootstrap() {
+    try { if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js', { scope: './' }); } catch (e) {}
+    try { window.PwaInstall && window.PwaInstall.init(); } catch (e) {}
+  })();
   (function waitUser(n) {
     if (curUser() && sbc()) { IM.boot(); }
     else if (n < 60) { setTimeout(function () { waitUser(n + 1); }, 250); }

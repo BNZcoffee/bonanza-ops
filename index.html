@@ -15,6 +15,21 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="manifest" href="manifest.json">
+<!-- PWA 설치 프롬프트 조기 캡처 (앱 스크립트 로드 이전에 beforeinstallprompt 를 놓치지 않도록 head 에서 선점) -->
+<script>
+(function(){
+  window.__bipEvent = null;
+  window.addEventListener('beforeinstallprompt', function(e){
+    e.preventDefault(); window.__bipEvent = e;
+    try { window.dispatchEvent(new Event('bip-ready')); } catch(_) {}
+  });
+  window.addEventListener('appinstalled', function(){
+    window.__bipEvent = null;
+    try { localStorage.setItem('pwa_installed','1'); } catch(_) {}
+    try { window.dispatchEvent(new Event('pwa-installed')); } catch(_) {}
+  });
+})();
+</script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.snow.css" rel="stylesheet">
@@ -20734,6 +20749,6 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script src="closing_helper.js?v=2026111506"></script>
-<script src="inventory_helper.js?v=2026111506"></script>
+<script src="inventory_helper.js?v=2026111507"></script>
 </body>
 </html>
