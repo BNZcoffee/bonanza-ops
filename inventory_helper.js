@@ -91,27 +91,29 @@
   IM.onStore = function (v) { IM.state.store = v; IM.render(); };
   IM.onYm = function (v) { IM.state.ym = v; IM.render(); };
 
-  /* ───────── 공지사항(메뉴 제목 아래 전용 박스) ───────── */
+  /* ───────── 탭별 개별 공지사항 ───────── */
+  IM._noticeKey = function () { return ({ loss: 'inv_notice_loss', transfer: 'inv_notice_transfer', count: 'inv_notice_count', hq: 'inv_notice_hq' })[IM.state.tab] || 'inv_notice_count'; };
+  IM._noticeLabel = function () { return ({ loss: '폐기(Loss)', transfer: '타매장 이관', count: '월말 실사', hq: '제출현황/시즌' })[IM.state.tab] || ''; };
   IM.renderNotice = async function () {
     const box = document.getElementById('imNotice'); if (!box) return;
-    let notice = '';
-    try { const { data } = await sbc().from('app_settings').select('value').eq('key', 'inventory_notice').maybeSingle(); notice = (data && data.value) || ''; } catch (e) {}
-    window.__imNotice = notice;
+    const key = IM._noticeKey(); let notice = '';
+    try { const { data } = await sbc().from('app_settings').select('value').eq('key', key).maybeSingle(); notice = (data && data.value) || ''; } catch (e) {}
+    window.__imNotice = notice; window.__imNoticeKey = key;
     const editBtn = isHQ() ? '<button onclick="InventoryMgr.editNotice()" style="background:none;border:none;color:var(--br,#8a5a2b);cursor:pointer;font-size:12px;white-space:nowrap"><i class="ti ti-pencil"></i> ' + (notice ? '공지 수정' : '공지 등록') + '</button>' : '';
     if (!notice && !isHQ()) { box.innerHTML = ''; return; }
     box.innerHTML = '<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;gap:8px;align-items:flex-start">'
       + '<i class="ti ti-speakerphone" style="color:#B45309;margin-top:2px"></i>'
-      + '<div style="flex:1;font-size:12.5px;color:#92400E;white-space:pre-wrap;line-height:1.5">' + (notice ? esc(notice) : '<span style="color:#B45309;opacity:.7">등록된 공지사항이 없습니다. (본사 관리자만 등록)</span>') + '</div>'
+      + '<div style="flex:1;font-size:12.5px;color:#92400E;white-space:pre-wrap;line-height:1.5"><b style="font-size:11px">[' + esc(IM._noticeLabel()) + ' 공지]</b><br>' + (notice ? esc(notice) : '<span style="color:#B45309;opacity:.7">등록된 공지사항이 없습니다. (본사 관리자만 등록)</span>') + '</div>'
       + editBtn + '</div>';
   };
   IM.editNotice = function () {
     if (!isHQ()) return;
-    modal('매장 재고 관리 공지사항',
-      '<div style="font-size:12px;color:var(--th);margin-bottom:8px">전 직원 화면 상단에 항상 노출됩니다. (장문 작성 가능)</div>'
-      + '<textarea id="imNoticeInp" class="form-input" rows="6" style="resize:vertical" placeholder="예: 이번 달 실사는 11/28~11/30 입니다. 소모품 포함 전 품목 실사 바랍니다.">' + esc(window.__imNotice || '') + '</textarea>',
+    modal('[' + IM._noticeLabel() + '] 공지사항',
+      '<div style="font-size:12px;color:var(--th);margin-bottom:8px">이 탭 전용 공지입니다. 해당 탭을 보는 전 직원 화면 상단에 노출됩니다. (장문 작성 가능)</div>'
+      + '<textarea id="imNoticeInp" class="form-input" rows="6" style="resize:vertical">' + esc(window.__imNotice || '') + '</textarea>',
       '저장', async function () {
         const val = (document.getElementById('imNoticeInp').value || '').trim();
-        try { await sbc().from('app_settings').upsert({ key: 'inventory_notice', value: val }, { onConflict: 'key' }); }
+        try { await sbc().from('app_settings').upsert({ key: window.__imNoticeKey, value: val }, { onConflict: 'key' }); }
         catch (e) { alert('저장 오류: ' + (e.message || e)); return false; }
         toast('공지 저장 완료'); IM.renderNotice(); return true;
       });
@@ -124,9 +126,10 @@
     if (IM.state.store) {
       try {
         const s = await rpc('ch_inv_season', { p_store: IM.state.store, p_ym: IM.state.ym });
-        if (s && s.overdue) html += '<div style="background:#FEE2E2;color:#991B1B;border-radius:8px;padding:9px 12px;margin-bottom:8px;font-size:13px;font-weight:700"><i class="ti ti-alert-triangle"></i> 실사 재고 마감 D+' + s.d_plus + '일 경과 — 미완료 상태입니다. ' + (isPriv() ? '입력/확정' : '실사 입력') + '을 서둘러 주세요.' + (s.reject_note ? ' (본사 보완요청: ' + esc(s.reject_note) + ')' : '') + '</div>';
-        else if (s && s.d_minus1) html += '<div style="background:#FEF3C7;color:#92400E;border-radius:8px;padding:9px 12px;margin-bottom:8px;font-size:13px;font-weight:700"><i class="ti ti-clock"></i> 실사 재고 마감 D-1 — 내일 마감입니다. 오늘 안에 제출해 주세요.</div>';
-        else if (s && s.status === 'rejected') html += '<div style="background:#FEF3C7;color:#92400E;border-radius:8px;padding:9px 12px;margin-bottom:8px;font-size:13px"><i class="ti ti-rotate"></i> 본사 보완요청(반려) 상태입니다' + (s.reject_note ? ': ' + esc(s.reject_note) : '') + '. 수정 후 다시 제출해 주세요.</div>';
+        const toCount = IM.state.tab !== 'count' ? ' <button onclick="InventoryMgr.goTab(\'count\')" style="background:#fff;border:1px solid currentColor;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;color:inherit">[월말 실사] 탭으로 이동</button>' : '';
+        if (s && s.status === 'rejected') html += '<div style="background:#FEE2E2;color:#991B1B;border-radius:8px;padding:9px 12px;margin-bottom:8px;font-size:12.5px;line-height:1.5"><b><i class="ti ti-rotate"></i> [월말 실사] 보완요청(반려)</b>' + (s.reject_note ? '<br><span style="font-weight:600">보완 사유:</span> ' + esc(s.reject_note) : '') + '<br>[월말 실사] 탭에서 수정 후 다시 제출해 주세요.' + toCount + '</div>';
+        else if (s && s.overdue) html += '<div style="background:#FEE2E2;color:#991B1B;border-radius:8px;padding:9px 12px;margin-bottom:8px;font-size:13px;font-weight:700"><i class="ti ti-alert-triangle"></i> [월말 실사] 마감 D+' + s.d_plus + '일 경과 — 미완료 상태입니다. ' + (isPriv() ? '입력/확정' : '실사 입력') + '을 서둘러 주세요.' + toCount + '</div>';
+        else if (s && s.d_minus1) html += '<div style="background:#FEF3C7;color:#92400E;border-radius:8px;padding:9px 12px;margin-bottom:8px;font-size:13px;font-weight:700"><i class="ti ti-clock"></i> [월말 실사] 마감 D-1 — 내일 마감입니다. 오늘 안에 제출해 주세요.' + toCount + '</div>';
       } catch (e) {}
     }
     // 웹푸시 구독 배너
@@ -295,11 +298,11 @@
     const vOpt = '<option value="">공급사 전체</option>' + vendors.map(v => '<option' + (c.fVendor === v ? ' selected' : '') + '>' + esc(v) + '</option>').join('');
     const cOpt = '<option value="">구분 전체</option>' + cats.map(v => '<option' + (c.fCat === v ? ' selected' : '') + '>' + esc(v) + '</option>').join('');
     const filterBar = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center">'
-      + '<select id="cntFVendor" class="form-input" style="width:140px;font-size:12px" onchange="InventoryMgr.cntFilter()">' + vOpt + '</select>'
       + '<select id="cntFCat" class="form-input" style="width:120px;font-size:12px" onchange="InventoryMgr.cntFilter()">' + cOpt + '</select>'
-      + '<input id="cntFSearch" class="form-input" style="width:140px;font-size:12px" placeholder="품목명 검색" value="' + esc(c.fSearch) + '" oninput="InventoryMgr.cntFilter()">'
-      + '<span style="margin-left:auto;display:flex;gap:6px"><button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.cntAddSearch()"><i class="ti ti-search"></i> 품목 추가</button>'
-      + '<button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.cntNewItem()"><i class="ti ti-plus"></i> 신규 품목 등록 요청</button></span></div>';
+      + '<select id="cntFVendor" class="form-input" style="width:140px;font-size:12px" onchange="InventoryMgr.cntFilter()">' + vOpt + '</select>'
+      + '<input id="cntFSearch" class="form-input" style="width:150px;font-size:12px" placeholder="품목명 (키워드 일부)" value="' + esc(c.fSearch) + '" onkeydown="if(event.key===\'Enter\')InventoryMgr.cntLookup()">'
+      + '<button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.cntLookup()"><i class="ti ti-search"></i> 조회</button>'
+      + '<button class="btn-cancel-sm" style="font-size:12px;margin-left:auto" onclick="InventoryMgr.cntNewItem()"><i class="ti ti-plus"></i> 신규 품목 등록 요청</button></div>';
     const anom = r => { if (!priv || r.count_qty === '' || r.count_qty == null) return ''; const base = Number(r.opening_qty || 0) + Number(r.in_qty || 0); if (base < Number(r.count_qty)) return 'background:#FEF2F2'; if (Number(r.in_qty || 0) > 0 && Number(r.count_qty) === 0) return 'background:#FFFBEB'; return ''; };
     const fv = c.fVendor, fc = c.fCat, fs = (c.fSearch || '').toLowerCase();
     const trs = c.rows.map((r, i) => {
@@ -323,10 +326,10 @@
     html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:5px 6px;text-align:left">공급처</th><th style="padding:5px 6px;text-align:left">구분</th><th style="padding:5px 6px;text-align:left">품명</th><th style="padding:5px 6px;text-align:left">규격/단위</th><th style="padding:5px 6px">실사수량</th>' + (priv ? '<th style="padding:5px 6px">개당단가</th>' : '') + '<th></th></tr></thead><tbody>' + (trs || '<tr><td colspan="' + (priv ? 7 : 6) + '" style="padding:14px;text-align:center;color:var(--th)">표시할 품목이 없습니다. [품목 추가]로 불러오세요.</td></tr>') + '</tbody></table></div>';
     html += '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">'
       + '<button class="btn-cancel-sm" style="font-size:13px" onclick="InventoryMgr.draftSave(true)"><i class="ti ti-clock-pause"></i> 임시저장</button>'
-      + '<button class="btn-submit" style="font-size:13px" onclick="InventoryMgr.saveCount(false)"><i class="ti ti-device-floppy"></i> ' + (priv ? '저장 (부분 저장 가능)' : '저장 (매니저 검토용 제출)') + '</button>'
-      + (priv ? '<button class="btn-submit" style="font-size:13px;background:#15803D" onclick="InventoryMgr.saveCount(true)"><i class="ti ti-circle-check"></i> 최종 제출 (본사 마감 제출)</button>' : '')
+      + '<button class="btn-submit" style="font-size:13px" onclick="InventoryMgr.saveCount(false)"><i class="ti ti-device-floppy"></i> ' + (priv ? '저장 (부분 입력 가능)' : '저장 (매니저 검토용 제출)') + '</button>'
+      + (priv ? '<button class="btn-submit" style="font-size:13px;background:#15803D" onclick="InventoryMgr.saveCount(true)"><i class="ti ti-circle-check"></i> 최종 제출 (본사 마감)</button>' : '')
       + '<span id="cntDraftMsg" style="font-size:11px;color:var(--th)">' + (c.draftAt ? '최근 임시저장 ' + String(c.draftAt).replace('T', ' ').slice(5, 16) : '') + '</span></div>';
-    html += '<div style="margin-top:8px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;padding:8px 12px;font-size:12px;color:#9A3412">⚠️ 임시저장은 최종 제출이 아닙니다. 입력 후 반드시 <b>[저장]</b> 버튼을 눌러야 데이터가 저장되며, <b>임시저장 데이터는 당일 자정(24:00)이 지나면 자동 삭제</b>됩니다.</div>';
+    html += '<div style="margin-top:8px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;padding:8px 12px;font-size:12px;color:#9A3412">⚠️ 임시저장은 최종 제출이 아닙니다. 입력 후 반드시 <b>[저장]</b> 버튼을 눌러야 반영되며, 당일 자정(24:00)이 지나면 자동 삭제됩니다.</div>';
     b.innerHTML = c.head + html;
   };
   IM.cntInput = function (i, field, val) { if (!IM.cnt || !IM.cnt.rows[i]) return; IM.cnt.rows[i][field] = val; IM.scheduleAutosave(); };
@@ -354,27 +357,35 @@
         IM.renderCountBody(); toast('신규 품목 등록 요청 완료 (본사 분류대기)'); return true;
       });
   };
-  IM.cntAddSearch = function () {
-    modal('품목 추가 (검색)',
-      '<input id="asKw" class="form-input" placeholder="키워드 일부 입력 (예: 레몬)" oninput="InventoryMgr.asSearch(this.value)">'
-      + '<div style="font-size:11px;color:var(--th);margin:6px 0">키워드를 치면 연관 품목이 뜹니다. 클릭하면 바로 추가됩니다.</div>'
-      + '<div id="asResult" style="max-height:300px;overflow:auto"></div>', '닫기', function () { return true; });
-    setTimeout(() => { const i = document.getElementById('asKw'); if (i) i.focus(); }, 100);
+  IM.cntLookup = async function () {
+    const kw = ((document.getElementById('cntFSearch') || {}).value || '').trim();
+    const fc = (document.getElementById('cntFCat') || {}).value || '';
+    const fv = (document.getElementById('cntFVendor') || {}).value || '';
+    let list = [];
+    try { list = kw ? (await rpc('ch_item_search', { p_kw: kw }) || []) : (await rpc('ch_item_master_list', { p_vendor: fv || null, p_category: fc || null }) || []); }
+    catch (e) { alert(e.missing ? '보안 SQL 미실행 (closing_module5.sql)' : '오류: ' + e.message); return; }
+    if (kw) list = list.filter(m => (!fc || m.category === fc) && (!fv || m.vendor_slug === fv));
+    list.sort((a, b) => String(a.item || '').localeCompare(String(b.item || ''), 'ko'));
+    window.__lkList = list;
+    const rows = list.map((m, i) => '<label style="display:flex;gap:8px;align-items:center;padding:6px 8px;border-bottom:0.5px solid var(--crm,#eee);cursor:pointer;font-size:12px"><input type="checkbox" class="lkChk" value="' + i + '"><b>' + esc(m.item) + '</b><span style="color:var(--th)">' + esc(m.vendor_slug || '') + (m.category ? ' / ' + esc(m.category) : '') + (m.spec ? ' / ' + esc(m.spec) : '') + '</span></label>').join('');
+    modal('품목 조회 (' + list.length + '건' + (kw ? ' · "' + esc(kw) + '"' : ' · 전체') + ')',
+      '<div style="font-size:11px;color:var(--th);margin-bottom:6px">가나다순. 체크 후 아래 [선택 품목 일괄 추가]를 누르세요.</div>'
+      + '<div style="margin-bottom:6px"><label style="font-size:11px"><input type="checkbox" onclick="document.querySelectorAll(\'.lkChk\').forEach(c=>c.checked=this.checked)"> 전체 선택</label></div>'
+      + '<div style="max-height:46vh;overflow:auto;border:0.5px solid var(--crd);border-radius:8px">' + (rows || '<div style="padding:14px;text-align:center;color:var(--th)">품목이 없습니다. [신규 품목 등록 요청]을 이용하세요.</div>') + '</div>'
+      + '<button class="btn-submit" style="font-size:13px;margin-top:10px;width:100%" onclick="InventoryMgr.lookupAddChecked()"><i class="ti ti-plus"></i> 선택 품목 일괄 추가</button>', '닫기', function () { return true; });
   };
-  IM.asSearch = async function (kw) {
-    const box = document.getElementById('asResult'); if (!box) return;
-    if (!kw || kw.length < 1) { box.innerHTML = ''; return; }
-    let list = []; try { list = await rpc('ch_item_search', { p_kw: kw }) || []; } catch (e) { box.innerHTML = '<div style="font-size:12px;color:#B91C1C">' + (e.missing ? '보안 SQL 미실행' : esc(e.message)) + '</div>'; return; }
-    if (!list.length) { box.innerHTML = '<div style="font-size:12px;color:var(--th);padding:8px">연관 품목이 없습니다. [신규 품목 등록 요청]을 이용하세요.</div>'; return; }
-    window.__asList = list;
-    box.innerHTML = list.map((m, i) => '<div onclick="InventoryMgr.asPick(' + i + ')" style="padding:7px 9px;border:0.5px solid var(--crd);border-radius:7px;margin-bottom:4px;cursor:pointer;font-size:12px;display:flex;gap:8px;align-items:center"><b>' + esc(m.item) + '</b><span style="color:var(--th)">' + esc(m.vendor_slug || '') + (m.category ? ' / ' + esc(m.category) : '') + (m.spec ? ' / ' + esc(m.spec) : '') + '</span><i class="ti ti-plus" style="margin-left:auto;color:var(--br,#8a5a2b)"></i></div>').join('');
-  };
-  IM.asPick = function (i) {
-    const m = (window.__asList || [])[i]; if (!m || !IM.cnt) return;
-    if (IM.cnt.rows.some(r => (r.item || '') === m.item && (r.vendor_slug || '') === (m.vendor_slug || ''))) { toast('이미 목록에 있습니다'); return; }
-    IM.cnt.rows.push({ vendor_slug: m.vendor_slug || null, category: m.category || '', item: m.item, spec: m.spec || '', unit: m.unit || '', count_qty: '', unit_price: (m.unit_price != null ? m.unit_price : ''), pending: false });
+  IM.lookupAddChecked = function () {
+    if (!IM.cnt) return;
+    const picks = Array.from(document.querySelectorAll('.lkChk:checked')).map(c => (window.__lkList || [])[Number(c.value)]).filter(Boolean);
+    if (!picks.length) { toast('선택된 품목이 없습니다'); return; }
+    let added = 0;
+    picks.forEach(m => {
+      if (IM.cnt.rows.some(r => (r.item || '') === m.item && (r.vendor_slug || '') === (m.vendor_slug || ''))) return;
+      IM.cnt.rows.push({ vendor_slug: m.vendor_slug || null, category: m.category || '', item: m.item, spec: m.spec || '', unit: m.unit || '', count_qty: '', unit_price: (m.unit_price != null ? m.unit_price : ''), pending: false });
+      added++;
+    });
     const mm = document.getElementById('imModal'); if (mm) mm.remove();
-    IM.renderCountBody(); toast(m.item + ' 추가됨');
+    IM.renderCountBody(); toast(added + '개 품목 추가됨' + (picks.length - added ? ' (중복 ' + (picks.length - added) + ' 제외)' : ''));
   };
   async function loadVendorsForStore() { try { return await rpc('ch_vendors_for_store', { p_store: IM.state.store }) || []; } catch (e) { return []; } }
 
