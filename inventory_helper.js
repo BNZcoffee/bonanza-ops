@@ -79,15 +79,43 @@
       '<div style="max-width:1120px;margin:0 auto;padding:4px 2px 48px">'
       + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap"><h2 style="font-size:19px;font-weight:800;margin:0"><i class="ti ti-building-warehouse" style="color:var(--br,#8a5a2b)"></i> 매장 재고 관리</h2>'
       + '<span style="margin-left:auto;display:flex;gap:8px;align-items:center">' + storeSel + '<input type="month" class="form-input" style="width:140px" value="' + IM.state.ym + '" onchange="InventoryMgr.onYm(this.value)"></span></div>'
+      + '<div id="imNotice"></div>'
       + '<div id="imBanner"></div>'
       + '<div style="display:flex;border-bottom:0.5px solid var(--crd);margin:8px 0 14px">' + tabs.map(t => tb(t[0], t[1], t[2])).join('') + '</div>'
       + '<div id="imBody"></div></div>';
+    IM.renderNotice();
     IM.renderBanner();
     if (tab === 'loss') IM.renderLoss(); else if (tab === 'transfer') IM.renderTransfer(); else if (tab === 'count') IM.renderCount(); else IM.renderHQ();
   };
   IM.goTab = function (k) { IM.state.tab = k; IM.render(); };
   IM.onStore = function (v) { IM.state.store = v; IM.render(); };
   IM.onYm = function (v) { IM.state.ym = v; IM.render(); };
+
+  /* ───────── 공지사항(메뉴 제목 아래 전용 박스) ───────── */
+  IM.renderNotice = async function () {
+    const box = document.getElementById('imNotice'); if (!box) return;
+    let notice = '';
+    try { const { data } = await sbc().from('app_settings').select('value').eq('key', 'inventory_notice').maybeSingle(); notice = (data && data.value) || ''; } catch (e) {}
+    window.__imNotice = notice;
+    const editBtn = isHQ() ? '<button onclick="InventoryMgr.editNotice()" style="background:none;border:none;color:var(--br,#8a5a2b);cursor:pointer;font-size:12px;white-space:nowrap"><i class="ti ti-pencil"></i> ' + (notice ? '공지 수정' : '공지 등록') + '</button>' : '';
+    if (!notice && !isHQ()) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;gap:8px;align-items:flex-start">'
+      + '<i class="ti ti-speakerphone" style="color:#B45309;margin-top:2px"></i>'
+      + '<div style="flex:1;font-size:12.5px;color:#92400E;white-space:pre-wrap;line-height:1.5">' + (notice ? esc(notice) : '<span style="color:#B45309;opacity:.7">등록된 공지사항이 없습니다. (본사 관리자만 등록)</span>') + '</div>'
+      + editBtn + '</div>';
+  };
+  IM.editNotice = function () {
+    if (!isHQ()) return;
+    modal('매장 재고 관리 공지사항',
+      '<div style="font-size:12px;color:var(--th);margin-bottom:8px">전 직원 화면 상단에 항상 노출됩니다. (장문 작성 가능)</div>'
+      + '<textarea id="imNoticeInp" class="form-input" rows="6" style="resize:vertical" placeholder="예: 이번 달 실사는 11/28~11/30 입니다. 소모품 포함 전 품목 실사 바랍니다.">' + esc(window.__imNotice || '') + '</textarea>',
+      '저장', async function () {
+        const val = (document.getElementById('imNoticeInp').value || '').trim();
+        try { await sbc().from('app_settings').upsert({ key: 'inventory_notice', value: val }, { onConflict: 'key' }); }
+        catch (e) { alert('저장 오류: ' + (e.message || e)); return false; }
+        toast('공지 저장 완료'); IM.renderNotice(); return true;
+      });
+  };
 
   /* ───────── 상단 배너: 푸시 구독 + 마감 경고 ───────── */
   IM.renderBanner = async function () {
@@ -237,7 +265,9 @@
     const seasonLine = season.season_set
       ? (IM.state.ym + ' 실사 기간 ' + (season.inv_start ? String(season.inv_start).slice(0, 16).replace('T', ' ') : '') + ' ~ ' + (season.inv_end ? String(season.inv_end).slice(0, 16).replace('T', ' ') : ''))
       : (IM.state.ym + ' 실사 시즌 미설정 (상시 입력 가능)');
-    let head = '<div style="background:var(--cr,#faf7f2);border:0.5px solid var(--crd);border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:12.5px"><i class="ti ti-calendar-stats"></i> ' + esc(seasonLine) + ' · 상태: <b>' + statusTxt + '</b>' + (season.d_plus ? ' · <span style="color:#B91C1C">D+' + season.d_plus + ' 경과</span>' : '') + (season.locked ? ' · <span style="color:#B91C1C">월마감 잠금</span>' : '') + '</div>';
+    const roleTag = isHQ() ? '본사' : (priv ? '매니저' : '팀원/PT');
+    const saverLine = season.last_saver_name ? (' · 최종 저장 <b>' + esc(season.last_saver_name) + '</b> · ' + String(season.last_saved_at || '').replace('T', ' ').slice(5, 16)) : '';
+    let head = '<div style="background:var(--cr,#faf7f2);border:0.5px solid var(--crd);border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:12.5px"><i class="ti ti-calendar-stats"></i> ' + esc(seasonLine) + ' · 상태: <b>' + statusTxt + '</b>' + ' <span style="font-size:11px;background:#E0E7FF;color:#3730A3;border-radius:5px;padding:1px 6px">' + roleTag + '</span>' + saverLine + (season.d_plus ? ' · <span style="color:#B91C1C">D+' + season.d_plus + ' 경과</span>' : '') + (season.locked ? ' · <span style="color:#B91C1C">월마감 잠금</span>' : '') + '</div>';
     if (!open) { b.innerHTML = head + '<div style="padding:24px;text-align:center;color:var(--th)">' + (season.locked ? '월마감 잠금 상태라 입력할 수 없습니다.' : (season.status === 'confirmed' ? '이미 최종 확정되었습니다.' : '현재 실사 입력 기간이 아닙니다. (본사 설정 시즌에만 활성화)')) + '</div>'; return; }
     // 품목 자동채움: 기존 입력분 + 전월 이월 품목(없는 것만)
     let tmpl = { items: [] };
@@ -246,7 +276,14 @@
     const ikey = x => (x.item || '') + '|' + (x.vendor_slug || '');
     const seen = {}; existing.forEach(x => { seen[ikey(x)] = true; });
     const items = existing.concat((tmpl.items || []).filter(t => !seen[ikey(t)]));
-    const rowHtml = (it, i) => '<tr data-i="' + i + '">'
+    const rowAnom = (it) => {
+      if (!priv || !it || it.count_qty == null) return '';
+      const base = Number(it.opening_qty || 0) + Number(it.in_qty || 0);
+      if (base < Number(it.count_qty)) return 'background:#FEF2F2';
+      if (Number(it.in_qty || 0) > 0 && Number(it.count_qty) === 0) return 'background:#FFFBEB';
+      return '';
+    };
+    const rowHtml = (it, i) => '<tr data-i="' + i + '" style="' + rowAnom(it) + '"' + (rowAnom(it) ? ' title="이상치: 사용량 마이너스 또는 입고 있으나 실사 0"' : '') + '>'
       + '<td style="padding:3px"><input class="iv-cat form-input" style="font-size:12px;padding:4px;width:84px" value="' + esc(it ? it.category || '' : '') + '" placeholder="분류"></td>'
       + '<td style="padding:3px"><input class="iv-item form-input" style="font-size:12px;padding:4px" value="' + esc(it ? it.item || '' : '') + '" placeholder="품명"></td>'
       + '<td style="padding:3px"><input class="iv-spec form-input" style="font-size:12px;padding:4px;width:120px" value="' + esc(it ? it.spec || '' : '') + '" placeholder="규격(예: 1박스=20줄)"></td>'
@@ -258,10 +295,11 @@
     head += '<div style="font-size:12px;color:var(--th);margin-bottom:6px">' + (blind ? '팀원/PT 모드 — 분류/품명/규격/단위/실사수량만 입력합니다. (금액·단가·원가는 매니저 확정 단계에서 표시)' : '매니저 모드 — 금액·단가 검수 후 [최종 마감 확정]을 눌러 주세요.') + '</div>';
     head += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:4px">분류</th><th style="padding:4px">품명</th><th style="padding:4px">규격/단위기준</th><th style="padding:4px">단위</th><th style="padding:4px">실사수량</th>' + (priv ? '<th style="padding:4px">단가</th>' : '') + '<th></th></tr></thead><tbody id="ivRows">' + bodyRows + '</tbody></table></div>';
     head += '<button class="btn-cancel-sm" style="font-size:12px;margin-top:6px" onclick="InventoryMgr.addRow()"><i class="ti ti-plus"></i> 행 추가</button>';
-    head += '<div style="display:flex;gap:8px;margin-top:12px">'
-      + '<button class="btn-submit" style="font-size:13px" onclick="InventoryMgr.saveCount(false)"><i class="ti ti-device-floppy"></i> ' + (blind ? '실사 제출 (매니저 확인 대기)' : '수량 저장') + '</button>'
-      + (priv ? '<button class="btn-submit" style="font-size:13px;background:#15803D" onclick="InventoryMgr.saveCount(true)"><i class="ti ti-circle-check"></i> 최종 마감 확정</button>' : '')
-      + '</div>';
+    head += '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">'
+      + '<button class="btn-submit" style="font-size:13px" onclick="InventoryMgr.saveCount(false)"><i class="ti ti-device-floppy"></i> ' + (priv ? '저장 (부분 저장 가능)' : '저장 (매니저 검토용 제출)') + '</button>'
+      + (priv ? '<button class="btn-submit" style="font-size:13px;background:#15803D" onclick="InventoryMgr.saveCount(true)"><i class="ti ti-circle-check"></i> 최종 제출 (본사 마감 제출)</button>' : '')
+      + '</div>'
+      + '<div style="margin-top:8px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;padding:8px 12px;font-size:12px;color:#9A3412">⚠️ 입력 후 반드시 <b>[저장]</b> 버튼을 눌러야 데이터가 저장됩니다. 30개만 입력하고 저장해도 그 부분까지 즉시 저장되며, 이어서 입력 후 다시 저장하면 덮어쓰기로 갱신됩니다. 빈칸은 미입력, 0은 재고 0으로 구분됩니다.' + (priv ? ' <b>[최종 제출]</b> 시 미입력 품목이 남아있으면 안내됩니다.' : ' (최종 제출은 매니저가 합니다.)') + '</div>';
     b.innerHTML = head;
   };
   IM.addRow = function () { const tb = document.getElementById('ivRows'); if (!tb) return; const priv = !!document.querySelector('.iv-price'); const tr = document.createElement('tr'); tr.innerHTML = '<td style="padding:3px"><input class="iv-cat form-input" style="font-size:12px;padding:4px;width:84px" placeholder="분류"></td><td style="padding:3px"><input class="iv-item form-input" style="font-size:12px;padding:4px" placeholder="품명"></td><td style="padding:3px"><input class="iv-spec form-input" style="font-size:12px;padding:4px;width:120px" placeholder="규격"></td><td style="padding:3px"><input class="iv-unit form-input" style="font-size:12px;padding:4px;width:64px" placeholder="단위"></td><td style="padding:3px"><input class="iv-qty form-input" type="number" step="0.01" style="font-size:12px;padding:4px;width:76px;text-align:right"></td>' + (priv ? '<td style="padding:3px"><input class="iv-price form-input" type="number" style="font-size:12px;padding:4px;width:90px;text-align:right" placeholder="단가"></td>' : '') + '<td style="padding:3px;text-align:center"><button onclick="this.closest(\'tr\').remove()" style="background:none;border:none;color:#B91C1C;cursor:pointer">✕</button></td>'; tb.appendChild(tr); };
@@ -273,9 +311,16 @@
       return r;
     }).filter(r => r.item);
     if (!rows.length) { toast('입력된 품목이 없습니다'); return; }
+    const unfilled = rows.filter(r => r.count_qty === '').length;
     try {
-      if (confirmFinal) { if (!confirm('최종 마감 확정하면 해당 월 실사가 확정됩니다. 계속할까요?')) return; await rpc('ch_inv_confirm', { p_store: IM.state.store, p_ym: IM.state.ym, p_rows: rows }); toast('최종 마감 확정 완료'); }
-      else { await rpc('ch_inv_count_save', { p_store: IM.state.store, p_ym: IM.state.ym, p_rows: rows }); toast('실사 제출 완료'); }
+      if (confirmFinal) {
+        let msg = '최종 제출하면 해당 월 실사가 본사로 마감 제출됩니다.';
+        if (unfilled) msg += '\n\n⚠️ 실사수량 미입력 품목이 ' + unfilled + '건 있습니다. 그대로 제출할까요?';
+        else msg += ' 계속할까요?';
+        if (!confirm(msg)) return;
+        await rpc('ch_inv_confirm', { p_store: IM.state.store, p_ym: IM.state.ym, p_rows: rows }); toast('최종 제출 완료');
+      }
+      else { await rpc('ch_inv_count_save', { p_store: IM.state.store, p_ym: IM.state.ym, p_rows: rows }); toast('저장 완료' + (unfilled ? ' (미입력 ' + unfilled + '건)' : '')); }
     } catch (e) { alert('오류: ' + (/SEASON_CLOSED/.test(e.message || '') ? '실사 입력 기간이 아닙니다' : (/MONTH_LOCKED/.test(e.message || '') ? '월마감 잠금' : (/ACCESS_DENIED/.test(e.message || '') ? '권한 없음' : (e.missing ? '보안 SQL 미실행' : e.message))))); return; }
     IM.renderCount();
   };
@@ -292,17 +337,31 @@
     const SB = { none: '<span style="font-size:11px;background:#F1F5F9;color:#64748B;border-radius:5px;padding:1px 7px">미제출</span>', submitted: '<span style="font-size:11px;background:#FEF3C7;color:#B45309;border-radius:5px;padding:1px 7px">제출(확인대기)</span>', confirmed: '<span style="font-size:11px;background:#DCFCE7;color:#15803D;border-radius:5px;padding:1px 7px">확정</span>', rejected: '<span style="font-size:11px;background:#FEE2E2;color:#B91C1C;border-radius:5px;padding:1px 7px">반려</span>' };
     const stores = d.stores || [];
     const done = stores.filter(s => s.status === 'confirmed').length;
-    const rows = stores.map(s => '<tr><td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);font-weight:600">' + esc(s.store) + '</td><td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + (SB[s.status] || SB.none) + (s.reject_note ? ' <span style="font-size:11px;color:#B91C1C">(' + esc(s.reject_note) + ')</span>' : '') + '</td><td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">' + (s.status === 'confirmed' ? '' : '<button class="btn-cancel-sm" style="font-size:11px;padding:2px 8px" onclick="InventoryMgr.rejectStore(\'' + esc(s.store).replace(/'/g, "\\'") + '\')">보완요청</button>') + '</td></tr>').join('');
+    const dt = t => t ? String(t).replace('T', ' ').slice(0, 16) : '-';
+    const rows = stores.map(s => '<tr><td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);font-weight:600">' + esc(s.store) + '</td><td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + (SB[s.status] || SB.none) + (s.reject_note ? ' <span style="font-size:11px;color:#B91C1C">(' + esc(s.reject_note) + ')</span>' : '') + '</td><td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);font-size:11px;color:var(--th);white-space:nowrap">' + dt(s.confirmed_at || s.submitted_at) + '</td><td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">' + (s.status === 'confirmed' ? '' : '<button class="btn-cancel-sm" style="font-size:11px;padding:2px 8px" onclick="InventoryMgr.rejectStore(\'' + esc(s.store).replace(/'/g, "\\'") + '\')">보완요청</button>') + '</td></tr>').join('');
     b.innerHTML =
       '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap"><div style="font-size:14px;font-weight:800">' + IM.state.ym + ' 실사 제출현황 <span style="font-size:12px;color:var(--th)">(확정 ' + done + '/' + stores.length + ')</span>' + (d.d_plus ? ' <span style="font-size:12px;color:#B91C1C">마감 D+' + d.d_plus + '</span>' : '') + '</div>'
       + '<span style="margin-left:auto;display:flex;gap:6px"><button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.openSeason()"><i class="ti ti-calendar-cog"></i> 취합 시즌 설정</button><button class="btn-cancel-sm" style="font-size:12px" onclick="InventoryMgr.triggerReminder()"><i class="ti ti-bell"></i> 리마인드 지금 발송</button></span></div>'
-      + '<table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:6px 8px;text-align:left">매장</th><th style="padding:6px 8px;text-align:left">상태</th><th style="padding:6px 8px;text-align:center">반려</th></tr></thead><tbody>' + (rows || '<tr><td colspan="3" style="padding:14px;text-align:center;color:var(--th)">매장 없음</td></tr>') + '</tbody></table>';
+      + '<table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:6px 8px;text-align:left">매장</th><th style="padding:6px 8px;text-align:left">상태</th><th style="padding:6px 8px;text-align:left">제출/확정 일시</th><th style="padding:6px 8px;text-align:center">반려</th></tr></thead><tbody>' + (rows || '<tr><td colspan="4" style="padding:14px;text-align:center;color:var(--th)">매장 없음</td></tr>') + '</tbody></table>';
   };
-  IM.rejectStore = function (store) {
+  IM.rejectStore = async function (store) {
+    let an = {}; try { an = await rpc('ch_inv_anomalies', { p_store: store, p_ym: IM.state.ym }) || {}; } catch (e) {}
+    const neg = an.negative_use || [], inc = an.in_no_count || [];
+    let issues = [];
+    if (an.unfilled) issues.push('미입력 품목 ' + an.unfilled + '건');
+    if (neg.length) issues.push('사용량 마이너스 이상치 ' + neg.length + '건 (' + neg.slice(0, 3).map(x => esc(x.item)).join(', ') + (neg.length > 3 ? ' 외' : '') + ')');
+    if (inc.length) issues.push('입고 있으나 실사 0 ' + inc.length + '건 (' + inc.slice(0, 3).map(x => esc(x.item)).join(', ') + (inc.length > 3 ? ' 외' : '') + ')');
+    if (an.transfers) issues.push('당월 이관 ' + an.transfers + '건 — 수령/반영 확인 필요');
+    const issueBox = issues.length
+      ? '<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:9px 12px;margin-bottom:8px;font-size:12px;color:#991B1B"><b><i class="ti ti-alert-triangle"></i> 자동 감지된 수정 필요 항목</b><ul style="margin:6px 0 0;padding-left:18px">' + issues.map(i => '<li>' + i + '</li>').join('') + '</ul></div>'
+      : '<div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:12px;color:#15803D"><i class="ti ti-circle-check"></i> 자동 감지된 이상치는 없습니다.</div>';
+    const autoText = issues.length ? ('[자동 감지] ' + issues.join(' / ') + '\n\n') : '';
     modal(store + ' 실사 보완요청(반려)',
       '<div style="font-size:12px;color:var(--th);margin-bottom:8px">반려하면 해당 매장의 실사 입력이 다시 열리고, 매장 화면/푸시로 보완요청이 표시됩니다.</div>'
-      + '<input id="rjNote" class="form-input" placeholder="보완 요청 사유 (예: 소모품 누락, 수량 재확인)">',
-      '반려', async function () {
+      + issueBox
+      + '<label style="font-size:11px;color:var(--th)">보완 요청 사유 (장문 가능)</label>'
+      + '<textarea id="rjNote" class="form-input" rows="5" style="resize:vertical" placeholder="예: 소모품 누락, 특정 품목 수량 재확인 요망">' + esc(autoText) + '</textarea>',
+      '반려 처리', async function () {
         try { await rpc('ch_inv_reject', { p_store: store, p_ym: IM.state.ym, p_note: (document.getElementById('rjNote').value || '').trim() || null }); }
         catch (e) { alert('오류: ' + (e.missing ? '보안 SQL 미실행' : e.message)); return false; }
         toast('보완요청 처리 완료'); IM.renderHQ(); return true;
@@ -310,21 +369,52 @@
   };
   IM.openSeason = async function () {
     let s = {}; try { s = await rpc('ch_season_get', { p_ym: IM.state.ym }) || {}; } catch (e) {}
-    const v = t => t ? String(t).slice(0, 16) : '';
+    const dv = t => t ? String(t).slice(0, 10) : '';
     modal(IM.state.ym + ' 취합 시즌 설정 (월 전체 공통)',
-      '<div style="font-size:12px;color:var(--th);margin-bottom:8px">설정한 기간에만 월말 실사 입력이 활성화됩니다. (폐기/이관은 상시) 마감 후 미제출/반려 매장은 완료 시까지 자동 연장됩니다.</div>'
-      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label style="font-size:11px;color:var(--th)">시작일시</label><input id="seStart" type="datetime-local" class="form-input" value="' + v(s.inv_start) + '"></div>'
-      + '<div><label style="font-size:11px;color:var(--th)">마감일시</label><input id="seEnd" type="datetime-local" class="form-input" value="' + v(s.inv_end) + '"></div></div>'
-      + '<input id="seNote" class="form-input" style="margin-top:8px" placeholder="안내 메모(선택)" value="' + esc(s.note || '') + '">',
+      '<div style="font-size:12px;color:var(--th);margin-bottom:8px">설정한 기간에만 월말 실사 입력이 활성화됩니다. (폐기/이관은 상시) 시작일 00:00 ~ 마감일 23:59 로 자동 적용되고, 마감 후 미제출/반려 매장은 완료 시까지 자동 연장됩니다.</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label style="font-size:11px;color:var(--th)">시작일</label><input id="seStart" type="date" class="form-input" value="' + dv(s.inv_start) + '"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">마감일</label><input id="seEnd" type="date" class="form-input" value="' + dv(s.inv_end) + '"></div></div>'
+      + '<div style="font-size:11px;color:var(--th);margin-top:6px"><i class="ti ti-info-circle"></i> 공지사항은 메뉴 상단 공지 박스에서 별도로 등록합니다.</div>',
       '저장', async function () {
         const st = document.getElementById('seStart').value, en = document.getElementById('seEnd').value;
-        if (!st || !en) { alert('시작/마감 일시를 입력하세요'); return false; }
-        try { await rpc('ch_season_set', { p_ym: IM.state.ym, p_start: new Date(st).toISOString(), p_end: new Date(en).toISOString(), p_note: document.getElementById('seNote').value.trim() || null }); }
+        if (!st || !en) { alert('시작일/마감일을 선택하세요'); return false; }
+        if (en < st) { alert('마감일이 시작일보다 빠릅니다'); return false; }
+        try { await rpc('ch_season_set', { p_ym: IM.state.ym, p_start: new Date(st + 'T00:00:00').toISOString(), p_end: new Date(en + 'T23:59:59').toISOString(), p_note: null }); }
         catch (e) { alert('오류: ' + (e.missing ? '보안 SQL 미실행' : e.message)); return false; }
         toast('시즌 저장 완료'); IM.renderHQ(); return true;
       });
   };
-  IM.triggerReminder = async function () { await IM.pushSend({ mode: 'inventory_reminders', ym: IM.state.ym }); toast('리마인드 발송을 요청했습니다 (대상 기기에 푸시)'); };
+  IM.triggerReminder = async function () {
+    const opts = await loadStoreOptions();
+    const storeChks = opts.map(s => '<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;margin:2px 6px 2px 0"><input type="checkbox" class="rmStore" value="' + esc(s) + '"> ' + esc(s) + '</label>').join('');
+    window.__rmTargets = null;
+    modal('리마인드 발송 대상 선택',
+      '<div style="font-size:12px;margin-bottom:8px;color:var(--th)">발송 전 수신자(매장 매니저)를 먼저 확인합니다. 일반 팀원에게는 가지 않습니다.</div>'
+      + '<div style="display:flex;flex-direction:column;gap:6px;font-size:13px">'
+      + '<label><input type="radio" name="rmMode" value="unsubmitted" checked onclick="InventoryMgr._rmToggle()"> 미제출(미확정) 매장 전체</label>'
+      + '<label><input type="radio" name="rmMode" value="rejected" onclick="InventoryMgr._rmToggle()"> 보완요청(반려) 매장</label>'
+      + '<label><input type="radio" name="rmMode" value="custom" onclick="InventoryMgr._rmToggle()"> 특정 매장 직접 선택</label>'
+      + '</div>'
+      + '<div id="rmStores" style="display:none;margin-top:6px;max-height:120px;overflow:auto;border:0.5px solid var(--crd);border-radius:6px;padding:6px">' + storeChks + '</div>'
+      + '<button class="btn-cancel-sm" style="font-size:12px;margin-top:8px" onclick="InventoryMgr.previewReminder()"><i class="ti ti-users"></i> 수신자 확인</button>'
+      + '<div id="rmPreview" style="margin-top:8px"></div>',
+      '확인 후 발송', async function () {
+        if (!window.__rmTargets || !window.__rmTargets.length) { alert('먼저 [수신자 확인]을 눌러 대상을 확인하세요'); return false; }
+        await IM.pushSend({ mode: 'notify_stores', stores: window.__rmTargets, title: '⏰ 월말 실사 리마인드', body: IM.state.ym + ' 실사 재고 제출을 완료해 주세요.', url: './index.html' });
+        toast(window.__rmTargets.length + '개 매장 매니저에게 리마인드를 발송했습니다'); window.__rmTargets = null; return true;
+      });
+  };
+  IM._rmToggle = function () { const m = document.querySelector('input[name=rmMode]:checked').value; document.getElementById('rmStores').style.display = m === 'custom' ? '' : 'none'; document.getElementById('rmPreview').innerHTML = ''; window.__rmTargets = null; };
+  IM.previewReminder = async function () {
+    const mode = document.querySelector('input[name=rmMode]:checked').value;
+    const stores = mode === 'custom' ? Array.from(document.querySelectorAll('.rmStore:checked')).map(x => x.value) : [];
+    if (mode === 'custom' && !stores.length) { document.getElementById('rmPreview').innerHTML = '<div style="font-size:12px;color:#B91C1C">매장을 선택하세요</div>'; return; }
+    let d; try { d = await rpc('ch_inv_managers', { p_ym: IM.state.ym, p_mode: mode, p_stores: stores }); } catch (e) { document.getElementById('rmPreview').innerHTML = '<div style="font-size:12px;color:#B91C1C">' + (e.missing ? '보안 SQL 미실행 (closing_inv_ux.sql)' : esc(e.message)) + '</div>'; return; }
+    const list = d.stores || [];
+    window.__rmTargets = list.map(s => s.store);
+    const rows = list.map(s => '<tr><td style="padding:3px 8px;border-bottom:0.5px solid var(--crm,#eee);font-weight:600">' + esc(s.store) + '</td><td style="padding:3px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + ((s.managers || []).length ? s.managers.map(m => esc(m.name) + ' (' + esc(m.position) + ')').join(', ') : '<span style="color:#B91C1C">매니저 미지정</span>') + '</td></tr>').join('');
+    document.getElementById('rmPreview').innerHTML = '<div style="font-size:12px;margin-bottom:4px">대상 <b>' + list.length + '</b>개 매장 · 수신자:</div><table style="width:100%;border-collapse:collapse;font-size:12px;border:0.5px solid var(--crd);border-radius:6px;overflow:hidden"><tbody>' + (rows || '<tr><td colspan="2" style="padding:8px;text-align:center;color:var(--th)">대상 없음</td></tr>') + '</tbody></table>';
+  };
 
   /* ───────── 마운트 / 로그인 시 푸시 SW 등록 + 리마인드 핑 ───────── */
   IM.boot = function () {

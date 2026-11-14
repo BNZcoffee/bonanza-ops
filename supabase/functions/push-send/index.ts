@@ -102,6 +102,16 @@ Deno.serve(async (req) => {
       return json({ ok: true, sent: n });
     }
 
+    if (mode === 'notify_stores') {
+      const isHQ = !!(user.is_master || user.role === 'admin' || user.role === 'dept' || user.store === '본사');
+      if (!isHQ) return json({ error: 'forbidden' }, 403);
+      const stores: string[] = Array.isArray(b.stores) ? b.stores : [];
+      if (!stores.length) return json({ ok: true, sent: 0 });
+      const subs = await activeSubsForStores(stores);
+      const n = await sendToSubs(subs, { title: b.title || '보난자 운영 알림', body: b.body || '', tag: b.tag || 'notify', url: b.url || './index.html' });
+      return json({ ok: true, sent: n, stores: stores.length });
+    }
+
     if (mode === 'inventory_reminders') {
       const ym = b.ym; if (!ym) return json({ error: 'no_ym' }, 400);
       const { data: season } = await admin.from('closing_seasons').select('inv_start,inv_end').eq('ym', ym).maybeSingle();
