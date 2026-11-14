@@ -497,6 +497,7 @@
     const head = '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
       + '<span style="font-size:14px;font-weight:800"><i class="ti ti-credit-card"></i> 법인카드 마스터 <span style="font-size:11px;color:var(--th)">(' + cards.length + '매장)</span></span>'
       + '<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">' + pinBtn + auditBtn
+      + '<button class="btn-cancel-sm" style="font-size:12px" onclick="ClosingHelper.exportAccountingExcel(\'all\')"><i class="ti ti-file-spreadsheet"></i> 회계 통합엑셀</button>'
       + '<button class="btn-submit" style="font-size:12px" onclick="ClosingHelper.openCardEdit(null)"><i class="ti ti-plus"></i> 카드 등록</button></span></div>';
     b.innerHTML = head + pinWarn + CH.cardTableHtml(cards) + CH.reconcileBoxHtml();
     window.__chRecon = null;
@@ -719,7 +720,7 @@
     const RB = { matched: '<span style="font-size:10px;background:#DCFCE7;color:#15803D;border-radius:5px;padding:1px 6px">일치·마감</span>', need_input: '<span style="font-size:10px;background:#FEF3C7;color:#B45309;border-radius:5px;padding:1px 6px">입력필요</span>', review: '<span style="font-size:10px;background:#FEE2E2;color:#B91C1C;border-radius:5px;padding:1px 6px">확인필요</span>', pending: '<span style="font-size:10px;background:#F1F5F9;color:#64748B;border-radius:5px;padding:1px 6px">대기</span>' };
     const accName = code => { const a = (window.__chAccounts || []).find(x => x.code === code); return a ? a.name : (code || '-'); };
     const rows = txs.map(t => '<tr><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(String(t.tx_date || '').slice(5)) + '</td><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:right;font-weight:600">' + won(t.total_amount) + '</td><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(accName(t.account_code)) + '</td><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee);font-size:11px;color:var(--th)">' + esc(t.memo || '') + '</td><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">' + (RB[t.recon_status] || RB.pending) + (t.source === 'accounting' && t.recon_status === 'need_input' ? ' <button class="btn-cancel-sm" style="font-size:10px;padding:1px 6px" onclick="ClosingHelper.classifyTx(' + t.id + ')">입력</button>' : '') + '</td></tr>').join('');
-    b.innerHTML = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' + sel + '<input type="month" class="form-input" style="width:140px" value="' + ym + '" onchange="ClosingHelper.state.ym=this.value;ClosingHelper.renderTab4()"><button class="btn-submit" style="font-size:12px;margin-left:auto" onclick="ClosingHelper.openCardTxAdd(\'' + esc(store).replace(/'/g, "\\'") + '\')"><i class="ti ti-plus"></i> 수시 등록</button></div>'
+    b.innerHTML = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' + sel + '<input type="month" class="form-input" style="width:140px" value="' + ym + '" onchange="ClosingHelper.state.ym=this.value;ClosingHelper.renderTab4()"><span style="margin-left:auto;display:flex;gap:6px"><button class="btn-cancel-sm" style="font-size:12px" onclick="ClosingHelper.exportAccountingExcel(\'' + esc(store).replace(/'/g, "\\'") + '\')"><i class="ti ti-file-spreadsheet"></i> 내 매장 엑셀</button><button class="btn-submit" style="font-size:12px" onclick="ClosingHelper.openCardTxAdd(\'' + esc(store).replace(/'/g, "\\'") + '\')"><i class="ti ti-plus"></i> 수시 등록</button></span></div>'
       + bar
       + '<div style="font-size:12px;font-weight:700;margin:12px 0 4px">' + ym + ' 카드 사용내역 <span style="font-size:11px;color:var(--th)">(' + txs.length + '건)</span></div>'
       + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:5px 8px;text-align:left">일자</th><th style="padding:5px 8px;text-align:right">금액</th><th style="padding:5px 8px;text-align:left">계정과목</th><th style="padding:5px 8px;text-align:left">내역</th><th style="padding:5px 8px">상태</th></tr></thead><tbody>' + (rows || '<tr><td colspan="5" style="padding:14px;text-align:center;color:var(--th)">등록된 내역 없음</td></tr>') + '</tbody></table></div>';
@@ -759,6 +760,120 @@
         catch (e) { alert('오류: ' + (e.missing ? '보안 SQL 미실행' : e.message)); return false; }
         toast('저장 완료'); CH.renderTab4(); return true;
       });
+  };
+
+  /* ======================================================================
+   * [모듈 C] 회계팀 제출용 통합 엑셀 (ExcelJS)
+   *   본사=전 매장(PDC 제외), 매니저=본인 매장. 동일 레이아웃 + 실제 계산값.
+   * ==================================================================== */
+  CH.exportAccountingExcel = async function (scope) {
+    if (typeof ExcelJS === 'undefined') { alert('엑셀 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요.'); return; }
+    toast('엑셀 생성 중…');
+    let d;
+    try { d = await rpc('ch_export_data', { p_ym: CH.state.ym, p_store: (scope === 'all' ? null : scope) }); }
+    catch (e) { alert('데이터 조회 오류: ' + (e.missing ? '보안 SQL 미실행 (closing_module_c.sql)' : (/ACCESS_DENIED/.test(e.message || '') ? '권한 없음' : e.message))); return; }
+    const accounts = d.accounts || [], stores = d.stores || [], ym = d.ym;
+    if (!stores.length) { alert('대상 매장이 없습니다'); return; }
+    const accName = c => { const a = accounts.find(x => x.code === c); return a ? a.name : (c || '미분류'); };
+    const num = n => Number(n || 0);
+    const money = '#,##0';
+    const HDR = { argb: 'FFF3EAD9' };
+    const thin = { top: { style: 'thin', color: { argb: 'FFDDDDDD' } }, left: { style: 'thin', color: { argb: 'FFDDDDDD' } }, bottom: { style: 'thin', color: { argb: 'FFDDDDDD' } }, right: { style: 'thin', color: { argb: 'FFDDDDDD' } } };
+    const wb = new ExcelJS.Workbook(); wb.creator = '보난자 월말 정산 도우미';
+    const safe = s => String(s || '').replace(/[\[\]\*\?\/\\:]/g, '').slice(0, 22);
+    function headerRow(ws, cells, from) {
+      const r = ws.addRow(cells);
+      r.eachCell((c, i) => { if (!from || i >= from) { c.font = { bold: true }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: HDR }; c.alignment = { vertical: 'middle', horizontal: 'center' }; c.border = thin; } });
+      return r;
+    }
+    // 1) 법인카드 전사집계 (전체 모드)
+    if (scope === 'all' && stores.length > 1) {
+      const ws = wb.addWorksheet('법인카드 전사집계');
+      ws.getCell('A1').value = '법인카드 계정별 전사집계 (' + ym + ') — 합계금액 기준, PDC 제외'; ws.getCell('A1').font = { bold: true, size: 13 };
+      ws.addRow([]);
+      headerRow(ws, ['구분', '계정과목'].concat(stores.map(s => s.store)).concat(['합계']));
+      accounts.forEach(a => {
+        const row = [a.kind, a.name]; let tot = 0;
+        stores.forEach(s => { const v = (s.cards || []).filter(c => !c.cancelled && c.account_code === a.code).reduce((x, c) => x + num(c.total), 0); row.push(v); tot += v; });
+        row.push(tot); const rr = ws.addRow(row);
+        for (let i = 3; i <= stores.length + 3; i++) rr.getCell(i).numFmt = money;
+      });
+      ws.columns.forEach((c, i) => { c.width = i < 2 ? 12 : 12; });
+    }
+    // 2) 업체별 합산 (전체 모드) — 발주(세금계산서 발급분) 합계금액 기준
+    if (scope === 'all' && stores.length > 1) {
+      const ws = wb.addWorksheet('업체별 합산');
+      ws.getCell('A1').value = '업체별 합산 (' + ym + ') — 합계금액 기준, PDC 제외'; ws.getCell('A1').font = { bold: true, size: 13 };
+      ws.addRow([]);
+      const vendors = Array.from(new Set([].concat.apply([], stores.map(s => (s.orders || []).map(o => o.vendor || '(미지정)'))))).sort();
+      headerRow(ws, ['업체명'].concat(stores.map(s => s.store)).concat(['합계']));
+      vendors.forEach(v => {
+        const row = [v]; let tot = 0;
+        stores.forEach(s => { const amt = (s.orders || []).filter(o => (o.vendor || '(미지정)') === v).reduce((x, o) => x + num(o.total || o.amount), 0); row.push(amt); tot += amt; });
+        row.push(tot); const rr = ws.addRow(row);
+        for (let i = 2; i <= stores.length + 2; i++) rr.getCell(i).numFmt = money;
+      });
+      ws.columns.forEach((c, i) => { c.width = i === 0 ? 20 : 12; });
+    }
+    // 3) 매장별 법인카드 사용세부내역 (좌측 17계정 집계 + 우측 상세)
+    stores.forEach(s => {
+      const ws = wb.addWorksheet('카드_' + safe(s.store));
+      ws.getCell('A1').value = '[' + s.store + '] 법인카드 사용세부내역 (' + ym.replace('-', '.') + '월)'; ws.getCell('A1').font = { bold: true, size: 12 };
+      ws.addRow([]);
+      headerRow(ws, ['구분', '계정과목', '금액', '', 'No.', '일자', '금액', '계정과목', '내용(인원/사용내역)', '카드번호']);
+      const cards = (s.cards || []).filter(c => !c.cancelled);
+      const sumByAcc = code => cards.filter(c => c.account_code === code).reduce((x, c) => x + num(c.total), 0);
+      const maxRows = Math.max(accounts.length, cards.length);
+      let gtot = 0;
+      for (let i = 0; i < maxRows; i++) {
+        const a = accounts[i], c = cards[i];
+        const left = a ? [a.kind, a.name, (function () { const v = sumByAcc(a.code); gtot += v; return v; })()] : ['', '', null];
+        const right = c ? ['', (c.tx_date ? String(c.tx_date).slice(5).replace('-', '.') : ''), num(c.total), accName(c.account_code), c.memo || '', (c.card_last ? '****' + c.card_last : '')] : ['', '', null, '', '', ''];
+        const rr = ws.addRow(left.concat(right));
+        rr.getCell(3).numFmt = money; rr.getCell(7).numFmt = money;
+        rr.eachCell((cell) => { cell.border = thin; });
+      }
+      // 합계행
+      const tr = ws.addRow(['', '합  계', gtot]); tr.getCell(2).font = { bold: true }; tr.getCell(3).font = { bold: true }; tr.getCell(3).numFmt = money;
+      ws.columns = [{ width: 8 }, { width: 18 }, { width: 13 }, { width: 2 }, { width: 5 }, { width: 8 }, { width: 13 }, { width: 14 }, { width: 40 }, { width: 16 }];
+    });
+    // 4) 매장별 입재고 종합
+    stores.forEach(s => {
+      const ws = wb.addWorksheet('입재고_' + safe(s.store));
+      ws.getCell('A1').value = '[' + s.store + '] 입재고 종합 (' + ym + ')'; ws.getCell('A1').font = { bold: true, size: 12 };
+      ws.addRow([]);
+      headerRow(ws, ['분류', '품명', '규격', '단위', '기초수량', '입고', '사용', '기말(실사)', '단가', '기말금액']);
+      (s.inventory || []).forEach(it => {
+        const closeQ = num(it.count_qty), up = num(it.unit_price);
+        const rr = ws.addRow([it.category || '', it.item || '', it.spec || '', it.unit || '', num(it.opening_qty), num(it.in_qty), num(it.use_qty), closeQ, up, closeQ * up]);
+        [5, 6, 7, 8].forEach(i => rr.getCell(i).numFmt = '#,##0.##');
+        [9, 10].forEach(i => rr.getCell(i).numFmt = money);
+        rr.eachCell(c => c.border = thin);
+      });
+      ws.columns = [{ width: 10 }, { width: 26 }, { width: 16 }, { width: 8 }, { width: 11 }, { width: 10 }, { width: 10 }, { width: 11 }, { width: 11 }, { width: 14 }];
+    });
+    // 5) 매장별 세금계산서 사용세부내역 (발주 기준)
+    stores.forEach(s => {
+      const ws = wb.addWorksheet('계산서_' + safe(s.store));
+      ws.getCell('A1').value = '[' + s.store + '] 세금계산서 사용세부내역 (' + ym + ')'; ws.getCell('A1').font = { bold: true, size: 12 };
+      ws.addRow([]);
+      headerRow(ws, ['No.', '업체명', '구분(계정)', '공급가', '부가세', '합계금액']);
+      let i = 1;
+      (s.orders || []).filter(o => !o.is_corp_card).forEach(o => {
+        const supply = num(o.supply) || Math.round(num(o.total || o.amount) / 1.1), vat = num(o.vat) || (num(o.total || o.amount) - supply), total = num(o.total) || num(o.amount);
+        const rr = ws.addRow([i++, o.vendor || '(미지정)', o.category || '', supply, vat, total]);
+        [4, 5, 6].forEach(k => rr.getCell(k).numFmt = money);
+        rr.eachCell(c => c.border = thin);
+      });
+      ws.columns = [{ width: 5 }, { width: 22 }, { width: 14 }, { width: 14 }, { width: 12 }, { width: 14 }];
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob); const a = document.createElement('a');
+    a.href = url; a.download = '회계제출_' + (scope === 'all' ? '전매장' : scope) + '_' + ym + '.xlsx'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2500);
+    toast('엑셀 다운로드 완료');
   };
 
   // 로그인/세션 복원 순서와 무관하게 안전 마운트: currentUser 가 준비될 때까지 대기 후 플래그 로드

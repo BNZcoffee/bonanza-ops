@@ -233,7 +233,13 @@
       : (IM.state.ym + ' 실사 시즌 미설정 (상시 입력 가능)');
     let head = '<div style="background:var(--cr,#faf7f2);border:0.5px solid var(--crd);border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:12.5px"><i class="ti ti-calendar-stats"></i> ' + esc(seasonLine) + ' · 상태: <b>' + statusTxt + '</b>' + (season.d_plus ? ' · <span style="color:#B91C1C">D+' + season.d_plus + ' 경과</span>' : '') + (season.locked ? ' · <span style="color:#B91C1C">월마감 잠금</span>' : '') + '</div>';
     if (!open) { b.innerHTML = head + '<div style="padding:24px;text-align:center;color:var(--th)">' + (season.locked ? '월마감 잠금 상태라 입력할 수 없습니다.' : (season.status === 'confirmed' ? '이미 최종 확정되었습니다.' : '현재 실사 입력 기간이 아닙니다. (본사 설정 시즌에만 활성화)')) + '</div>'; return; }
-    const items = inv.items || [];
+    // 품목 자동채움: 기존 입력분 + 전월 이월 품목(없는 것만)
+    let tmpl = { items: [] };
+    try { tmpl = await rpc('ch_inv_template', { p_store: IM.state.store, p_ym: IM.state.ym }) || tmpl; } catch (e) {}
+    const existing = inv.items || [];
+    const ikey = x => (x.item || '') + '|' + (x.vendor_slug || '');
+    const seen = {}; existing.forEach(x => { seen[ikey(x)] = true; });
+    const items = existing.concat((tmpl.items || []).filter(t => !seen[ikey(t)]));
     const rowHtml = (it, i) => '<tr data-i="' + i + '">'
       + '<td style="padding:3px"><input class="iv-cat form-input" style="font-size:12px;padding:4px;width:84px" value="' + esc(it ? it.category || '' : '') + '" placeholder="분류"></td>'
       + '<td style="padding:3px"><input class="iv-item form-input" style="font-size:12px;padding:4px" value="' + esc(it ? it.item || '' : '') + '" placeholder="품명"></td>'
