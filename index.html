@@ -617,6 +617,10 @@ table.g-tbl th{background:var(--crm);font-weight:700}
       <button class="nav-btn" onclick="goPage('staffingPlan')" id="nav-staffingPlan" style="display:none"><i class="ti ti-layout-grid"></i> 인원 배치 관리</button>
       <button class="nav-btn" onclick="goPage('closingHelper')" id="nav-closingHelper" style="display:none"><i class="ti ti-calculator"></i> 월말 정산 도우미</button>
     </div>
+    <div class="sidebar-section" id="inventoryNav">
+      <div class="sidebar-label">매장 재고</div>
+      <button class="nav-btn" onclick="goPage('inventory')" id="nav-inventory"><i class="ti ti-building-warehouse"></i> 매장 재고 관리</button>
+    </div>
     <div class="sidebar-section" id="adminNav" style="display:none">
       <div class="sidebar-label">관리</div>
       <button class="nav-btn" onclick="goPage('drafts')" id="nav-drafts"><i class="ti ti-notes"></i> 임시저장<span class="nav-new" id="draftBadge" style="display:none">!</span></button>
@@ -736,6 +740,7 @@ table.g-tbl th{background:var(--crm);font-weight:700}
 const SUPABASE_URL = 'https://fhwiihbtlspeckmgnlax.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZod2lpaGJ0bHNwZWNrbWdubGF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MzQxMjcsImV4cCI6MjA5NjMxMDEyN30.izRHlmKaKLBSY78eSNMpyt-mGw0Whlt6XIAoNjp5Aqo';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+window.SUPABASE_URL = SUPABASE_URL; window.SUPABASE_KEY = SUPABASE_KEY;
 
 // ── PWA 홈화면 아이콘: 정적 파일(manifest.json + icon-192/512 + apple-touch-icon)로 일원화.
 //    과거에는 app_settings.logo_url 을 읽어 blob manifest 로 동적 교체했으나,
@@ -1930,6 +1935,11 @@ function goPage(page) {
     if (!ClosingHelper.canAccess() || !ClosingHelper.navVisible()) { area.innerHTML = '<div style="text-align:center;padding:50px;color:var(--th)">접근 권한이 없습니다.</div>'; return; }
     const nb = document.getElementById('nav-closingHelper'); if (nb) nb.classList.add('active');
     ClosingHelper.render(area);
+  } else if (page === 'inventory') {
+    // 매장 재고 관리 — 전 직원(매니저/팀원/PT) 접근. 매장 스코프/권한은 서버 RPC 재검증.
+    if (!window.InventoryMgr) { area.innerHTML = '<div style="text-align:center;padding:50px;color:var(--th)">모듈 로딩 중입니다. 잠시 후 다시 시도해주세요.</div>'; return; }
+    const nb = document.getElementById('nav-inventory'); if (nb) nb.classList.add('active');
+    InventoryMgr.render(area);
   }
 }
 
@@ -20715,5 +20725,6 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="closing_helper.js?v=2026111401"></script>
+<script src="inventory_helper.js?v=2026111401"></script>
 </body>
 </html>
