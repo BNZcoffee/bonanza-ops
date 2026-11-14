@@ -173,9 +173,9 @@
       + (window.__closingVisible !== true ? '<span style="font-size:11px;background:#FEF3C7;color:#92400E;border-radius:6px;padding:2px 8px;font-weight:700">개발중 · 총괄 전용</span>' : '')
       + '<span style="font-size:11px;color:var(--th)">' + (CH.isHQ() ? '본사 관리자' : '매장 관리자') + '</span>'
       + '<span style="margin-left:auto">' + settingsBtn + '</span></div>'
-      + '<div style="display:flex;border-bottom:0.5px solid var(--crd);margin:8px 0 14px">' + tb(1, '서류 자동검수', 'ti-file-search') + tb(2, '발주 추이 & 원가', 'ti-chart-line') + tb(3, '품목·단가 & 보관함', 'ti-database') + '</div>'
+      + '<div style="display:flex;border-bottom:0.5px solid var(--crd);margin:8px 0 14px">' + tb(1, '서류 자동검수', 'ti-file-search') + tb(2, '발주 추이 & 원가', 'ti-chart-line') + tb(3, '품목·단가 & 보관함', 'ti-database') + tb(4, '법인카드', 'ti-credit-card') + '</div>'
       + '<div id="chTabBody"></div></div>';
-    if (tab === 1) CH.renderTab1(); else if (tab === 2) CH.renderTab2(); else CH.renderTab3();
+    if (tab === 1) CH.renderTab1(); else if (tab === 2) CH.renderTab2(); else if (tab === 3) CH.renderTab3(); else CH.renderTab4();
   };
   CH.goTab = function (n) { CH.state.tab = n; CH.render(document.getElementById('contentArea')); };
 
@@ -465,6 +465,300 @@
     m.innerHTML = '<div class="modal-box" style="max-width:600px;width:95%"><div class="modal-title">' + esc(title) + '</div><div style="max-height:64vh;overflow:auto;padding:2px 2px 10px">' + bodyHtml + '</div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn-cancel-sm" onclick="document.getElementById(\'chModal\').remove()">취소</button><button class="btn-submit" id="chModalOk">' + esc(okLabel || '확인') + '</button></div></div>';
     document.body.appendChild(m);
     document.getElementById('chModalOk').onclick = async function () { this.disabled = true; let close = true; try { if (onOk) close = (await onOk()) !== false; } catch (e) { alert('오류: ' + (e.message || e)); close = false; } this.disabled = false; if (close) { const mm = document.getElementById('chModal'); if (mm) mm.remove(); } };
+  };
+
+  /* ======================================================================
+   * [탭 4] 법인카드 — 마스터(암호화) · 수시등록/한도 · 월말 자동대사 · 총괄 2차 PIN
+   * ==================================================================== */
+  CH.card = { reveal: {} };
+  const isMaster = () => !!(window.currentUser && window.currentUser.is_master);
+  const mask4 = (last) => '•••• ' + (last || '····');
+  async function loadAccounts() { if (window.__chAccounts) return window.__chAccounts; try { window.__chAccounts = await rpc('ch_accounts', {}) || []; } catch (e) { window.__chAccounts = []; } return window.__chAccounts; }
+  async function loadStoreOptions() { if (window.__chStoreOpts) return window.__chStoreOpts; try { const { data } = await sbc().from('store_options').select('name,sort_order').order('sort_order'); window.__chStoreOpts = (data || []).map(s => s.name).filter(n => n && n !== '본사'); } catch (e) { window.__chStoreOpts = []; } return window.__chStoreOpts; }
+
+  CH.renderTab4 = async function () {
+    const b = document.getElementById('chTabBody'); if (!b) return;
+    b.innerHTML = '<div style="padding:24px;text-align:center;color:var(--th)">불러오는 중…</div>';
+    await loadAccounts();
+    if (CH.isHQ()) return CH.renderCardAdmin(b);
+    return CH.renderCardStore(b);
+  };
+
+  /* ───────── 본사: 카드 마스터 + 자동대사 ───────── */
+  CH.renderCardAdmin = async function (b) {
+    let cards = [];
+    try { cards = await rpc('ch_cards', {}) || []; } catch (e) { b.innerHTML = '<div style="padding:24px;text-align:center;color:#B91C1C">' + (e.missing ? '보안 SQL 미실행 — closing_cards.sql 을 먼저 실행하세요' : '오류: ' + esc(e.message)) + '</div>'; return; }
+    let pin = { set: false, locked: false };
+    if (isMaster()) { try { pin = await rpc('ch_secpin_status', {}) || pin; } catch (e) {} }
+    const master = isMaster();
+    const pinBtn = master ? '<button class="btn-cancel-sm" style="font-size:12px" onclick="ClosingHelper.openSecPin()"><i class="ti ti-lock-cog"></i> 보안 PIN ' + (pin.set ? '변경' : '설정') + '</button>' : '';
+    const auditBtn = master ? '<button class="btn-cancel-sm" style="font-size:12px" onclick="ClosingHelper.openCardAudit()"><i class="ti ti-history"></i> 열람 기록</button>' : '';
+    const pinWarn = (master && !pin.set) ? '<div style="font-size:12px;background:#FEF3C7;color:#92400E;border-radius:8px;padding:8px 12px;margin-bottom:10px"><i class="ti ti-alert-triangle"></i> 보안 PIN 미설정 — 민감정보 열람/수정 전에 [보안 PIN 설정]을 먼저 완료하세요.</div>' : '';
+    const head = '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+      + '<span style="font-size:14px;font-weight:800"><i class="ti ti-credit-card"></i> 법인카드 마스터 <span style="font-size:11px;color:var(--th)">(' + cards.length + '매장)</span></span>'
+      + '<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">' + pinBtn + auditBtn
+      + '<button class="btn-submit" style="font-size:12px" onclick="ClosingHelper.openCardEdit(null)"><i class="ti ti-plus"></i> 카드 등록</button></span></div>';
+    b.innerHTML = head + pinWarn + CH.cardTableHtml(cards) + CH.reconcileBoxHtml();
+    window.__chRecon = null;
+  };
+  CH.cardTableHtml = function (cards) {
+    const master = isMaster();
+    window.__chCard = {};
+    const td = (v) => '<td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + v + '</td>';
+    const sens = (has, id, field) => '<span id="cs-' + field + '-' + id + '" style="font-family:monospace">' + (has ? '••••' : '-') + '</span>';
+    const rows = cards.map(c => {
+      window.__chCard[c.id] = c;
+      const act = master
+        ? '<button class="btn-cancel-sm" style="font-size:11px;padding:3px 7px" onclick="ClosingHelper.revealCard(' + c.id + ')"><i class="ti ti-eye"></i> 열람</button>'
+          + ' <button class="btn-cancel-sm" style="font-size:11px;padding:3px 7px" onclick="ClosingHelper.openCardEdit(' + c.id + ')">수정</button>'
+          + ' <button class="btn-cancel-sm" style="font-size:11px;padding:3px 7px;color:#B91C1C;border-color:#FCA5A5" onclick="ClosingHelper.delCard(' + c.id + ')">삭제</button>'
+        : '<button class="btn-cancel-sm" style="font-size:11px;padding:3px 7px" onclick="ClosingHelper.openCardEdit(' + c.id + ')">수정</button>';
+      return '<tr id="cardrow-' + c.id + '">'
+        + td(esc(c.category || '-')) + td('<b>' + esc(c.store) + '</b>')
+        + '<td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);font-family:monospace"><span id="cs-num-' + c.id + '">' + mask4(c.card_last) + '</span></td>'
+        + '<td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">' + (master ? sens(c.has_expiry, c.id, 'exp') : '-') + '</td>'
+        + '<td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">' + (master ? sens(c.has_cvc, c.id, 'cvc') : '-') + '</td>'
+        + '<td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">' + (master ? sens(c.has_pw, c.id, 'pw') : '-') + '</td>'
+        + td(esc(c.card_user || '-')) + td(esc(c.remark || '-'))
+        + '<td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:right">' + (c.limit_amount != null ? won(c.limit_amount) : '-') + '</td>'
+        + '<td style="padding:5px 8px;border-bottom:0.5px solid var(--crm,#eee);white-space:nowrap">' + act + '</td></tr>';
+    }).join('');
+    return '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden"><thead><tr style="background:var(--cr,#faf7f2)">'
+      + ['분류', '매장 명', '카드번호', '유효기간', 'CVC', 'PW', '사용자', '비고(입금계좌)', '결제한도', '관리'].map(h => '<th style="padding:6px 8px;text-align:left;white-space:nowrap">' + h + '</th>').join('')
+      + '</tr></thead><tbody>' + (rows || '<tr><td colspan="10" style="padding:16px;text-align:center;color:var(--th)">등록된 카드 없음</td></tr>') + '</tbody></table></div>'
+      + (isMaster() ? '<div style="font-size:11px;color:var(--th);margin-top:6px"><i class="ti ti-lock"></i> 카드번호/유효기간/CVC/PW는 암호화 저장 — [열람] 시 보안 PIN 인증 후 30초간만 표시됩니다.</div>' : '<div style="font-size:11px;color:var(--th);margin-top:6px">민감정보 열람·수정은 총괄만 가능합니다.</div>');
+  };
+
+  /* ───────── 민감정보 2차 인증 열람(30초 자동 재마스킹) ───────── */
+  CH.revealCard = function (id) {
+    if (!isMaster()) return;
+    CH.pinPrompt('민감정보 열람 — 보안 PIN', async function (pin) {
+      let r; try { r = await rpc('ch_reveal_card_secret', { p_id: id, p_pin: pin }); } catch (e) { document.getElementById('chPinMsg').textContent = CH.pinMsg(e); return false; }
+      CH.showCardSecret(id, r); return true;
+    });
+  };
+  CH.showCardSecret = function (id, r) {
+    const fmt = n => String(n || '').replace(/(\d{4})(?=\d)/g, '$1 ').trim();
+    const c = (window.__chCard || {})[id] || {};
+    const numEl = document.getElementById('cs-num-' + id); if (numEl) numEl.textContent = r.card_number ? fmt(r.card_number) : mask4(c.card_last);
+    const set = (f, v) => { const el = document.getElementById('cs-' + f + '-' + id); if (el) el.textContent = (v == null || v === '') ? '-' : v; };
+    set('exp', r.expiry); set('cvc', r.cvc); set('pw', r.card_pw);
+    if (CH.card.reveal[id]) clearTimeout(CH.card.reveal[id]);
+    toast('30초 후 자동으로 다시 가려집니다');
+    CH.card.reveal[id] = setTimeout(function () {
+      if (numEl) numEl.textContent = mask4(c.card_last);
+      [['exp', 'has_expiry'], ['cvc', 'has_cvc'], ['pw', 'has_pw']].forEach(p => { const el = document.getElementById('cs-' + p[0] + '-' + id); if (el) el.textContent = c[p[1]] ? '••••' : '-'; });
+    }, 30000);
+  };
+  CH.pinPrompt = function (title, onPin) {
+    CH.modal(title,
+      '<div style="font-size:12px;color:var(--th);margin-bottom:8px">총괄 전용 6자리 보안 PIN을 입력하세요. (로그인 비밀번호와 별개)</div>'
+      + '<input id="chPinInp" class="form-input" type="password" inputmode="numeric" maxlength="6" placeholder="● ● ● ● ● ●" autocomplete="off" style="text-align:center;letter-spacing:8px;font-size:20px">'
+      + '<div id="chPinMsg" style="font-size:12px;color:#B91C1C;margin-top:6px;min-height:16px"></div>',
+      '확인', async function () {
+        const pin = (document.getElementById('chPinInp').value || '').trim();
+        if (!/^[0-9]{6}$/.test(pin)) { document.getElementById('chPinMsg').textContent = '6자리 숫자를 입력하세요.'; return false; }
+        return await onPin(pin);
+      });
+    setTimeout(() => { const i = document.getElementById('chPinInp'); if (i) i.focus(); }, 120);
+  };
+  CH.pinMsg = function (e) { const m = (e && e.message) || ''; if (/PIN_WRONG:(\d+)/.test(m)) return 'PIN 불일치 — 남은 시도 ' + RegExp.$1 + '회'; if (/PIN_WRONG/.test(m)) return 'PIN 불일치'; if (/PIN_LOCKED/.test(m)) return '5회 오류 — 10분간 잠깁니다.'; if (/PIN_NOT_SET/.test(m)) return '보안 PIN 미설정 — 먼저 설정하세요.'; if (/ACCESS_DENIED/.test(m)) return '총괄만 가능합니다.'; if (e && e.missing) return '보안 SQL 미실행'; return '오류: ' + m; };
+
+  CH.openSecPin = async function () {
+    if (!isMaster()) return;
+    let st = { set: false }; try { st = await rpc('ch_secpin_status', {}) || st; } catch (e) {}
+    CH.modal('총괄 보안 PIN ' + (st.set ? '변경' : '설정'),
+      (st.set ? '<input id="spOld" class="form-input" type="password" inputmode="numeric" maxlength="6" placeholder="기존 PIN 6자리" style="text-align:center;letter-spacing:6px;margin-bottom:8px">' : '')
+      + '<input id="spNew" class="form-input" type="password" inputmode="numeric" maxlength="6" placeholder="새 PIN 6자리" style="text-align:center;letter-spacing:6px;margin-bottom:8px">'
+      + '<input id="spNew2" class="form-input" type="password" inputmode="numeric" maxlength="6" placeholder="새 PIN 확인" style="text-align:center;letter-spacing:6px">'
+      + '<div id="spMsg" style="font-size:12px;color:#B91C1C;margin-top:6px;min-height:16px"></div>'
+      + '<div style="font-size:11px;color:var(--th);margin-top:4px">로그인 비밀번호와 별개 / 서버에 단방향 해시로만 저장 / 분실 시 복구 불가(재설정만 가능)</div>',
+      '저장', async function () {
+        const oldEl = document.getElementById('spOld'); const old = oldEl ? oldEl.value.trim() : '';
+        const n1 = (document.getElementById('spNew').value || '').trim(), n2 = (document.getElementById('spNew2').value || '').trim();
+        const msg = document.getElementById('spMsg');
+        if (!/^[0-9]{6}$/.test(n1)) { msg.textContent = '새 PIN은 6자리 숫자'; return false; }
+        if (n1 !== n2) { msg.textContent = '새 PIN 확인이 일치하지 않습니다'; return false; }
+        try { await rpc('ch_secpin_set', { p_old_pin: old, p_new_pin: n1 }); } catch (e) { const m = e.message || ''; msg.textContent = /PIN_WRONG/.test(m) ? '기존 PIN 불일치' : (/PIN_LOCKED/.test(m) ? '잠금 상태 — 잠시 후 시도' : (e.missing ? '보안 SQL 미실행' : '오류: ' + m)); return false; }
+        toast('보안 PIN 저장 완료'); CH.renderTab4(); return true;
+      });
+  };
+  CH.openCardAudit = async function () {
+    if (!isMaster()) return;
+    let logs = []; try { logs = await rpc('ch_card_audit_list', { p_limit: 100 }) || []; } catch (e) {}
+    const A = { reveal: '🔓 열람', edit_secret: '✏️ 민감수정', set_pin: '🔑 PIN설정' };
+    const rows = logs.map(l => '<tr><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee);font-size:11px;white-space:nowrap">' + esc(String(l.created_at || '').replace('T', ' ').slice(0, 16)) + '</td><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(l.user_name || '') + '</td><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + (A[l.action] || esc(l.action || '')) + '</td><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(l.store || '') + '</td></tr>').join('');
+    CH.modal('민감정보 열람 기록 (최근 100건)',
+      '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:5px 8px;text-align:left">일시</th><th style="padding:5px 8px;text-align:left">사용자</th><th style="padding:5px 8px;text-align:left">동작</th><th style="padding:5px 8px;text-align:left">매장</th></tr></thead><tbody>' + (rows || '<tr><td colspan="4" style="padding:14px;text-align:center;color:var(--th)">기록 없음</td></tr>') + '</tbody></table>', '닫기', function () { return true; });
+  };
+
+  /* ───────── 카드 기본정보 등록/수정 · 민감정보 저장 · 삭제 ───────── */
+  CH.openCardEdit = async function (id) {
+    if (!CH.isHQ()) return;
+    const c = id != null ? (window.__chCard || {})[id] : null;
+    const opts = await loadStoreOptions();
+    const storeSel = '<select id="ceStore" class="form-input">' + opts.map(s => '<option' + (c && c.store === s ? ' selected' : '') + '>' + esc(s) + '</option>').join('') + '</select>';
+    CH.modal((c ? '카드 수정' : '카드 등록') + (c ? ' — ' + esc(c.store) : ''),
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+      + '<div><label style="font-size:11px;color:var(--th)">분류</label><input id="ceCat" class="form-input" value="' + esc(c ? c.category || '' : '') + '" placeholder="예: 법인/신한"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">매장 명</label>' + storeSel + '</div>'
+      + '<div><label style="font-size:11px;color:var(--th)">카드 끝 4자리</label><input id="ceLast" class="form-input" maxlength="4" value="' + esc(c ? c.card_last || '' : '') + '" placeholder="4804"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">사용자</label><input id="ceUser" class="form-input" value="' + esc(c ? c.card_user || '' : '') + '"></div>'
+      + '<div style="grid-column:1/3"><label style="font-size:11px;color:var(--th)">비고(매출입금계좌)</label><input id="ceRemark" class="form-input" value="' + esc(c ? c.remark || '' : '') + '"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">결제 한도(원)</label><input id="ceLimit" type="number" class="form-input" value="' + (c && c.limit_amount != null ? c.limit_amount : '') + '"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">카드 별칭</label><input id="ceLabel" class="form-input" value="' + esc(c ? c.label || '' : '') + '"></div>'
+      + '</div>'
+      + (isMaster() ? '<div style="margin-top:10px;padding:10px;border:0.5px dashed var(--crd);border-radius:8px;background:var(--cr,#faf7f2)"><div style="font-size:12px;font-weight:700"><i class="ti ti-lock"></i> 민감정보(암호화) — 총괄 + 보안PIN</div><div style="font-size:11px;color:var(--th);margin-top:2px">카드번호 전체/유효기간/CVC/PW는 ' + (c ? '아래 버튼' : '카드 저장 후 [수정]') + '에서 암호화 저장합니다.</div>' + (c ? '<button type="button" class="btn-cancel-sm" style="font-size:12px;margin-top:6px" onclick="ClosingHelper.openCardSecret(' + c.id + ')"><i class="ti ti-key"></i> 민감정보 입력/변경</button>' : '') + '</div>' : '')
+      ,
+      '저장', async function () {
+        const last = (document.getElementById('ceLast').value || '').trim();
+        if (last && !/^[0-9]{3,4}$/.test(last)) { alert('카드 끝 4자리는 숫자로 입력'); return false; }
+        const limit = document.getElementById('ceLimit').value;
+        try { await rpc('ch_card_save', { p_id: id, p_category: document.getElementById('ceCat').value.trim() || null, p_store: document.getElementById('ceStore').value, p_card_last: last || null, p_label: document.getElementById('ceLabel').value.trim() || null, p_card_user: document.getElementById('ceUser').value.trim() || null, p_remark: document.getElementById('ceRemark').value.trim() || null, p_limit: limit === '' ? null : Number(limit), p_active: true }); }
+        catch (e) { alert('저장 오류: ' + (e.missing ? '보안 SQL 미실행' : (/ACCESS_DENIED/.test(e.message || '') ? '본사 관리자만 가능' : e.message))); return false; }
+        toast('저장 완료'); CH.renderTab4(); return true;
+      });
+  };
+  CH.openCardSecret = function (id) {
+    if (!isMaster()) return;
+    const c = (window.__chCard || {})[id] || {};
+    CH.modal('민감정보 입력/변경 — ' + esc(c.store || ''),
+      '<div style="font-size:11px;color:var(--th);margin-bottom:8px">입력한 값만 암호화 저장됩니다(비우면 기존값 유지). 저장 시 보안 PIN을 확인합니다.</div>'
+      + '<label style="font-size:11px;color:var(--th)">카드번호 전체</label><input id="csNum" class="form-input" inputmode="numeric" placeholder="숫자(공백 가능)" style="margin-bottom:6px">'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">'
+      + '<div><label style="font-size:11px;color:var(--th)">유효기간 MM/YY</label><input id="csExp" class="form-input" maxlength="5" placeholder="08/27"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">CVC</label><input id="csCvc" class="form-input" maxlength="4" inputmode="numeric"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">결제 PW</label><input id="csPw" class="form-input" maxlength="8" inputmode="numeric"></div></div>'
+      + '<div style="font-size:11px;color:#B91C1C;margin-top:8px"><i class="ti ti-alert-triangle"></i> CVC 저장은 카드망 규정상 권장되지 않습니다. 꼭 필요한 경우에만 입력하세요.</div>'
+      + '<div id="csMsg" style="font-size:12px;color:#B91C1C;margin-top:6px;min-height:16px"></div>'
+      + '<label style="font-size:11px;color:var(--th);display:block;margin-top:6px">보안 PIN 6자리</label><input id="csPin" class="form-input" type="password" inputmode="numeric" maxlength="6" style="text-align:center;letter-spacing:6px">',
+      '암호화 저장', async function () {
+        const pin = (document.getElementById('csPin').value || '').trim();
+        if (!/^[0-9]{6}$/.test(pin)) { document.getElementById('csMsg').textContent = '보안 PIN 6자리를 입력하세요'; return false; }
+        const val = f => { const v = document.getElementById(f).value; return v === '' ? null : v; };
+        try { await rpc('ch_card_set_secret', { p_id: id, p_pin: pin, p_card_number: val('csNum'), p_expiry: val('csExp'), p_cvc: val('csCvc'), p_card_pw: val('csPw') }); }
+        catch (e) { document.getElementById('csMsg').textContent = CH.pinMsg(e); return false; }
+        toast('민감정보 암호화 저장 완료'); CH.renderTab4(); return true;
+      });
+  };
+  CH.delCard = function (id) {
+    if (!isMaster()) return;
+    const c = (window.__chCard || {})[id] || {};
+    if (!confirm((c.store || '') + ' 카드를 삭제합니다. 암호화된 민감정보도 함께 삭제됩니다. 계속할까요?')) return;
+    rpc('ch_card_del', { p_id: id }).then(() => { toast('삭제 완료'); CH.renderTab4(); }).catch(e => alert('오류: ' + (e.missing ? '보안 SQL 미실행' : (/ACCESS_DENIED/.test(e.message || '') ? '총괄만 가능' : e.message))));
+  };
+
+  /* ───────── 월말 자동대사 (회계 승인엑셀 → 매장 수시등록 매칭) ───────── */
+  CH.reconcileBoxHtml = function () {
+    return '<div style="margin-top:18px;border-top:0.5px solid var(--crd);padding-top:14px">'
+      + '<div style="font-size:14px;font-weight:800;margin-bottom:6px"><i class="ti ti-file-import"></i> 월말 카드 자동대사</div>'
+      + '<div style="font-size:12px;color:var(--th);margin-bottom:8px">회계팀 카드 승인 엑셀을 올리면 <b>끝4자리 + 결제일 + 승인금액</b>으로 매장 수시등록 내역과 자동 매칭합니다. (일치=자동마감 / 미등록=매장입력필요 / 불일치·취소=확인필요)</div>'
+      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+      + '<input type="month" id="rcYm" class="form-input" value="' + CH.state.ym + '" style="width:150px">'
+      + '<label class="btn-cancel-sm" style="font-size:12px;cursor:pointer"><i class="ti ti-upload"></i> 승인 엑셀 선택<input type="file" id="rcFile" accept=".xlsx,.xls" style="display:none" onchange="ClosingHelper.reconcileParse(this.files[0])"></label>'
+      + '</div><div id="rcResult" style="margin-top:10px"></div></div>';
+  };
+  CH.reconcileParse = function (file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
+        const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null, raw: true });
+        let hr = -1, cLast = -1, cDate = -1, cAmt = -1, cCanc = -1;
+        for (let r = 0; r < Math.min(aoa.length, 25); r++) {
+          const row = (aoa[r] || []).map(x => String(x == null ? '' : x));
+          const find = (kw) => row.findIndex(v => kw.some(k => v.indexOf(k) !== -1));
+          const li = find(['카드번호', '카드No', '승인카드', '카드']); const ai = find(['승인금액', '결제금액', '이용금액', '합계', '금액']);
+          if (li !== -1 && ai !== -1) { hr = r; cLast = li; cDate = find(['결제일', '승인일', '거래일', '매출일', '이용일', '일자', '일시']); cAmt = ai; cCanc = find(['취소', '상태', '구분']); break; }
+        }
+        if (hr === -1) { document.getElementById('rcResult').innerHTML = '<div style="color:#B91C1C;font-size:12px">헤더(카드번호/금액)를 인식하지 못했습니다. 승인내역 엑셀인지 확인해 주세요.</div>'; return; }
+        const last4 = v => { const d = String(v == null ? '' : v).replace(/\D/g, ''); return d.length >= 4 ? d.slice(-4) : ''; };
+        const toDate = v => { if (v instanceof Date) { const z = new Date(v.getTime() - v.getTimezoneOffset() * 60000); return z.toISOString().slice(0, 10); } const s = String(v == null ? '' : v); let m = s.match(/(\d{4})[.\-\/]\s?(\d{1,2})[.\-\/]\s?(\d{1,2})/); if (m) return m[1] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[3]).padStart(2, '0'); m = s.match(/(\d{2})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/); if (m) return '20' + m[1] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[3]).padStart(2, '0'); return ''; };
+        const num = v => { const n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; };
+        const rows = [];
+        for (let r = hr + 1; r < aoa.length; r++) {
+          const row = aoa[r] || []; const l4 = last4(row[cLast]); const amt = num(row[cAmt]); if (!l4 || !amt) continue;
+          const canc = cCanc !== -1 ? /취소|반품|cancel/i.test(String(row[cCanc] || '')) : (amt < 0);
+          rows.push({ card_last: l4, tx_date: cDate !== -1 ? toDate(row[cDate]) : '', amount: Math.abs(amt), cancelled: canc });
+        }
+        window.__chRecon = { ym: document.getElementById('rcYm').value, rows: rows, fileName: file.name };
+        CH.renderReconPreview();
+      } catch (err) { document.getElementById('rcResult').innerHTML = '<div style="color:#B91C1C;font-size:12px">파싱 오류: ' + esc(err.message) + '</div>'; }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  CH.renderReconPreview = function () {
+    const R = window.__chRecon; const box = document.getElementById('rcResult'); if (!R || !box) return;
+    const prev = R.rows.slice(0, 8).map(x => '<tr><td style="padding:3px 8px;border-bottom:0.5px solid var(--crm,#eee);font-family:monospace">••••' + esc(x.card_last) + '</td><td style="padding:3px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(x.tx_date || '-') + '</td><td style="padding:3px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:right">' + won(x.amount) + '</td><td style="padding:3px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">' + (x.cancelled ? '<span style="color:#B91C1C">취소</span>' : '') + '</td></tr>').join('');
+    box.innerHTML = '<div style="font-size:12px;margin-bottom:6px">' + esc(R.fileName) + ' — <b>' + R.rows.length + '</b>건 인식 (' + esc(R.ym) + ' 귀속)</div>'
+      + '<table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:4px 8px;text-align:left">카드</th><th style="padding:4px 8px;text-align:left">결제일</th><th style="padding:4px 8px;text-align:right">승인금액</th><th style="padding:4px 8px">취소</th></tr></thead><tbody>' + prev + '</tbody></table>'
+      + (R.rows.length > 8 ? '<div style="font-size:11px;color:var(--th);margin-top:4px">… 외 ' + (R.rows.length - 8) + '건</div>' : '')
+      + '<button class="btn-submit" style="font-size:12px;margin-top:8px" onclick="ClosingHelper.reconcileCommit()"><i class="ti ti-check"></i> 자동대사 실행</button>';
+  };
+  CH.reconcileCommit = async function () {
+    const R = window.__chRecon; if (!R || !R.rows.length) return;
+    if (!confirm(R.ym + ' 귀속 ' + R.rows.length + '건 자동대사를 실행합니다. 계속할까요?')) return;
+    let r; try { r = await rpc('ch_card_reconcile', { p_ym: R.ym, p_rows: R.rows }); } catch (e) { alert('오류: ' + (e.missing ? '보안 SQL 미실행' : (/MONTH_LOCKED/.test(e.message || '') ? '월마감 잠금 상태' : (/ACCESS_DENIED/.test(e.message || '') ? '본사 관리자만 가능' : e.message)))); return; }
+    document.getElementById('rcResult').innerHTML = '<div style="padding:10px;border:0.5px solid var(--crd);border-radius:8px;background:var(--cr,#faf7f2);font-size:13px">자동대사 완료 — <b style="color:#15803D">일치·자동마감 ' + r.matched + '</b> / <b style="color:#B45309">매장입력필요 ' + r.need_input + '</b> / <b style="color:#B91C1C">확인필요 ' + r.review + '</b></div>';
+    window.__chRecon = null;
+  };
+
+  /* ───────── 매장: 한도바 + 수시등록 + 당월 내역 ───────── */
+  CH.renderCardStore = async function (b) {
+    const sts = CH.stores(); const store = (CH.state.store && sts.indexOf(CH.state.store) !== -1) ? CH.state.store : (sts[0] || '');
+    if (!store) { b.innerHTML = '<div style="padding:24px;text-align:center;color:var(--th)">담당 매장이 없습니다</div>'; return; }
+    const ym = CH.state.ym;
+    const sel = sts.length > 1 ? '<select class="form-input" style="width:160px" onchange="ClosingHelper.state.store=this.value;ClosingHelper.renderTab4()">' + sts.map(s => '<option' + (s === store ? ' selected' : '') + '>' + esc(s) + '</option>').join('') + '</select>' : '<span style="font-size:14px;font-weight:700"><i class="ti ti-building-store"></i> ' + esc(store) + '</span>';
+    let usage = {}; try { usage = await rpc('ch_card_usage', { p_store: store, p_ym: ym }) || {}; } catch (e) { if (e.missing) { b.innerHTML = '<div style="padding:24px;text-align:center;color:#B91C1C">보안 SQL 미실행 — closing_cards.sql 을 먼저 실행하세요</div>'; return; } }
+    let txs = []; try { txs = await rpc('ch_card_tx_list', { p_store: store, p_ym: ym }) || []; } catch (e) {}
+    const used = usage.used || 0, lim = usage.limit, pctv = usage.pct;
+    const bar = lim != null
+      ? '<div style="margin:8px 0 4px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span>당월 사용 ' + won(used) + '원</span><span style="color:var(--th)">한도 ' + won(lim) + '원 · 잔여 ' + won(usage.remain) + '원</span></div><div style="height:12px;background:#EEE;border-radius:6px;overflow:hidden"><div style="height:100%;width:' + Math.min(100, pctv || 0) + '%;background:' + ((pctv || 0) > 90 ? '#B91C1C' : (pctv || 0) > 70 ? '#D97706' : '#15803D') + '"></div></div><div style="text-align:right;font-size:11px;color:var(--th);margin-top:2px">' + (pctv != null ? pctv + '% 사용' : '') + '</div></div>'
+      : '<div style="margin:8px 0;font-size:13px">당월 사용 <b>' + won(used) + '</b>원 <span style="font-size:11px;color:var(--th)">(한도 미설정)</span></div>';
+    const RB = { matched: '<span style="font-size:10px;background:#DCFCE7;color:#15803D;border-radius:5px;padding:1px 6px">일치·마감</span>', need_input: '<span style="font-size:10px;background:#FEF3C7;color:#B45309;border-radius:5px;padding:1px 6px">입력필요</span>', review: '<span style="font-size:10px;background:#FEE2E2;color:#B91C1C;border-radius:5px;padding:1px 6px">확인필요</span>', pending: '<span style="font-size:10px;background:#F1F5F9;color:#64748B;border-radius:5px;padding:1px 6px">대기</span>' };
+    const accName = code => { const a = (window.__chAccounts || []).find(x => x.code === code); return a ? a.name : (code || '-'); };
+    const rows = txs.map(t => '<tr><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(String(t.tx_date || '').slice(5)) + '</td><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:right;font-weight:600">' + won(t.total_amount) + '</td><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee)">' + esc(accName(t.account_code)) + '</td><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee);font-size:11px;color:var(--th)">' + esc(t.memo || '') + '</td><td style="padding:4px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">' + (RB[t.recon_status] || RB.pending) + (t.source === 'accounting' && t.recon_status === 'need_input' ? ' <button class="btn-cancel-sm" style="font-size:10px;padding:1px 6px" onclick="ClosingHelper.classifyTx(' + t.id + ')">입력</button>' : '') + '</td></tr>').join('');
+    b.innerHTML = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' + sel + '<input type="month" class="form-input" style="width:140px" value="' + ym + '" onchange="ClosingHelper.state.ym=this.value;ClosingHelper.renderTab4()"><button class="btn-submit" style="font-size:12px;margin-left:auto" onclick="ClosingHelper.openCardTxAdd(\'' + esc(store).replace(/'/g, "\\'") + '\')"><i class="ti ti-plus"></i> 수시 등록</button></div>'
+      + bar
+      + '<div style="font-size:12px;font-weight:700;margin:12px 0 4px">' + ym + ' 카드 사용내역 <span style="font-size:11px;color:var(--th)">(' + txs.length + '건)</span></div>'
+      + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--crd);border-radius:8px;overflow:hidden"><thead><tr style="background:var(--cr,#faf7f2)"><th style="padding:5px 8px;text-align:left">일자</th><th style="padding:5px 8px;text-align:right">금액</th><th style="padding:5px 8px;text-align:left">계정과목</th><th style="padding:5px 8px;text-align:left">내역</th><th style="padding:5px 8px">상태</th></tr></thead><tbody>' + (rows || '<tr><td colspan="5" style="padding:14px;text-align:center;color:var(--th)">등록된 내역 없음</td></tr>') + '</tbody></table></div>';
+  };
+  CH.openCardTxAdd = function (store) {
+    const accs = window.__chAccounts || [];
+    const accOpts = '<option value="">(계정과목 선택)</option>' + accs.map(a => '<option value="' + esc(a.code) + '">' + esc(a.name) + '</option>').join('');
+    const today = (new Date()).toISOString().slice(0, 10);
+    CH.modal(esc(store) + ' 카드 사용 수시 등록',
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+      + '<div><label style="font-size:11px;color:var(--th)">결제일자</label><input id="txDate" type="date" class="form-input" value="' + today + '"></div>'
+      + '<div><label style="font-size:11px;color:var(--th)">결제금액</label><input id="txAmt" type="number" class="form-input" placeholder="원"></div>'
+      + '<div style="grid-column:1/3"><label style="font-size:11px;color:var(--th)">계정과목</label><select id="txAcc" class="form-input">' + accOpts + '</select></div>'
+      + '<div style="grid-column:1/3"><label style="font-size:11px;color:var(--th)">사용내역(인원/목적)</label><input id="txMemo" class="form-input" placeholder="예: 매장 비품 구입 / 3인"></div>'
+      + '</div>'
+      + '<div style="margin-top:8px"><label style="font-size:11px;color:var(--th)">영수증 사진(선택)</label><input id="txFile" type="file" accept="image/*" capture="environment" class="form-input" style="font-size:12px"></div>'
+      + '<div id="txMsg" style="font-size:12px;color:#B91C1C;margin-top:6px;min-height:14px"></div>',
+      '등록', async function () {
+        const date = document.getElementById('txDate').value, amt = Number(document.getElementById('txAmt').value || 0);
+        if (!date || !amt) { document.getElementById('txMsg').textContent = '결제일자/금액을 입력하세요'; return false; }
+        let evid = null; const f = document.getElementById('txFile').files[0];
+        if (f) { try { const path = 'card/' + date.slice(0, 7) + '/' + store + '/' + Date.now() + '_' + f.name; const up = await sbc().storage.from(STORAGE_BUCKET).upload(path, f, { upsert: true }); if (!up.error) evid = path; } catch (e) {} }
+        try { await rpc('ch_card_tx_add', { p_store: store, p_tx_date: date, p_total: amt, p_account: document.getElementById('txAcc').value || null, p_memo: document.getElementById('txMemo').value.trim() || null, p_card_last: null, p_evidence: evid }); }
+        catch (e) { document.getElementById('txMsg').textContent = /MONTH_LOCKED/.test(e.message || '') ? '월마감 잠금 상태' : (e.missing ? '보안 SQL 미실행' : '오류: ' + e.message); return false; }
+        toast('등록 완료'); CH.renderTab4(); return true;
+      });
+  };
+  CH.classifyTx = function (id) {
+    const accs = window.__chAccounts || [];
+    const accOpts = '<option value="">(계정과목 선택)</option>' + accs.map(a => '<option value="' + esc(a.code) + '">' + esc(a.name) + '</option>').join('');
+    CH.modal('미등록 결제건 입력',
+      '<div style="font-size:12px;color:var(--th);margin-bottom:8px">회계 승인내역에만 있던 결제건입니다. 계정과목과 사용내역을 입력하세요.</div>'
+      + '<select id="ctAcc" class="form-input" style="margin-bottom:8px">' + accOpts + '</select>'
+      + '<input id="ctMemo" class="form-input" placeholder="사용내역(인원/목적)">',
+      '저장', async function () {
+        try { await rpc('ch_card_tx_update', { p_id: id, p_account: document.getElementById('ctAcc').value || null, p_memo: document.getElementById('ctMemo').value.trim() || null }); }
+        catch (e) { alert('오류: ' + (e.missing ? '보안 SQL 미실행' : e.message)); return false; }
+        toast('저장 완료'); CH.renderTab4(); return true;
+      });
   };
 
   // 로그인/세션 복원 순서와 무관하게 안전 마운트: currentUser 가 준비될 때까지 대기 후 플래그 로드
