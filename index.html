@@ -1334,6 +1334,8 @@ async function loginAs(user) {
   window.__deepPost = postId ? parseInt(postId) : null;
   loadCats();   // 내부에서 __deepPost 있으면 openPostById, 없으면 goPage('all')
   setInterval(checkScheduled, 60000);
+  // 설치 안내 배너는 로그인 완료(앱 진입) 후에만 노출(로그인 화면에서는 표시하지 않음)
+  try { window.PwaInstall && window.PwaInstall.init(); } catch (e) {}
 
   const opsB = params.get('opsboard');
   if (opsB) { setTimeout(function(){ try{ if(typeof opsCanSee==='function' && opsCanSee()){ window.__ops.boardId=parseInt(opsB); goPage('opsboard'); const oc=params.get('opscard'); if(oc){ setTimeout(function(){ try{ opsOpenCard(parseInt(oc)); }catch(e){} }, 1300); } } }catch(e){} }, 700); }
@@ -1384,6 +1386,8 @@ async function doLogout() {
   try { await clearSession(); } catch(e) {}
   try { localStorage.removeItem('bck_auto'); } catch(e) {}
   currentUser = null;
+  // 로그인 화면에서는 설치 안내 배너를 숨긴다(로그아웃 시 잔존 제거)
+  try { const b = document.getElementById('pwaInstallBar'); if (b) b.remove(); } catch(e) {}
   document.getElementById('mainScreen').style.display = 'none';
   document.getElementById('topbar').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
@@ -20925,6 +20929,6 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script src="closing_helper.js?v=2026111506"></script>
-<script src="inventory_helper.js?v=2026111509"></script>
+<script src="inventory_helper.js?v=2026111510"></script>
 </body>
 </html>

@@ -1165,10 +1165,10 @@
       document.body.appendChild(ov);
     }
   };
-  // 로그인 여부와 무관하게 로드 즉시 1회: 서비스워커 등록 + 설치 안내(로그인 화면에서도 표시)
+  // 로드 즉시: 서비스워커만 등록(설치 가능 조건 성립·푸시 준비). 설치 안내 배너는 로그인 후에만 띄운다.
+  //   (설치 배너 init 은 index.html 의 loginAs() = 로그인 완료 시점에서 호출)
   (function pwaBootstrap() {
     try { if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js', { scope: './' }); } catch (e) {}
-    try { window.PwaInstall && window.PwaInstall.init(); } catch (e) {}
   })();
   (function waitUser(n) {
     if (curUser() && sbc()) { IM.boot(); }
