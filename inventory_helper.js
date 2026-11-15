@@ -183,7 +183,7 @@
     function isStandalone() { return (window.navigator.standalone === true) || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches); }
     function isIOS() { const ua = navigator.userAgent || ''; return /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
     P.isStandalone = isStandalone;
-    P.dismiss = function () { try { localStorage.setItem('pwa_install_dismiss', '1'); } catch (_) {} const b = document.getElementById('pwaInstallBar'); if (b) b.remove(); };
+    P.dismiss = function () { try { localStorage.setItem('pwa_install_dismiss', String(Date.now())); } catch (_) {} const b = document.getElementById('pwaInstallBar'); if (b) b.remove(); };
     P.install = async function () {
       const e = window.__bipEvent;
       if (!e) { toast('이 브라우저에서는 주소창의 설치 아이콘을 눌러 설치하세요.'); return; }
@@ -191,9 +191,10 @@
       catch (err) { toast('설치 실패: ' + (err.message || err)); }
     };
     P.render = function () {
-      if (isStandalone()) return;
-      try { if (localStorage.getItem('pwa_install_dismiss') === '1') return; } catch (_) {}
-      try { if (localStorage.getItem('pwa_installed') === '1') return; } catch (_) {}
+      if (isStandalone()) return; // 이미 설치된 앱으로 실행 중이면 숨김(설치/삭제 상태의 진짜 신호)
+      // '나중에' 는 3일만 숨김(영구 차단 금지). 과거 pwa_installed 영구 플래그는 사용하지 않음
+      //  → 앱을 삭제하면 beforeinstallprompt 가 다시 발생하고 배너도 다시 뜬다.
+      try { const d = localStorage.getItem('pwa_install_dismiss'); if (d && /^\d+$/.test(d) && (Date.now() - Number(d)) < 3 * 864e5) return; } catch (_) {}
       const old = document.getElementById('pwaInstallBar'); if (old) old.remove();
       const ios = isIOS(); const hasBip = !!window.__bipEvent;
       if (!ios && !hasBip) return; // 설치 불가/이미 설치 환경이면 표시하지 않음

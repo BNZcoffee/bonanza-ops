@@ -6700,7 +6700,7 @@ async function deleteDraft(id){
 }
 
 // ── 앱 관리 ─────────────────────────────────────────────────────
-let APP = {app_name:'보난자커피 — 운영 매뉴얼',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
+let APP = {app_name:'보난자커피 — 운영 매뉴얼',pwa_name:'보난자커피',logo_text:'Bonanza Coffee Korea',primary_color:'#3B2314',comments_enabled:'true',watermark_enabled:'true',read_confirm_enabled:'true',search_enabled:'true',stats_enabled:'true',app_version:'1.0.0'};
 const APP_BUILD_DATE = '2026-11-13';   // 배포 시 갱신 (표시는 app_settings.updated_at 과 비교해 더 최근값 노출)
 let APP_UPDATED_AT = null;
 async function loadAppSettings(){
@@ -6728,8 +6728,10 @@ async function loadAppSettings(){
     document.documentElement.style.setProperty('--br', APP.primary_color);
     // 연관 색상도 조정
   }
-  // PWA 홈 화면 아이콘 적용 (로고 URL 기반, 없으면 기본 아이콘)
+  // PWA 홈 화면 아이콘/이름 적용 (로고 URL 기반, 없으면 기본 아이콘)
   applyPwaIcon(APP.logo_url || '');
+  // 설치된 앱에서 실행 중이고 이름/로고가 바뀌었으면 재설치 안내
+  try { checkBrandReinstallNotice(); } catch(e){}
 }
 async function saveAppSetting(key,value){
   await sb.from('app_settings').upsert({key,value,updated_at:new Date().toISOString()},{onConflict:'key'});
@@ -6744,7 +6746,8 @@ async function renderAppSettings(area){
     ${(currentUser.is_master||currentUser.role==='admin') ? '<div id="attEvTypeCard" class="notif-card" style="margin-bottom:12px"><div class="section-label" style="margin-bottom:8px"><i class="ti ti-alarm"></i> 근태 증빙 종류 관리</div><div style="font-size:12px;color:var(--th)">불러오는 중...</div></div>' : ''}
     <div class="notif-card" style="margin-bottom:12px">
       <div class="section-label" style="margin-bottom:12px">UI 설정</div>
-      <div class="form-row"><label class="form-label">앱 이름 (상단 로고)</label><input class="form-input" id="cfg-name" value="${APP.app_name||''}"/></div>
+      <div class="form-row"><label class="form-label">앱 진행화면 상단 제목</label><input class="form-input" id="cfg-name" value="${APP.app_name||''}" oninput="updatePwaPreview()"/><div style="font-size:11px;color:var(--ts);margin-top:3px">앱 화면 최상단에 표시되는 제목입니다. (홈 화면 설치 이름과 별개)</div></div>
+      <div class="form-row"><label class="form-label">홈 화면 앱 이름 (설치 시)</label><input class="form-input" id="cfg-pwaname" value="${APP.pwa_name||APP.app_name||''}" maxlength="16" oninput="updatePwaPreview()"/><div style="font-size:11px;color:var(--ts);margin-top:3px">홈 화면 아이콘 아래 표시되는 이름입니다. 짧게(최대 16자) 권장.</div></div>
       <div class="form-row"><label class="form-label">메인 색상</label>
         <div style="display:flex;gap:10px;align-items:center">
           <input type="color" id="cfg-cpicker" value="${APP.primary_color||'#3B2314'}" style="width:48px;height:36px;border:0.5px solid var(--crd);border-radius:8px;cursor:pointer;padding:2px"/>
@@ -6760,6 +6763,21 @@ async function renderAppSettings(area){
             <button class="btn-cancel-sm" onclick="document.getElementById('logoFileInput').click()"><i class="ti ti-upload"></i> 이미지 선택</button>
             ${APP.logo_url?`<button class="btn-cancel-sm" style="color:var(--rd);border-color:var(--rd);margin-left:6px" onclick="removeLogo()"><i class="ti ti-trash"></i> 제거</button>`:''}
             <div id="logoUploadStatus" style="font-size:12px;color:var(--gn);margin-top:6px"></div>
+          </div>
+        </div>
+      </div>
+      <div class="form-row"><label class="form-label">홈 화면 설치 미리보기</label>
+        <div style="font-size:12px;color:var(--ts);margin-bottom:8px">아래는 휴대폰 홈 화면에 설치했을 때의 아이콘/이름 미리보기입니다. 확인 후 [UI 저장]을 누르세요.</div>
+        <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
+          <div style="background:linear-gradient(160deg,#cbd5e1,#94a3b8);border-radius:20px;padding:18px 22px;display:inline-flex;flex-direction:column;align-items:center;gap:7px;min-width:96px">
+            <div id="pwaPreviewTile" style="width:60px;height:60px;border-radius:14px;background:${APP.logo_url?`#fff url('${APP.logo_url}') center/cover`:'var(--br)'};box-shadow:0 2px 6px rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px;font-weight:bold;font-family:Georgia,serif">${APP.logo_url?'':'B'}</div>
+            <div id="pwaPreviewName" style="font-size:12px;color:#fff;font-weight:600;text-align:center;max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,.4)">${esc(APP.pwa_name||APP.app_name||'보난자커피')}</div>
+          </div>
+          <div style="flex:1;min-width:160px;font-size:11px;color:var(--th);line-height:1.7">
+            · 아이콘: 등록한 로고(없으면 기본 아이콘)<br>
+            · 이름: 위 [홈 화면 앱 이름]<br>
+            · 실제 홈 화면에서는 기기 배경/모양에 따라 조금 다르게 보일 수 있습니다.<br>
+            · 이미 설치한 직원은 저장 후 앱을 열면 재설치 안내가 자동으로 뜹니다.
           </div>
         </div>
       </div>
@@ -6913,6 +6931,7 @@ async function uploadLogo(file) {
     // 미리보기 갱신
     const pv = document.getElementById('logoPreview');
     if (pv) { pv.style.background = `url('${url}') center/cover`; pv.textContent = ''; }
+    try { updatePwaPreview(); } catch(e){}
   } catch(e) {
     if (status) { status.style.color = 'var(--rd)'; status.textContent = '오류: ' + e.message; }
   }
@@ -8610,22 +8629,31 @@ function opsMindEdgeClick(id){
 }
 
 
+function updatePwaPreview(){
+  const nameEl=document.getElementById('cfg-pwaname');
+  const label=document.getElementById('pwaPreviewName');
+  if(label){ const v=nameEl?nameEl.value.trim():''; label.textContent = v||'보난자커피'; }
+  const tile=document.getElementById('pwaPreviewTile');
+  if(tile){ if(APP.logo_url){ tile.style.background="#fff url('"+APP.logo_url+"') center/cover"; tile.textContent=''; } else { tile.style.background='var(--br)'; tile.textContent='B'; } }
+}
 async function saveUISettings(){
   const name = document.getElementById('cfg-name')?.value.trim()||APP.app_name;
+  const pwaName = document.getElementById('cfg-pwaname')?.value.trim()||name;
   const color = document.getElementById('cfg-color')?.value.trim()||APP.primary_color;
   await Promise.all([
     saveAppSetting('app_name', name),
+    saveAppSetting('pwa_name', pwaName),
     saveAppSetting('primary_color', color),
   ]);
   // 즉시 화면 반영
-  APP.app_name = name; APP.primary_color = color;
+  APP.app_name = name; APP.pwa_name = pwaName; APP.primary_color = color;
   const logo = document.querySelector('.logo');
   if(logo) logo.textContent = name;
   document.title = name;
   document.documentElement.style.setProperty('--br', color);
-  // 설치 매니페스트(앱 이름/테마색)도 즉시 갱신
+  // 설치 매니페스트(홈 앱 이름/테마색)도 즉시 갱신
   try { applyPwaIcon(APP.logo_url || ''); } catch(e){}
-  alert('저장됐습니다! 앱 이름/로고는 홈 화면에 다시 설치(추가)하면 적용됩니다. (색상은 다음 로그인부터 완전 적용)');
+  alert('저장됐습니다! 홈 화면 앱 이름/로고는 다시 설치(추가)하면 적용됩니다. 이미 설치한 직원은 앱을 열면 재설치 안내가 뜹니다. (색상은 다음 로그인부터 완전 적용)');
   renderAppSettings(document.getElementById('contentArea'));
 }
 async function saveFeatSettings(){
@@ -9465,10 +9493,11 @@ function applyPwaIcon(logoUrl) {
   try {
     const theme = (typeof APP !== 'undefined' && APP.primary_color) ? APP.primary_color : '#3B2314';
     const tc = document.querySelector('meta[name="theme-color"]'); if (tc) tc.content = theme;
-    const appName = (typeof APP !== 'undefined' && APP.app_name) ? String(APP.app_name).trim() : '보난자커피';
-    const shortName = (appName.split(/[\s—\-|·/]+/)[0] || appName).slice(0, 12);
+    // 홈 화면(설치) 앱 이름은 pwa_name 을 쓰고, 없으면 상단 제목(app_name) 으로 폴백.
+    const installName = (typeof APP !== 'undefined' && (APP.pwa_name || APP.app_name)) ? String(APP.pwa_name || APP.app_name).trim() : '보난자커피';
+    const shortName = installName.slice(0, 16);
     const titleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]'); if (titleMeta) titleMeta.content = shortName;
-    applyDynamicManifest(appName, shortName, theme, logoUrl || '');
+    applyDynamicManifest(installName, shortName, theme, logoUrl || '');
   } catch (e) { /* 실패 시 정적 manifest 유지 */ }
 }
 function __pwaLoadImg(src) { return new Promise(function (res, rej) { const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = function () { res(im); }; im.onerror = function () { rej(new Error('img load fail')); }; im.src = src; }); }
@@ -9517,6 +9546,28 @@ async function applyDynamicManifest(name, shortName, theme, logoUrl) {
     __manifestBlobUrl = url;
   } catch (e) {}
   if (appleHref) { const at = document.getElementById('appleTouchIcon'); if (at) at.setAttribute('href', appleHref); }
+}
+
+// 설치된 앱(standalone)에서 실행 중일 때, 이름/로고가 바뀌면 삭제 후 재설치 안내를 자동 표시.
+//   브랜딩 시그니처(설치이름+상단제목+로고)로 변경을 감지. 최초 1회는 기준값만 저장(안내 없음).
+function brandSignature(){ return (APP.pwa_name||'')+'|'+(APP.app_name||'')+'|'+(APP.logo_url||''); }
+function checkBrandReinstallNotice(){
+  const standalone = (window.navigator.standalone===true) || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  if(!standalone) return;             // 설치된 앱에서만 안내
+  const sig = brandSignature();
+  let prev=null; try{ prev=localStorage.getItem('bnz_brand_sig'); }catch(_){}
+  try{ localStorage.setItem('bnz_brand_sig', sig); }catch(_){}
+  if(prev!==null && prev!==sig) showReinstallNotice();
+}
+function showReinstallNotice(){
+  if(document.getElementById('reinstallNotice')) return;
+  const ov=document.createElement('div'); ov.id='reinstallNotice'; ov.className='modal-bg open';
+  ov.innerHTML = '<div class="modal-box" style="max-width:430px"><div class="modal-title">📱 앱 디자인 변경 안내</div>'
+    + '<div style="font-size:13px;line-height:1.7;padding:6px 2px">앱 이름 또는 아이콘이 변경되었습니다. 지금 홈 화면에 설치된 앱에는 이전 아이콘/이름이 남아 있습니다.<br><br>최신 디자인으로 보시려면 <b>설치된 앱을 삭제한 뒤 다시 설치</b>해 주세요.'
+    + '<div style="font-size:12px;color:var(--th);margin-top:8px;line-height:1.7">· 아이폰: 아이콘 길게 눌러 앱 삭제 → 사파리로 접속 → 공유 → 홈 화면에 추가<br>· 안드로이드: 아이콘 길게 눌러 제거 → 크롬으로 접속 → 설치 배너에서 설치</div></div>'
+    + '<div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn-submit" onclick="document.getElementById(\'reinstallNotice\').remove()">확인</button></div></div>';
+  ov.addEventListener('click', e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
 }
 
 // 메뉴 표시를 권한에 따라 제어
@@ -20893,6 +20944,6 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script src="closing_helper.js?v=2026111506"></script>
-<script src="inventory_helper.js?v=2026111507"></script>
+<script src="inventory_helper.js?v=2026111508"></script>
 </body>
 </html>
