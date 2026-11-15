@@ -6728,6 +6728,8 @@ async function loadAppSettings(){
     document.documentElement.style.setProperty('--br', APP.primary_color);
     // 연관 색상도 조정
   }
+  // 설치 안내 배너 문구(앱 관리에서 설정) 를 PwaInstall 에 전달
+  window.__pwaMsg = { android: APP.pwa_install_msg || '', ios: APP.pwa_install_msg_ios || '' };
   // PWA 홈 화면 아이콘/이름 적용 (로고 URL 기반, 없으면 기본 아이콘)
   applyPwaIcon(APP.logo_url || '');
   // 설치된 앱에서 실행 중이고 이름/로고가 바뀌었으면 재설치 안내
@@ -6765,6 +6767,14 @@ async function renderAppSettings(area){
             <div id="logoUploadStatus" style="font-size:12px;color:var(--gn);margin-top:6px"></div>
           </div>
         </div>
+      </div>
+      <div class="form-row"><label class="form-label">설치 안내 문구 (안드로이드 / PC)</label>
+        <textarea class="form-input" id="cfg-pwamsg" rows="2" style="font-size:12px" placeholder="예: 보난자 운영 앱을 홈 화면에 설치하시겠습니까? (앱처럼 빠른 실행 & 알림 수신)">${esc(APP.pwa_install_msg||'')}</textarea>
+        <div style="font-size:11px;color:var(--ts);margin-top:3px">접속 시 하단에 뜨는 설치 안내 배너의 문구입니다. 비워두면 기본 문구가 사용됩니다.</div>
+      </div>
+      <div class="form-row"><label class="form-label">설치 안내 문구 (아이폰)</label>
+        <textarea class="form-input" id="cfg-pwamsg-ios" rows="2" style="font-size:12px" placeholder="예: 아이폰 설치 방법 — 하단 공유 버튼 → 홈 화면에 추가">${esc(APP.pwa_install_msg_ios||'')}</textarea>
+        <div style="font-size:11px;color:var(--ts);margin-top:3px">아이폰은 설치 버튼이 없어 안내만 뜹니다. 공유 → 홈 화면에 추가 방법을 안내하세요. 비우면 기본 문구 사용.</div>
       </div>
       <div class="form-row"><label class="form-label">홈 화면 설치 미리보기</label>
         <div style="font-size:12px;color:var(--ts);margin-bottom:8px">아래는 휴대폰 홈 화면에 설치했을 때의 아이콘/이름 미리보기입니다. 확인 후 [UI 저장]을 누르세요.</div>
@@ -8640,13 +8650,19 @@ async function saveUISettings(){
   const name = document.getElementById('cfg-name')?.value.trim()||APP.app_name;
   const pwaName = document.getElementById('cfg-pwaname')?.value.trim()||name;
   const color = document.getElementById('cfg-color')?.value.trim()||APP.primary_color;
+  const pwaMsg = (document.getElementById('cfg-pwamsg')?.value||'').trim();
+  const pwaMsgIos = (document.getElementById('cfg-pwamsg-ios')?.value||'').trim();
   await Promise.all([
     saveAppSetting('app_name', name),
     saveAppSetting('pwa_name', pwaName),
     saveAppSetting('primary_color', color),
+    saveAppSetting('pwa_install_msg', pwaMsg),
+    saveAppSetting('pwa_install_msg_ios', pwaMsgIos),
   ]);
   // 즉시 화면 반영
   APP.app_name = name; APP.pwa_name = pwaName; APP.primary_color = color;
+  APP.pwa_install_msg = pwaMsg; APP.pwa_install_msg_ios = pwaMsgIos;
+  window.__pwaMsg = { android: pwaMsg, ios: pwaMsgIos };
   const logo = document.querySelector('.logo');
   if(logo) logo.textContent = name;
   document.title = name;
@@ -20944,6 +20960,6 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script src="closing_helper.js?v=2026111506"></script>
-<script src="inventory_helper.js?v=2026111508"></script>
+<script src="inventory_helper.js?v=2026111509"></script>
 </body>
 </html>

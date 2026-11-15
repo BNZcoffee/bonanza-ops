@@ -200,12 +200,17 @@
       if (!ios && !hasBip) return; // 설치 불가/이미 설치 환경이면 표시하지 않음
       const bar = document.createElement('div'); bar.id = 'pwaInstallBar';
       bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#3B2314;color:#fff;padding:12px 14px;box-shadow:0 -2px 12px rgba(0,0,0,.2);font-size:13px;line-height:1.5;display:flex;align-items:center;gap:10px;flex-wrap:wrap';
+      // 안내 문구는 [앱 관리]에서 설정 가능(window.__pwaMsg). 미설정 시 기본 문구 사용.
+      const cfg = window.__pwaMsg || {};
+      const fmt = t => esc(String(t)).replace(/\n/g, '<br>');
+      const androidMsg = (cfg.android && String(cfg.android).trim()) ? fmt(cfg.android) : '📱 보난자 운영 앱을 홈 화면에 설치하시겠습니까? <span style="opacity:.85">(앱처럼 빠른 실행 &amp; 마감/이관 푸시 알림 수신)</span>';
+      const iosMsg = (cfg.ios && String(cfg.ios).trim()) ? fmt(cfg.ios) : '📱 <b>아이폰 앱 설치 방법</b>: 하단 <b>공유(□↑)</b> 버튼 → <b>홈 화면에 추가</b>를 누르면 앱으로 설치되고 푸시 알림을 받을 수 있습니다.';
       if (hasBip) {
-        bar.innerHTML = '<span style="flex:1;min-width:200px">📱 보난자 운영 앱을 홈 화면에 설치하시겠습니까? <span style="opacity:.85">(앱처럼 빠른 실행 & 마감/이관 푸시 알림 수신)</span></span>'
+        bar.innerHTML = '<span style="flex:1;min-width:200px">' + androidMsg + '</span>'
           + '<span style="display:flex;gap:6px;margin-left:auto"><button onclick="InventoryMgr.pwaInstall()" style="background:#fff;color:#3B2314;border:none;border-radius:7px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">앱으로 설치하기</button>'
           + '<button onclick="InventoryMgr.pwaDismiss()" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:7px;padding:7px 10px;font-size:12px;cursor:pointer">나중에</button></span>';
       } else {
-        bar.innerHTML = '<span style="flex:1;min-width:200px">📱 <b>아이폰 앱 설치 방법</b>: 하단 <b>공유(□↑)</b> 버튼 → <b>홈 화면에 추가</b>를 누르면 앱으로 설치되고 푸시 알림을 받을 수 있습니다.</span>'
+        bar.innerHTML = '<span style="flex:1;min-width:200px">' + iosMsg + '</span>'
           + '<button onclick="InventoryMgr.pwaDismiss()" style="background:#fff;color:#3B2314;border:none;border-radius:7px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;margin-left:auto">확인</button>';
       }
       document.body.appendChild(bar);
