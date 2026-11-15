@@ -1,6 +1,6 @@
 {
   "name": "보난자커피 운영 매뉴얼",
-  "short_name": "보난자",
+  "short_name": "보난자커피",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

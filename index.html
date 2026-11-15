@@ -8618,10 +8618,14 @@ async function saveUISettings(){
     saveAppSetting('primary_color', color),
   ]);
   // 즉시 화면 반영
+  APP.app_name = name; APP.primary_color = color;
   const logo = document.querySelector('.logo');
   if(logo) logo.textContent = name;
+  document.title = name;
   document.documentElement.style.setProperty('--br', color);
-  alert('저장됐습니다! (색상은 다음 로그인부터 완전 적용)');
+  // 설치 매니페스트(앱 이름/테마색)도 즉시 갱신
+  try { applyPwaIcon(APP.logo_url || ''); } catch(e){}
+  alert('저장됐습니다! 앱 이름/로고는 홈 화면에 다시 설치(추가)하면 적용됩니다. (색상은 다음 로그인부터 완전 적용)');
   renderAppSettings(document.getElementById('contentArea'));
 }
 async function saveFeatSettings(){
@@ -9452,15 +9456,67 @@ const PERM_DEFAULT = {
 let PERM_MAP = null;
 
 // PWA 홈 화면 아이콘/매니페스트 적용 (로고 URL 기반)
+// PWA 브랜딩: 앱 이름(app_name) + 로고(logo_url)를 설치 매니페스트/아이콘에 반영.
+//  - 과거 blob manifest 가 안드로이드에서 기본아이콘으로 폴백되던 문제는, 로고를 '정확한 크기(192/512)
+//    PNG 로 캔버스 렌더'해 매니페스트에 넣어 해결한다(선언 크기와 실제 크기 불일치 제거).
+//  - 로고 미등록 시엔 이름만 동적 반영하고 아이콘은 검증된 정적 파일 URL 을 쓴다.
+let __manifestBlobUrl = null;
 function applyPwaIcon(logoUrl) {
-  // 기본 홈화면 아이콘은 <head>의 정적 아이콘(apple-touch-icon.png / manifest.json)이 담당한다.
-  //  → 로그인 전·미방문 상태로 '홈 화면에 추가'해도 '보' 글자 대신 로고가 뜬다.
-  // 여기서는 (1) 테마색, (2) 총괄이 커스텀 로고를 올린 경우에만 iOS 홈아이콘을 그 로고로 덮어쓴다.
-  const theme = (typeof APP !== 'undefined' && APP.primary_color) ? APP.primary_color : '#3B2314';
-  const tc = document.querySelector('meta[name="theme-color"]');
-  if (tc) tc.content = theme;
-  // PWA 아이콘은 정적 파일(apple-touch-icon.png / manifest.json)이 단일 소스.
-  // logo_url(원격 URL)로 아이콘을 덮어쓰지 않는다 → 기기별 홈아이콘 일관성 확보.
+  try {
+    const theme = (typeof APP !== 'undefined' && APP.primary_color) ? APP.primary_color : '#3B2314';
+    const tc = document.querySelector('meta[name="theme-color"]'); if (tc) tc.content = theme;
+    const appName = (typeof APP !== 'undefined' && APP.app_name) ? String(APP.app_name).trim() : '보난자커피';
+    const shortName = (appName.split(/[\s—\-|·/]+/)[0] || appName).slice(0, 12);
+    const titleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]'); if (titleMeta) titleMeta.content = shortName;
+    applyDynamicManifest(appName, shortName, theme, logoUrl || '');
+  } catch (e) { /* 실패 시 정적 manifest 유지 */ }
+}
+function __pwaLoadImg(src) { return new Promise(function (res, rej) { const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = function () { res(im); }; im.onerror = function () { rej(new Error('img load fail')); }; im.src = src; }); }
+function __pwaRenderIcon(img, size, maskable, bg) {
+  const c = document.createElement('canvas'); c.width = size; c.height = size; const ctx = c.getContext('2d');
+  if (maskable) { ctx.fillStyle = bg || '#3B2314'; ctx.fillRect(0, 0, size, size); }
+  const pad = Math.round(size * (maskable ? 0.16 : 0.06)); const avail = size - pad * 2;
+  const r = Math.min(avail / img.width, avail / img.height); const w = img.width * r, h = img.height * r;
+  ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+  return c.toDataURL('image/png');
+}
+async function applyDynamicManifest(name, shortName, theme, logoUrl) {
+  // blob manifest 는 상대경로를 blob: 기준으로 잘못 해석하므로, 현재 페이지 기준 '절대 URL' 로 구성한다.
+  //   (location 기반이라 github.io 하위경로/커스텀 도메인 어디서나 자동으로 정확)
+  const dir = new URL('.', location.href).href;         // 예: https://.../bonanza-ops/
+  const base = dir;
+  let icons = null, appleHref = null;
+  if (logoUrl) {
+    try {
+      const img = await __pwaLoadImg(logoUrl);
+      icons = [
+        { src: __pwaRenderIcon(img, 192, false, theme), sizes: '192x192', type: 'image/png', purpose: 'any' },
+        { src: __pwaRenderIcon(img, 512, false, theme), sizes: '512x512', type: 'image/png', purpose: 'any' },
+        { src: __pwaRenderIcon(img, 192, true, theme), sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+        { src: __pwaRenderIcon(img, 512, true, theme), sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+      ];
+      appleHref = __pwaRenderIcon(img, 180, true, theme);
+    } catch (e) { icons = null; /* CORS 등 실패 → 정적 아이콘 폴백 */ }
+  }
+  if (!icons) {
+    icons = [
+      { src: base + 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: base + 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: base + 'icon-192-maskable.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+      { src: base + 'icon-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+    ];
+  }
+  const manifest = { name: name, short_name: shortName, start_url: dir + 'index.html', scope: dir, display: 'standalone', orientation: 'portrait', background_color: theme, theme_color: theme, icons: icons };
+  try {
+    const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+    const url = URL.createObjectURL(blob);
+    let link = document.querySelector('link[rel="manifest"]');
+    if (!link) { link = document.createElement('link'); link.rel = 'manifest'; document.head.appendChild(link); }
+    link.setAttribute('href', url);
+    if (__manifestBlobUrl) { try { URL.revokeObjectURL(__manifestBlobUrl); } catch (_) {} }
+    __manifestBlobUrl = url;
+  } catch (e) {}
+  if (appleHref) { const at = document.getElementById('appleTouchIcon'); if (at) at.setAttribute('href', appleHref); }
 }
 
 // 메뉴 표시를 권한에 따라 제어
