@@ -2404,17 +2404,9 @@ let readListHtml = '';
   const remindBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px;color:var(--or,#B85C00);border-color:var(--or,#B85C00)" onclick="openRemindModal(${p.id})"><i class="ti ti-bell-ringing"></i> 리마인드</button>` : '';
   const updateNotifyBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px;color:var(--bl);border-color:var(--bl)" onclick="sendPostUpdateNotify(${p.id})"><i class="ti ti-refresh-alert"></i> 수정 알림</button>` : '';
 
-  // 조회자 인라인 표시(작성자/총괄 전용) — 이름 · 매장명 바로 노출
-  let viewerInlineHtml = '';
-  if (p.author_id === currentUser.id || currentUser.is_master) {
-    const { data: vlist } = await sb.from('post_views').select('last_at, users(name,store,position,part)').eq('post_id', p.id).order('last_at',{ascending:false});
-    const vs = vlist || [];  // 최근 조회순(last_at desc)
-    const rows = vs.map(v => { const u=v.users||{}; return '<div style="display:flex;align-items:baseline;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--crm,#eee);font-size:12px"><b style="min-width:62px">'+esc(u.name||'')+'</b><span style="color:var(--ts);min-width:52px">'+esc(u.store||u.part||'')+'</span><span style="color:var(--ts);font-size:11px;margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums">'+fmtDateTimeSec(v.last_at)+'</span></div>'; }).join('');
-    viewerInlineHtml = '<div style="margin:14px 0;padding:12px 14px;border:0.5px solid var(--crd);border-radius:12px">'
-      + '<div style="display:flex;align-items:center;margin-bottom:8px"><div style="font-weight:bold;font-size:13px"><i class="ti ti-eye-check"></i> 조회자 '+vs.length+'명 (이름 / 매장 / 최근 조회시간 · 최근순)</div>'
-      + '<button class="btn-cancel-sm" style="margin-left:auto;font-size:11px;padding:3px 9px" onclick="openViewerList('+p.id+')">최초/최근 · 미조회자 알림</button></div>'
-      + '<div>'+(rows||'<span style="font-size:12px;color:var(--ts)">아직 조회한 사람이 없습니다. (이 기능 적용 이후 열람분부터 집계됩니다)</span>')+'</div></div>';
-  }
+  // 열람자 버튼(작성자/총괄 전용) — 길어지지 않게 새 창(모달)에서 조회
+  const viewerBtn = (p.author_id === currentUser.id || currentUser.is_master)
+    ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openViewerList(${p.id})"><i class="ti ti-eye-check"></i> 열람자</button>` : '';
 
   area.innerHTML = `
     <div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage('board')"><i class="ti ti-arrow-left"></i> 목록</button></div>
@@ -2432,6 +2424,7 @@ let readListHtml = '';
             ${deletePostBtn}
             ${remindBtn}
             ${updateNotifyBtn}
+            ${viewerBtn}
             <button class="btn-cancel-sm" id="favBtn" style="font-size:12px;padding:5px 10px;${isFav?'color:var(--gd);border-color:var(--gd)':''}" onclick="toggleFav(${p.id})"><i class="ti ti-bookmark${isFav?'-filled':''}"></i> ${isFav?'저장됨':'저장'}</button>
             <button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openShareModal(${p.id})"><i class="ti ti-share"></i> 링크 공유</button>
           </span>
@@ -2445,7 +2438,6 @@ let readListHtml = '';
       ${refHtml}
       ${confirmHtml}
       ${readListHtml}
-      ${viewerInlineHtml}
       ${cmtHtml}
     </div>`;
   // 본문 이미지 탭하면 확대 보기 (작게 넣은 이미지도 크게 볼 수 있게)
@@ -2587,6 +2579,16 @@ async function openViewerList(postId){
     .select('first_at,last_at,cnt, users(name,position,store,part,role)')
     .eq('post_id',postId).order('last_at',{ascending:false});
   const list = views || [];
+  // 열람 권한(대상) 산정 — notifyNonViewers와 동일 기준
+  let eligCnt = 0;
+  try{
+    const { data: au } = await sb.from('users').select('id,role,is_master,is_vice_master,part').eq('active',true);
+    const mgrOnly = postIsManagerAccess(currentPost.access);
+    eligCnt = (au||[]).filter(u=>{ const g=userGrade(u); return mgrOnly ? g==='manager' : (g==='manager'||g==='staff'); }).length;
+  }catch(e){}
+  const { data: vuids } = await sb.from('post_views').select('user_id').eq('post_id',postId);
+  const viewedCnt = (vuids||[]).length;
+  const notViewed = Math.max(0, eligCnt - viewedCnt);
   const vlabel = u => u ? (esc(u.name||'') + ' ' + esc(u.position||u.part||u.role||'')).trim() : '(알수없음)';
   const rows = list.map((v,i)=>'<tr>'
     + '<td style="padding:6px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">'+(i+1)+'</td>'
@@ -2597,7 +2599,8 @@ async function openViewerList(postId){
   const old = document.getElementById('viewerListModal'); if(old) old.remove();
   const ov = document.createElement('div'); ov.id='viewerListModal'; ov.className='modal-overlay'; ov.style.display='flex';
   ov.innerHTML = '<div class="modal-inner" style="background:var(--cr,#fff);border-radius:14px;max-width:560px;width:95%;max-height:84vh;display:flex;flex-direction:column;overflow:hidden">'
-    + '<div style="display:flex;align-items:center;padding:14px 16px;border-bottom:0.5px solid var(--crd)"><div style="font-size:15px;font-weight:700">조회자 목록</div><div style="margin-left:10px;font-size:12px;color:var(--ts)">전체 <b style="color:var(--br)">'+list.length+'</b></div><button onclick="document.getElementById(\'viewerListModal\').remove()" style="margin-left:auto;background:none;border:none;font-size:20px;cursor:pointer;color:var(--ts)">✕</button></div>'
+    + '<div style="display:flex;align-items:center;padding:14px 16px 10px"><div style="font-size:15px;font-weight:700">조회자 목록</div><button onclick="document.getElementById(\'viewerListModal\').remove()" style="margin-left:auto;background:none;border:none;font-size:20px;cursor:pointer;color:var(--ts)">✕</button></div>'
+    + '<div style="display:flex;gap:16px;padding:0 16px 12px;border-bottom:0.5px solid var(--crd);font-size:12px"><span style="color:var(--ts)">열람권한 <b style="color:var(--br)">'+eligCnt+'</b>명</span><span style="color:var(--ts)">조회 <b style="color:var(--br)">'+viewedCnt+'</b>명</span><span style="color:var(--ts)">미조회 <b style="color:var(--or,#B85C00)">'+notViewed+'</b>명</span></div>'
     + '<div style="overflow:auto;padding:4px 14px 10px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--cr2,#faf7f2)"><th style="padding:7px 8px">번호</th><th style="padding:7px 8px;text-align:left">조회자</th><th style="padding:7px 8px;text-align:left">최초 조회시간</th><th style="padding:7px 8px;text-align:left">최근 조회시간</th></tr></thead><tbody>'+(rows||'<tr><td colspan="4" style="padding:18px;text-align:center;color:var(--ts)">아직 조회한 사람이 없습니다.</td></tr>')+'</tbody></table></div>'
     + '<div style="display:flex;justify-content:flex-end;gap:6px;padding:12px 16px;border-top:0.5px solid var(--crd)"><button class="btn-cancel-sm" style="font-size:12px" onclick="notifyNonViewers('+postId+')"><i class="ti ti-bell-ringing"></i> 미조회자 알림 발송</button><button class="btn-submit" style="font-size:12px" onclick="document.getElementById(\'viewerListModal\').remove()">닫기</button></div>'
     + '</div>';
