@@ -2280,7 +2280,7 @@ let readListHtml = '';
       const isVid = vidExts.includes(ext);
       let preview = '';
       if (isImg) {
-        preview = `<div class="wm-wrap" style="margin:6px 0 10px;cursor:zoom-in" onclick="openImageZoom('${a.file_url}')"><div class="watermark">${wmText}&nbsp;&nbsp;&nbsp;${wmText}&nbsp;&nbsp;&nbsp;${wmText}</div><img src="${a.file_url}" style="max-width:100%;border-radius:8px;border:0.5px solid var(--crd);display:block;-webkit-user-drag:none;user-select:none;pointer-events:none" loading="lazy" oncontextmenu="return false" ondragstart="return false"/><div style="position:absolute;bottom:8px;right:8px;background:rgba(43,26,14,.6);color:#fff;font-size:11px;padding:3px 8px;border-radius:6px;pointer-events:none"><i class="ti ti-zoom-in"></i> 탭하여 확대</div></div>`;
+        preview = `<div class="wm-wrap" style="margin:6px 0 10px;cursor:zoom-in" onclick="openImageZoom('${a.file_url}')"><div style="position:absolute;inset:0;display:flex;flex-wrap:wrap;align-content:center;justify-content:center;gap:30px 20px;pointer-events:none;overflow:hidden;border-radius:8px;z-index:2">${Array.from({length:24}).map(()=>'<span style="color:#fff;mix-blend-mode:difference;opacity:.5;font-size:12px;font-weight:700;transform:rotate(-28deg);white-space:nowrap;letter-spacing:1px">'+wmText+'</span>').join('')}</div><img src="${a.file_url}" style="max-width:100%;border-radius:8px;border:0.5px solid var(--crd);display:block;-webkit-user-drag:none;user-select:none;pointer-events:none" loading="lazy" oncontextmenu="return false" ondragstart="return false"/><div style="position:absolute;bottom:8px;right:8px;background:rgba(43,26,14,.6);color:#fff;font-size:11px;padding:3px 8px;border-radius:6px;pointer-events:none"><i class="ti ti-zoom-in"></i> 탭하여 확대</div></div>`;
       } else if (isVid) {
         preview = `<video src="${a.file_url}" controls controlslist="nodownload" style="max-width:100%;border-radius:8px;border:0.5px solid var(--crd);margin:6px 0 10px;display:block"></video>`;
       }
@@ -2464,7 +2464,7 @@ function openImageZoom(url) {
   ov.setAttribute('oncontextmenu','return false');
   // 워터마크 다수 + 이미지 (이미지 위에 워터마크 오버레이)
   let wmTiles = '';
-  for (let i=0;i<40;i++){ wmTiles += `<div style="color:rgba(255,255,255,.16);font-size:14px;font-weight:700;transform:rotate(-28deg);white-space:nowrap;letter-spacing:2px">${wmText}</div>`; }
+  for (let i=0;i<40;i++){ wmTiles += `<div style="color:#fff;mix-blend-mode:difference;opacity:.5;font-size:14px;font-weight:700;transform:rotate(-28deg);white-space:nowrap;letter-spacing:2px">${wmText}</div>`; }
   ov.innerHTML = `
     <div style="position:absolute;inset:0;display:grid;grid-template-columns:repeat(3,1fr);gap:60px 30px;align-content:center;justify-items:center;pointer-events:none;z-index:2">${wmTiles}</div>
     <img src="${url}" style="max-width:96vw;max-height:92vh;object-fit:contain;z-index:1;-webkit-user-drag:none;user-select:none" oncontextmenu="return false" ondragstart="return false"/>
@@ -2492,7 +2492,7 @@ function openFilePreview(url, fname) {
     // 이미지: 워터마크와 함께 앱 내 미리보기 (확대해서 보기)
     const wm = currentUser ? (currentUser.code + ' ' + currentUser.name + ' ' + (currentUser.store||'')) : '';
     let wmTiles = '';
-    for (let i=0;i<40;i++){ wmTiles += '<span style="opacity:.13;font-size:13px;color:#fff;font-weight:700;transform:rotate(-30deg);white-space:nowrap">'+wm+'</span>'; }
+    for (let i=0;i<40;i++){ wmTiles += '<span style="color:#fff;mix-blend-mode:difference;opacity:.5;font-size:13px;font-weight:700;transform:rotate(-30deg);white-space:nowrap">'+wm+'</span>'; }
     inner = `<div style="position:relative;max-width:96vw;max-height:84vh;display:flex;align-items:center;justify-content:center">
       <img src="${url}" style="max-width:96vw;max-height:84vh;border-radius:10px;display:block;-webkit-user-select:none;user-select:none" oncontextmenu="return false" ondragstart="return false"/>
       <div style="position:absolute;inset:0;display:flex;flex-wrap:wrap;align-content:center;justify-content:center;gap:38px 26px;pointer-events:none;overflow:hidden;border-radius:10px">${wmTiles}</div>
@@ -5621,10 +5621,10 @@ async function sendRoleBasedPostNotify(postId, title) {
   const roleCheck = {};
   (nrs||[]).forEach(r => { roleCheck[r.role_key] = !(r.enabled===false||r.enabled==='false'||r.enabled===0||r.enabled===null); });
 
+  // 작성자 본인도 발송 대상에 포함(정상 발송 여부 확인용) — 기존 .neq 제외 제거
   const { data: allUsers } = await sb.from('users')
     .select('id,role,store,slack_member_id,is_master,is_vice_master,part')
-    .eq('active', true)
-    .neq('id', currentUser.id);
+    .eq('active', true);
 
   if (!allUsers?.length) return;
 
@@ -5635,7 +5635,11 @@ async function sendRoleBasedPostNotify(postId, title) {
   const __boardPerm = __cat ? (__cat.read_perm||'all') : 'all';
   const __boardDept = __cat ? __cat.dept : null;
 
-  const msg = notifRender('new_post',{title:(title||'새 공지가 등록되었습니다')});
+  // 확인체크(require_read) 사용 공지만 '확인해주세요' 문구 포함. 미사용(박제용)이면 확인 유도 문구 제외.
+  const __requireRead = !(__pa && __pa.require_read === false);
+  const msg = __requireRead
+    ? notifRender('new_post',{title:(title||'새 공지가 등록되었습니다')})
+    : ('[새 공지] ' + (title||'새 공지가 등록되었습니다'));
   let sent = 0;
   window.__notifBatchLog = true;   // 개별 로그 억제(아래에서 총계 1건만 기록)
   for (const u of allUsers) {
@@ -5667,6 +5671,13 @@ async function sendRoleBasedPostNotify(postId, title) {
   }
   window.__notifBatchLog = false;
   console.log('[알림] 공지 ' + sent + '명 발송');
+  // 전 직원 공지(매니저 전용/게시판 제한 아님)는 웹푸시(앱 푸시)도 발송 — 슬랙·인앱과 별개로 스마트폰 배너 수신
+  try {
+    if (!postIsManagerAccess(__postAccess) && __boardPerm === 'all' && window.InventoryMgr && typeof window.InventoryMgr.pushSend === 'function') {
+      const pushStores = [...new Set((allUsers||[]).map(u=>u.store).filter(Boolean))];
+      if (pushStores.length) await window.InventoryMgr.pushSend({ mode:'notify_stores', stores:pushStores, title:'📢 새 공지', body:(title||'새 공지가 등록되었습니다'), url: APP_BASE_URL + '?post=' + postId });
+    }
+  } catch(e){}
   try{ await logNotifSend('new_post','post',postId, "'"+(title||'공지')+"' 새 공지 발송", sent); }catch(e){}
 }
 
