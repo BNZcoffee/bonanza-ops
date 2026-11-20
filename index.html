@@ -2061,6 +2061,7 @@ async function renderPostDetail(area) {
   const p = currentPost;
   if (!p) { goPage('board'); return; }
   area.innerHTML = `<div class="loading"><i class="ti ti-loader spin"></i> 불러오는 중...</div>`;
+  recordPostView(p.id);  // 열람(조회) 기록 — 최초/최근 조회시간
 
   const week = new Date(Date.now() - 7*24*60*60*1000).toISOString();
   const isNew = new Date(p.created_at) >= new Date(week);
@@ -2400,6 +2401,7 @@ let readListHtml = '';
   const editBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openEditPost(${p.id})"><i class="ti ti-edit"></i> 수정</button>` : '';
   const deletePostBtn = canDeletePost(p) ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px;color:var(--rd);border-color:var(--rd)" onclick="deletePost(${p.id})"><i class="ti ti-trash"></i> 삭제</button>` : '';
   const remindBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px;color:var(--or,#B85C00);border-color:var(--or,#B85C00)" onclick="openRemindModal(${p.id})"><i class="ti ti-bell-ringing"></i> 리마인드</button>` : '';
+  const viewerBtn = (p.author_id === currentUser.id || currentUser.is_master) ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openViewerList(${p.id})"><i class="ti ti-eye-check"></i> 조회자 목록</button>` : '';
   const updateNotifyBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px;color:var(--bl);border-color:var(--bl)" onclick="sendPostUpdateNotify(${p.id})"><i class="ti ti-refresh-alert"></i> 수정 알림</button>` : '';
 
   area.innerHTML = `
@@ -2417,6 +2419,7 @@ let readListHtml = '';
             ${editBtn}
             ${deletePostBtn}
             ${remindBtn}
+            ${viewerBtn}
             ${updateNotifyBtn}
             <button class="btn-cancel-sm" id="favBtn" style="font-size:12px;padding:5px 10px;${isFav?'color:var(--gd);border-color:var(--gd)':''}" onclick="toggleFav(${p.id})"><i class="ti ti-bookmark${isFav?'-filled':''}"></i> ${isFav?'저장됨':'저장'}</button>
             <button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openShareModal(${p.id})"><i class="ti ti-share"></i> 링크 공유</button>
@@ -2553,6 +2556,66 @@ async function confirmRead(postId) {
   await sb.from('post_reads').upsert({post_id: postId, user_id: currentUser.id}, {onConflict:'post_id,user_id'});
   updateNotifDot();
   openPostById(postId);
+}
+
+// ── 공지 조회(열람) 기록 — 최초/최근 조회시간 + 횟수 ──────────────────────
+async function recordPostView(postId){
+  if(!postId || !currentUser) return;
+  try{
+    const now = new Date().toISOString();
+    const { data: ex } = await sb.from('post_views').select('cnt').eq('post_id',postId).eq('user_id',currentUser.id).maybeSingle();
+    if(ex){ await sb.from('post_views').update({ last_at: now, cnt: (ex.cnt||1)+1 }).eq('post_id',postId).eq('user_id',currentUser.id); }
+    else { await sb.from('post_views').insert({ post_id: postId, user_id: currentUser.id }); }
+  }catch(e){}
+}
+// ── 조회자 목록 (작성자/총괄 전용) ───────────────────────────────────────
+async function openViewerList(postId){
+  if(!(currentPost && (currentPost.author_id === currentUser.id || currentUser.is_master))){ alert('작성자와 총괄만 볼 수 있습니다.'); return; }
+  const { data: views } = await sb.from('post_views')
+    .select('first_at,last_at,cnt, users(name,position,store,part,role)')
+    .eq('post_id',postId).order('last_at',{ascending:false});
+  const list = views || [];
+  const vlabel = u => u ? (esc(u.name||'') + ' ' + esc(u.position||u.part||u.role||'')).trim() : '(알수없음)';
+  const rows = list.map((v,i)=>'<tr>'
+    + '<td style="padding:6px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">'+(i+1)+'</td>'
+    + '<td style="padding:6px 8px;border-bottom:0.5px solid var(--crm,#eee)">'+vlabel(v.users)+'</td>'
+    + '<td style="padding:6px 8px;border-bottom:0.5px solid var(--crm,#eee);font-size:11px;color:var(--ts);white-space:nowrap">'+fmtDateTime(v.first_at)+'</td>'
+    + '<td style="padding:6px 8px;border-bottom:0.5px solid var(--crm,#eee);font-size:11px;color:var(--ts);white-space:nowrap">'+fmtDateTime(v.last_at)+'</td>'
+    + '</tr>').join('');
+  const old = document.getElementById('viewerListModal'); if(old) old.remove();
+  const ov = document.createElement('div'); ov.id='viewerListModal'; ov.className='modal-overlay'; ov.style.display='flex';
+  ov.innerHTML = '<div class="modal-inner" style="background:var(--cr,#fff);border-radius:14px;max-width:560px;width:95%;max-height:84vh;display:flex;flex-direction:column;overflow:hidden">'
+    + '<div style="display:flex;align-items:center;padding:14px 16px;border-bottom:0.5px solid var(--crd)"><div style="font-size:15px;font-weight:700">조회자 목록</div><div style="margin-left:10px;font-size:12px;color:var(--ts)">전체 <b style="color:var(--br)">'+list.length+'</b></div><button onclick="document.getElementById(\'viewerListModal\').remove()" style="margin-left:auto;background:none;border:none;font-size:20px;cursor:pointer;color:var(--ts)">✕</button></div>'
+    + '<div style="overflow:auto;padding:4px 14px 10px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--cr2,#faf7f2)"><th style="padding:7px 8px">번호</th><th style="padding:7px 8px;text-align:left">조회자</th><th style="padding:7px 8px;text-align:left">최초 조회시간</th><th style="padding:7px 8px;text-align:left">최근 조회시간</th></tr></thead><tbody>'+(rows||'<tr><td colspan="4" style="padding:18px;text-align:center;color:var(--ts)">아직 조회한 사람이 없습니다.</td></tr>')+'</tbody></table></div>'
+    + '<div style="display:flex;justify-content:flex-end;gap:6px;padding:12px 16px;border-top:0.5px solid var(--crd)"><button class="btn-cancel-sm" style="font-size:12px" onclick="notifyNonViewers('+postId+')"><i class="ti ti-bell-ringing"></i> 미조회자 알림 발송</button><button class="btn-submit" style="font-size:12px" onclick="document.getElementById(\'viewerListModal\').remove()">닫기</button></div>'
+    + '</div>';
+  ov.addEventListener('click', e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+async function notifyNonViewers(postId){
+  if(!(currentPost && (currentPost.author_id === currentUser.id || currentUser.is_master))){ alert('권한이 없습니다.'); return; }
+  const { data: au } = await sb.from('users').select('id,name,store,role,is_master,is_vice_master,part,slack_member_id').eq('active',true);
+  const mgrOnly = postIsManagerAccess(currentPost.access);
+  const eligible = (au||[]).filter(u=>{ const g=userGrade(u); return mgrOnly ? g==='manager' : (g==='manager'||g==='staff'); });
+  const { data: views } = await sb.from('post_views').select('user_id').eq('post_id',postId);
+  const viewed = new Set((views||[]).map(v=>v.user_id));
+  const targets = eligible.filter(u=>!viewed.has(u.id));
+  if(!targets.length){ alert('미조회자가 없습니다. 대상 전원이 조회했습니다.'); return; }
+  if(!confirm('아직 조회하지 않은 '+targets.length+'명에게 알림을 보낼까요?')) return;
+  const title = (currentPost && currentPost.title) || '공지';
+  const msg = "[미조회 공지] '"+title+"' 공지를 아직 조회하지 않으셨습니다.";
+  const link = APP_BASE_URL + '?post=' + postId;
+  let sent = 0;
+  for(const u of targets){
+    try{
+      await sendNotificationDedup({targetUserId:u.id, noticeId:postId, type:'notice_reminder_3d', message:msg, refType:'post'});
+      if(u.slack_member_id && typeof sendSlackDM==='function'){ await sendSlackDM(u.slack_member_id, '🔔 '+msg+'\n'+link); }
+      sent++;
+    }catch(e){}
+  }
+  try{ await logNotifSend('reminder_manual','post',postId,"'"+title+"' 미조회자 알림", sent); }catch(e){}
+  updateNotifDot();
+  alert('미조회자 '+sent+'명에게 알림을 발송했습니다.');
 }
 
 // ── 게시판 댓글 @태그 기능 ──
