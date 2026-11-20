@@ -549,12 +549,12 @@ table.g-tbl th{background:var(--crm);font-weight:700}
 
     <!-- STEP 1: 슬랙 멤버 ID 확인 + 인증번호 발송 -->
     <div id="pwStep1">
-      <div class="login-sub" style="margin-bottom:14px">슬랙 인증</div>
+      <div class="login-sub" id="pwStep1Sub" style="margin-bottom:14px">슬랙 인증</div>
       <div id="pwSetWelcome" style="font-size:13px;color:var(--ts);margin-bottom:14px;line-height:1.6;text-align:left"></div>
-      <div style="font-size:12px;color:var(--ts);margin-bottom:6px;text-align:left;font-weight:600">슬랙 멤버 ID</div>
+      <div id="pwStep1Label" style="font-size:12px;color:var(--ts);margin-bottom:6px;text-align:left;font-weight:600">슬랙 멤버 ID</div>
       <input type="text" id="pwSlackId" placeholder="예: U012AB3CD" autocomplete="off"
         oninput="this.value=this.value.replace(/\s/g,'').toUpperCase()" style="text-align:center;letter-spacing:1px;font-weight:600" />
-      <div style="font-size:11px;color:var(--ts);margin:8px 0 12px;line-height:1.75;text-align:left;background:var(--crm);border-radius:8px;padding:10px 12px">
+      <div id="pwStep1Help" style="font-size:11px;color:var(--ts);margin:8px 0 12px;line-height:1.75;text-align:left;background:var(--crm);border-radius:8px;padding:10px 12px">
         <b>📋 멤버 ID 확인 방법</b><br>
         슬랙 앱 → 본인 프로필 → 점 세개(<b>⋯ 더보기</b>) → <b>멤버 ID 복사</b><br>
         <span style="color:var(--th)">(U로 시작하는 8~11자리 영문·숫자)</span>
@@ -1075,6 +1075,9 @@ async function checkPushPriorityGate(){
     const ua = navigator.userAgent;
     const isIOS = /iphone|ipad|ipod/i.test(ua) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
     const isAndroid = /android/i.test(ua);
+    const plat = isAndroid ? 'android' : (isIOS ? 'ios' : 'pc');
+    // 미완료 직원도 접속 OS를 기록 → 본사 현황에서 '미완료 (아이폰/iOS) / (안드로이드)' 구분 가능
+    try{ sb.from('users').update({ push_priority_platform: plat }).eq('id', currentUser.id).then(()=>{}); }catch(e){}
     const pushSupported = ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
     const standalone = (window.navigator.standalone===true) || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
     // 웹푸시 불가 구형 환경(안드/아이폰 아님)은 강제 불가 → 스킵
@@ -1091,8 +1094,9 @@ function openPushPriorityModal(ctx){
   if(ctx.isIOS && !ctx.standalone){
     const ov = document.createElement('div'); ov.id='pushPrioModal'; ov.className='modal-bg open';
     ov.innerHTML = '<div class="modal-box" style="max-width:440px;width:95%">'
-      + '<div class="modal-title">📢 알림 수신을 위해 먼저 홈 화면에 설치</div>'
-      + '<div style="font-size:13px;line-height:1.75;padding:4px 2px">아이폰은 <b>홈 화면에 앱을 설치한 뒤 앱 아이콘으로 열어야</b> 푸시 알림을 받을 수 있습니다.<br><br>하단 <b>공유(□↑)</b> → <b>홈 화면에 추가</b> → 설치된 아이콘으로 실행한 뒤, [내 정보] 또는 하단 배너에서 <b>알림 받기</b>를 눌러 주세요.</div>'
+      + '<div class="modal-title">📱 아이폰(iOS) 기기 — 앱 설치 필요</div>'
+      + '<div style="font-size:12px;color:#B45309;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:7px 10px;margin:2px 0 10px;font-weight:600">아이폰/아이패드(iOS)는 Safari 공유 → 홈 화면에 추가로 설치해야 알림을 받을 수 있습니다.</div>'
+      + '<div style="font-size:13px;line-height:1.75;padding:4px 2px">아이폰은 <b>홈 화면에 앱을 설치한 뒤 앱 아이콘으로 열어야</b> 푸시 알림을 받을 수 있습니다.<br><br>Safari 하단 <b>공유(□↑)</b> → <b>홈 화면에 추가</b> → 설치된 아이콘으로 실행한 뒤, [내 정보] 또는 하단 배너에서 <b>알림 받기</b>를 눌러 주세요.</div>'
       + '<div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn-submit" onclick="document.getElementById(\'pushPrioModal\').remove()">확인</button></div>'
       + '</div>';
     document.body.appendChild(ov);
@@ -1207,8 +1211,9 @@ async function openPushPrioStatus(){
   const done = rows.filter(r=>r.push_priority_verified_at);
   const undone = rows.filter(r=>!r.push_priority_verified_at);
   const who = u => esc(u.name||'') + (u.store?' <span style="color:var(--ts)">'+esc(u.store)+'</span>':'');
-  const doneRows = done.map(u=>'<div style="display:flex;gap:8px;padding:4px 0;border-bottom:0.5px solid var(--crm,#eee);font-size:12px"><span style="flex:1">'+who(u)+'</span><span style="color:var(--ts);font-size:11px">'+esc(u.push_priority_platform||'')+'</span><span style="color:#15803D;font-size:11px;white-space:nowrap">'+fmtDateTimeSec(u.push_priority_verified_at)+'</span></div>').join('');
-  const undoneRows = undone.map(u=>'<div style="display:flex;gap:8px;padding:4px 0;border-bottom:0.5px solid var(--crm,#eee);font-size:12px"><span style="flex:1">'+who(u)+'</span><span style="color:#B91C1C;font-size:11px;white-space:nowrap">미완료</span></div>').join('');
+  const platKO = p => p==='android' ? '안드로이드' : (p==='ios' ? '아이폰/iOS' : (p==='pc' ? 'PC' : '미접속'));
+  const doneRows = done.map(u=>'<div style="display:flex;gap:8px;padding:4px 0;border-bottom:0.5px solid var(--crm,#eee);font-size:12px"><span style="flex:1">'+who(u)+'</span><span style="color:var(--ts);font-size:11px">'+platKO(u.push_priority_platform)+'</span><span style="color:#15803D;font-size:11px;white-space:nowrap">'+fmtDateTimeSec(u.push_priority_verified_at)+'</span></div>').join('');
+  const undoneRows = undone.map(u=>'<div style="display:flex;gap:8px;padding:4px 0;border-bottom:0.5px solid var(--crm,#eee);font-size:12px"><span style="flex:1">'+who(u)+'</span><span style="color:#B91C1C;font-size:11px;white-space:nowrap">미완료 ('+platKO(u.push_priority_platform)+')</span></div>').join('');
   const ov=document.createElement('div'); ov.id='pgStatusModal'; ov.className='modal-bg open';
   ov.innerHTML = '<div class="modal-box" style="max-width:520px;width:95%;max-height:86vh;display:flex;flex-direction:column">'
     + '<div class="modal-title">알림 필수설정 현황</div>'
@@ -1227,6 +1232,7 @@ async function openPushPrioStatus(){
 // ── 슬랙 DM 인증 + 최초 비밀번호 설정 ──────────────
 let pwSetUser    = null;
 let pwSetSlackId = null;   // 첫 로그인 시 입력받은 슬랙 멤버 ID
+let pwSetEmail   = null;   // 이메일 인증 모드에서 입력받은 이메일
 let otpCode      = null;   // 발송한 6자리 코드
 let otpExpiry    = null;   // 만료 timestamp (10분)
 
@@ -1254,6 +1260,61 @@ function openPwSetScreen(user) {
   const sidEl = document.getElementById('pwSlackId');
   if (sidEl) sidEl.value = user.slack_member_id || '';
   document.getElementById('pwStep1Err').textContent = '';
+  // 가입 인증 수단(슬랙/이메일) 설정을 읽어 UI 전환 (비로그인 공개 RPC)
+  applySignupAuthUI(user);
+}
+// 가입 인증 수단 기본 이메일 템플릿({인증번호} 치환)
+const DEFAULT_SIGNUP_EMAIL_TMPL = '보난자 운영앱 가입 인증번호는 [{인증번호}] 입니다. (10분 이내 입력)';
+// 비로그인 회원가입 화면: 인증 수단 설정을 읽어 슬랙 ↔ 이메일 UI 전환
+async function applySignupAuthUI(user){
+  let method = 'slack', template = DEFAULT_SIGNUP_EMAIL_TMPL;
+  try{
+    const { data, error } = await sb.rpc('get_signup_auth');
+    if(!error && data){
+      const row = Array.isArray(data) ? data[0] : data;
+      if(row){ method = row.method || 'slack'; template = row.email_template || template; }
+    }
+  }catch(e){}
+  window.__signupAuth = { method, template };
+  const sub = document.getElementById('pwStep1Sub');
+  const label = document.getElementById('pwStep1Label');
+  const help = document.getElementById('pwStep1Help');
+  const sidEl = document.getElementById('pwSlackId');
+  const welcome = document.getElementById('pwSetWelcome');
+  if(method === 'email'){
+    if(sub) sub.textContent = '이메일 인증';
+    if(label) label.textContent = '이메일 주소';
+    if(sidEl){
+      sidEl.value = (user && user.email) || '';
+      sidEl.placeholder = '예: name@bonanza.kr';
+      sidEl.style.letterSpacing = '0';
+      sidEl.oninput = function(){ this.value = this.value.replace(/\s/g,''); };   // 이메일은 대문자 변환 안 함
+    }
+    if(help) help.innerHTML = '<b>📧 이메일 인증</b><br>본인 이메일로 인증번호가 발송됩니다. 받은 6자리 번호를 다음 화면에 입력하세요.<br><span style="color:var(--th)">메일이 안 보이면 스팸함도 확인해 주세요.</span>';
+    if(welcome && user) welcome.innerHTML = '<strong>' + (user.name||'') + '</strong>님, 환영합니다.<br>본인 이메일로 인증번호를 받아 비밀번호를 설정합니다.';
+  } else {
+    if(sub) sub.textContent = '슬랙 인증';
+    if(label) label.textContent = '슬랙 멤버 ID';
+    if(sidEl){
+      sidEl.placeholder = '예: U012AB3CD';
+      sidEl.style.letterSpacing = '1px';
+      sidEl.oninput = function(){ this.value = this.value.replace(/\s/g,'').toUpperCase(); };
+    }
+    if(help) help.innerHTML = '<b>📋 멤버 ID 확인 방법</b><br>슬랙 앱 → 본인 프로필 → 점 세개(<b>⋯ 더보기</b>) → <b>멤버 ID 복사</b><br><span style="color:var(--th)">(U로 시작하는 8~11자리 영문·숫자)</span>';
+    if(welcome && user) welcome.innerHTML = '<strong>' + (user.name||'') + '</strong>님, 환영합니다.<br>본인 슬랙 계정으로 인증번호를 받아 비밀번호를 설정합니다.';
+  }
+}
+// 이메일 OTP 발송 — 뼈대. 실제 발송은 window.__emailSendHook({to,subject,body}) 연결 시 동작.
+async function sendEmailOtp(email, code){
+  const tmpl = (window.__signupAuth && window.__signupAuth.template) || DEFAULT_SIGNUP_EMAIL_TMPL;
+  const body = String(tmpl).replace(/\{인증번호\}/g, code).replace(/\{code\}/g, code);
+  if(typeof window.__emailSendHook === 'function'){
+    try{
+      const r = await window.__emailSendHook({ to: email, subject: '[보난자 운영앱] 가입 인증번호', body });
+      return (r && r.ok !== false) ? { ok:true } : { ok:false, error:(r && r.error) || 'send_failed' };
+    }catch(e){ return { ok:false, error:String(e) }; }
+  }
+  return { ok:false, error:'email_not_connected' };   // 발송 훅 미연결(키/훅 연결 전)
 }
 
 function showPwStep(n) {
@@ -1304,7 +1365,45 @@ async function applyEmailChange() {
 // OTP 발송 — 슬랙 DM (Edge Function slack-notify 경유, 봇 토큰은 서버 시크릿)
 async function sendOtp() {
   const err = document.getElementById('pwStep1Err');
-  const slackId = (document.getElementById('pwSlackId').value||'').trim().toUpperCase();
+  const method = (window.__signupAuth && window.__signupAuth.method) || 'slack';
+  const raw = (document.getElementById('pwSlackId').value||'').trim();
+
+  // ── 이메일 인증 모드 ──────────────────────────────────────────
+  if (method === 'email') {
+    const email = raw;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      err.style.color = '';
+      err.textContent = '이메일 주소 형식이 올바르지 않습니다.';
+      return;
+    }
+    pwSetEmail = email;
+    err.style.color = '';
+    err.textContent = '인증번호 발송 중...';
+    otpCode   = String(Math.floor(100000 + Math.random() * 900000));
+    otpExpiry = Date.now() + 10 * 60 * 1000;
+    try {
+      const j = await sendEmailOtp(email, otpCode);
+      if (!j || !j.ok) {
+        err.textContent = (j && j.error === 'email_not_connected')
+          ? '이메일 발송이 아직 연결되지 않았습니다. 운영팀에 문의해 주세요.'
+          : '발송 실패: ' + ((j && j.error) || '알 수 없는 오류 (운영팀 문의)');
+        otpCode = null; otpExpiry = null; return;
+      }
+      document.getElementById('pwStep2Info').innerHTML =
+        '<strong>이메일</strong>로 인증번호를 발송했습니다.<br>메일함(스팸함 포함)을 확인해 주세요. (유효시간 10분)';
+      document.getElementById('otpInput').value = '';
+      document.getElementById('pwStep2Err').textContent = '';
+      showPwStep(2);
+      setTimeout(()=>document.getElementById('otpInput').focus(), 100);
+    } catch(e) {
+      err.textContent = '발송 오류: ' + (e?.message || JSON.stringify(e));
+      otpCode = null; otpExpiry = null;
+    }
+    return;
+  }
+
+  // ── 슬랙 인증 모드(기본) ──────────────────────────────────────
+  const slackId = raw.toUpperCase();
   // 슬랙 멤버 ID 형식: U로 시작하는 총 8~11자리 (U + 7~10자리 영문·숫자)
   if (!/^U[A-Z0-9]{7,10}$/.test(slackId)) {
     err.style.color = '';
@@ -1377,9 +1476,13 @@ async function doSetPassword() {
   const { data: __ok, error: __e } = await sb.rpc('set_password', { p_user_id: pwSetUser.id, p_new_password: p1, p_current_password: window.__pwSetAuth || '' });
   if (__e || !__ok) { err.textContent = '비밀번호 설정에 실패했습니다. 다시 로그인해 주세요.'; return; }
   // 슬랙 멤버 ID는 민감정보가 아니므로 users에 저장 (수집률 100%)
-  await sb.from('users').update({ slack_member_id: pwSetSlackId || pwSetUser.slack_member_id || null }).eq('id', pwSetUser.id);
+  const __su = { slack_member_id: pwSetSlackId || pwSetUser.slack_member_id || null };
+  // 이메일 인증 모드: 입력한 이메일을 users.email 에 저장
+  if ((window.__signupAuth && window.__signupAuth.method) === 'email' && pwSetEmail) __su.email = pwSetEmail;
+  await sb.from('users').update(__su).eq('id', pwSetUser.id);
   pwSetUser.pw_set          = true;
   pwSetUser.slack_member_id = pwSetSlackId || pwSetUser.slack_member_id;
+  if (__su.email) pwSetUser.email = __su.email;
   try { const { data: __sv } = await sb.rpc('verify_login_v2', { p_user_id: pwSetUser.id, p_password: p1 }); if(__sv && __sv.length) setSessionToken(__sv[0].session_token); } catch(e){}
   document.getElementById('pwSetScreen').style.display = 'none';
   loginAs(pwSetUser);
@@ -7102,6 +7205,24 @@ async function renderAppSettings(area){
       </div>
       <div style="text-align:right;margin-top:10px"><button class="btn-submit" style="font-size:13px;padding:8px 18px" onclick="saveBackupChannel()">백업 채널 저장</button></div>
     </div>` : ''}
+    ${(currentUser.is_master||currentUser.role==='admin') ? `<div class="notif-card" style="margin-bottom:12px">
+      <div class="section-label" style="margin-bottom:8px"><i class="ti ti-user-check"></i> 가입 인증 수단 설정</div>
+      <div style="font-size:12px;color:var(--th);margin-bottom:12px;line-height:1.6">첫 로그인(회원가입) 시 본인 확인 수단입니다. 추후 슬랙을 걷어내고 이메일 인증으로 전환할 수 있도록 미리 준비해 둔 설정입니다.</div>
+      <div class="form-row"><label class="form-label">인증 수단</label>
+        <select class="form-input" id="cfg-signupauth" onchange="document.getElementById('signupEmailBox').style.display=(this.value==='email'?'block':'none')">
+          <option value="slack"${(APP.signup_auth_method||'slack')==='slack'?' selected':''}>슬랙(Slack) 인증 (기본)</option>
+          <option value="email"${APP.signup_auth_method==='email'?' selected':''}>이메일(Email) 인증</option>
+        </select>
+        <div style="font-size:11px;color:var(--ts);margin-top:3px">이메일 인증은 실제 발송 연동(이메일 발송 훅) 연결 후 동작합니다. 전까지는 슬랙 인증을 유지하세요.</div>
+      </div>
+      <div id="signupEmailBox" style="display:${APP.signup_auth_method==='email'?'block':'none'}">
+        <div class="form-row"><label class="form-label">이메일 인증 안내 문구(템플릿)</label>
+          <textarea class="form-input" id="cfg-signupemail" rows="3" style="font-size:12px" placeholder="보난자 운영앱 가입 인증번호는 [{인증번호}] 입니다.">${esc(APP.signup_email_template||'보난자 운영앱 가입 인증번호는 [{인증번호}] 입니다. (10분 이내 입력)')}</textarea>
+          <div style="font-size:11px;color:var(--ts);margin-top:3px"><b>{인증번호}</b> 위치에 6자리 코드가 자동 삽입됩니다. (예: 보난자 운영앱 가입 인증번호는 [123456] 입니다.)</div>
+        </div>
+      </div>
+      <div style="text-align:right;margin-top:10px"><button class="btn-submit" style="font-size:13px;padding:8px 18px" onclick="saveSignupAuth()">가입 인증 설정 저장</button></div>
+    </div>` : ''}
     <div class="notif-card" style="margin-bottom:12px">
       <div class="section-label" style="margin-bottom:12px">기능 ON/OFF</div>
       <div class="setting-row"><div><div class="setting-title">댓글 기능</div></div>${tog('comments_enabled')}</div>
@@ -9002,6 +9123,22 @@ async function saveBackupChannel(){
   ]);
   window.__notifyMode = mode; window.__backupWebhookUrl = url;
   alert('백업 채널 설정을 저장했습니다. (발송 채널: ' + ({slack:'슬랙 기본',both:'슬랙+백업 동시',backup:'백업 단독'}[mode]) + ')');
+}
+// 가입 인증 수단(슬랙/이메일) + 이메일 템플릿 저장
+async function saveSignupAuth(){
+  if(!(currentUser && (currentUser.is_master || currentUser.role==='admin'))){ alert('권한이 없습니다.'); return; }
+  const method = document.getElementById('cfg-signupauth')?.value || 'slack';
+  const tmpl = (document.getElementById('cfg-signupemail')?.value || '').trim();
+  if(method==='email'){
+    if(!tmpl){ alert('이메일 인증 안내 문구(템플릿)를 입력해 주세요.'); return; }
+    if(!/\{인증번호\}/.test(tmpl) && !/\{code\}/.test(tmpl)){ alert('템플릿에 {인증번호} 자리를 포함해야 인증번호가 삽입됩니다.'); return; }
+    if(!confirm('이메일 인증으로 전환하면, 이메일 발송 훅이 연결되기 전에는 신규 입사자가 인증번호를 받지 못합니다.\n(발송 연동 완료 전까지는 슬랙 인증 유지를 권장)\n\n저장하시겠습니까?')) return;
+  }
+  await Promise.all([
+    saveAppSetting('signup_auth_method', method),
+    saveAppSetting('signup_email_template', tmpl || '보난자 운영앱 가입 인증번호는 [{인증번호}] 입니다. (10분 이내 입력)')
+  ]);
+  alert('가입 인증 설정을 저장했습니다. (수단: ' + (method==='email'?'이메일':'슬랙') + ')');
 }
 async function testBackupWebhook(){
   const res = document.getElementById('backupWebhookTestResult');
