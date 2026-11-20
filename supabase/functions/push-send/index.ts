@@ -103,7 +103,7 @@ Deno.serve(async (req) => {
     }
 
     if (mode === 'notify_stores') {
-      const isHQ = !!(user.is_master || user.role === 'admin' || user.role === 'dept' || user.store === '본사');
+      const isHQ = !!(user.is_master || user.role === 'admin' || user.role === 'dept' || user.part || user.store === '본사');
       if (!isHQ) return json({ error: 'forbidden' }, 403);
       const stores: string[] = Array.isArray(b.stores) ? b.stores : [];
       if (!stores.length) return json({ ok: true, sent: 0 });
