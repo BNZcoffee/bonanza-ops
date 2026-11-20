@@ -13,6 +13,8 @@ self.addEventListener('push', function (e) {
     badge: './icon-192.png',
     tag: d.tag || 'bnz',
     renotify: true,
+    requireInteraction: true,            // 사용자가 확인/스와이프 전까지 상단 알림 유지(조용히 묻히지 않게)
+    vibrate: [200, 100, 200],            // 진동으로 수신 인지
     data: { url: d.url || './index.html' }
   };
   e.waitUntil(self.registration.showNotification(title, opts));

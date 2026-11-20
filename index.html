@@ -1043,6 +1043,186 @@ async function doLogin() {
   loginAs(__user);
 }
 
+// ══════════════════════════════════════════════════════════════════
+// [알림 최우선 수신 필수 설정 게이트]
+//   안드로이드/갤럭시는 배터리 '제한 없음'이 아니면 백그라운드 푸시가 지연·차단되어
+//   현장 공지를 놓치는 문제가 있어, 로그인 후 필수 설정을 강제한다(완료 전 X 없음).
+//   iOS/PC 는 배터리 항목 없이 '알림 허용'만 필수.
+//   완료 시 users.push_priority_verified_at 저장 → 재접속 시 반복 노출 안 함.
+// ══════════════════════════════════════════════════════════════════
+async function __pushIsSubscribed(){
+  try{
+    if(!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return false;
+    if(Notification.permission !== 'granted') return false;
+    const reg = await navigator.serviceWorker.getRegistration();
+    if(!reg) return false;
+    const sub = await reg.pushManager.getSubscription();
+    return !!sub;
+  }catch(e){ return false; }
+}
+async function checkPushPriorityGate(){
+  try{
+    if(!currentUser) return;
+    // 이미 완료된 계정은 스킵. 컬럼 미존재(SQL 미실행) 시 조용히 스킵(기존 사용자 차단 방지).
+    let verified = currentUser.push_priority_verified_at || null;
+    try{
+      const { data, error } = await sb.from('users').select('push_priority_verified_at').eq('id',currentUser.id).maybeSingle();
+      if(error) return;                       // 컬럼 없음 등 → 스킵
+      if(data) verified = data.push_priority_verified_at;
+    }catch(e){ return; }
+    if(verified){ currentUser.push_priority_verified_at = verified; return; }
+
+    const ua = navigator.userAgent;
+    const isIOS = /iphone|ipad|ipod/i.test(ua) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+    const isAndroid = /android/i.test(ua);
+    const pushSupported = ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
+    const standalone = (window.navigator.standalone===true) || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    // 웹푸시 불가 구형 환경(안드/아이폰 아님)은 강제 불가 → 스킵
+    if(!pushSupported && !isIOS) return;
+    openPushPriorityModal({ isIOS, isAndroid, isDesktop: !isIOS && !isAndroid, standalone, isMaster: !!currentUser.is_master });
+  }catch(e){}
+}
+function openPushPriorityModal(ctx){
+  window.__pgCtx = ctx;
+  window.__pg = { s1:false, s2:false, s3:false, testSent:false };
+  const old = document.getElementById('pushPrioModal'); if(old) old.remove();
+
+  // iOS 미설치(사파리) — 설치 전엔 푸시 불가. 설치 안내만, 강제 보류(다음 로그인 때 재안내).
+  if(ctx.isIOS && !ctx.standalone){
+    const ov = document.createElement('div'); ov.id='pushPrioModal'; ov.className='modal-bg open';
+    ov.innerHTML = '<div class="modal-box" style="max-width:440px;width:95%">'
+      + '<div class="modal-title">📢 알림 수신을 위해 먼저 홈 화면에 설치</div>'
+      + '<div style="font-size:13px;line-height:1.75;padding:4px 2px">아이폰은 <b>홈 화면에 앱을 설치한 뒤 앱 아이콘으로 열어야</b> 푸시 알림을 받을 수 있습니다.<br><br>하단 <b>공유(□↑)</b> → <b>홈 화면에 추가</b> → 설치된 아이콘으로 실행한 뒤, [내 정보] 또는 하단 배너에서 <b>알림 받기</b>를 눌러 주세요.</div>'
+      + '<div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn-submit" onclick="document.getElementById(\'pushPrioModal\').remove()">확인</button></div>'
+      + '</div>';
+    document.body.appendChild(ov);
+    return;
+  }
+
+  const required = ctx.isAndroid ? ['s1','s2','s3'] : ['s1'];   // iOS(설치됨)/PC: 알림 허용만 필수
+  window.__pgCtx.required = required;
+
+  const batteryBlock = ctx.isAndroid ? (
+    '<div class="pg-step" id="pgStep2">'
+    + '<div class="pg-step-h"><span class="pg-num">2</span> 갤럭시 배터리 <b>제한 없음</b> 설정 <span class="pg-req">필수</span></div>'
+    + '<div style="background:var(--cr,#faf7f2);border:1px solid var(--crd);border-radius:10px;padding:12px 14px;margin:8px 0;font-size:12.5px;line-height:1.8">'
+    +   '<div style="font-weight:700;margin-bottom:6px">📱 필수 설정 방법 (안드로이드 / 갤럭시)</div>'
+    +   '1. 홈 화면에 설치된 <b>보난자커피 앱 아이콘을 길게 누른 뒤</b> 오른쪽 위 <b>ⓘ (앱 정보)</b>를 누릅니다.<br>'
+    +   '2. 메뉴에서 <b>배터리</b>로 들어가 <b>제한 없음</b>을 선택합니다.<br>'
+    +   '<span style="color:var(--ts)">(배터리 항목이 \'최적화됨\'에서 \'제한 없음\'으로 바뀌어야 백그라운드 차단이 해제됩니다.)</span>'
+    + '</div>'
+    + '<label style="display:flex;align-items:flex-start;gap:9px;cursor:pointer;font-size:13px;font-weight:600"><input type="checkbox" id="pgBatteryChk" style="margin-top:2px;width:18px;height:18px" onchange="pgToggleBattery(this.checked)"><span>위 방법대로 배터리 설정을 <b>\'제한 없음\'</b>으로 변경했습니다 (필수)</span></label>'
+    + '</div>'
+  ) : '';
+
+  const testBlock =
+    '<div class="pg-step" id="pgStep3">'
+    + '<div class="pg-step-h"><span class="pg-num">' + (ctx.isAndroid?'3':'2') + '</span> 테스트 푸시 발송 / 수신 확인 ' + (ctx.isAndroid?'<span class="pg-req">필수</span>':'<span class="pg-opt">권장</span>') + '</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">'
+    +   '<button class="btn-cancel-sm" style="font-size:12.5px" onclick="pgTestPush()">🔔 내 기기로 테스트 푸시 발송</button>'
+    +   '<button class="btn-submit" id="pgArriveBtn" style="font-size:12.5px;opacity:.5" disabled onclick="pgConfirmArrival()">알림 도착 확인 완료</button>'
+    + '</div>'
+    + '<div id="pgTestHint" style="font-size:11.5px;color:var(--ts);margin-top:6px">발송 버튼을 누른 뒤, 스마트폰 상단에 알림이 도착하면 [알림 도착 확인 완료]를 눌러 주세요.</div>'
+    + '</div>';
+
+  const masterSkip = ctx.isMaster
+    ? '<div style="text-align:center;margin-top:10px"><a href="javascript:void(0)" onclick="pgClose(false)" style="font-size:11.5px;color:var(--ts);text-decoration:underline">총괄 — 이번에는 건너뛰기</a></div>'
+    : '';
+
+  const ov = document.createElement('div'); ov.id='pushPrioModal'; ov.className='modal-bg open';
+  ov.innerHTML =
+    '<style>'
+    + '#pushPrioModal .pg-step{border:1px solid var(--crd);border-radius:12px;padding:12px 14px;margin-bottom:10px}'
+    + '#pushPrioModal .pg-step-h{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700}'
+    + '#pushPrioModal .pg-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--br);color:#fff;font-size:12px;flex-shrink:0}'
+    + '#pushPrioModal .pg-req{font-size:10px;background:#B91C1C;color:#fff;border-radius:4px;padding:1px 6px;margin-left:auto}'
+    + '#pushPrioModal .pg-opt{font-size:10px;background:#6B7280;color:#fff;border-radius:4px;padding:1px 6px;margin-left:auto}'
+    + '#pushPrioModal .pg-state{font-size:11.5px;font-weight:700;margin-top:6px}'
+    + '</style>'
+    + '<div class="modal-box" style="max-width:480px;width:95%;max-height:90vh;overflow:auto">'
+    + '<div class="modal-title">📢 알림 최우선 수신 필수 설정</div>'
+    + '<div style="font-size:12.5px;color:var(--th);line-height:1.7;margin-bottom:12px">현장 공지와 마감 알림을 <b>놓치지 않으려면</b> 아래 설정이 반드시 필요합니다. 모두 완료해야 시작할 수 있습니다.</div>'
+    // Step 1
+    + '<div class="pg-step" id="pgStep1">'
+    +   '<div class="pg-step-h"><span class="pg-num">1</span> 앱 알림 허용 <span class="pg-req">필수</span></div>'
+    +   '<div style="font-size:12.5px;color:var(--ts);margin:6px 0">버튼을 눌러 브라우저 알림을 허용하고 푸시를 구독합니다.</div>'
+    +   '<button class="btn-submit" style="font-size:12.5px" onclick="pgSubscribe()">알림 받기</button>'
+    +   '<div class="pg-state" id="pgS1state" style="color:#B91C1C">미완료</div>'
+    + '</div>'
+    + batteryBlock
+    + testBlock
+    + '<div style="margin-top:14px"><button class="btn-submit" id="pgDoneBtn" style="width:100%;padding:11px;font-size:14px;opacity:.5" disabled onclick="completePushPriority()">설정 완료 및 시작하기</button></div>'
+    + masterSkip
+    + '</div>';
+  document.body.appendChild(ov);
+  // 이미 구독된 상태면 1단계 자동 체크
+  __pushIsSubscribed().then(ok=>{ if(ok){ window.__pg.s1=true; updatePushGateState(); } });
+}
+async function pgSubscribe(){
+  try{ if(window.InventoryMgr && typeof InventoryMgr.subscribePush==='function') await InventoryMgr.subscribePush(); }catch(e){}
+  window.__pg.s1 = await __pushIsSubscribed();
+  updatePushGateState();
+  if(!window.__pg.s1){ try{ toast('알림 권한을 허용해야 합니다. 차단된 경우 브라우저 설정에서 알림을 허용해 주세요.'); }catch(e){} }
+}
+function pgToggleBattery(v){ window.__pg.s2 = !!v; updatePushGateState(); }
+async function pgTestPush(){
+  try{ if(window.InventoryMgr && typeof InventoryMgr.pushSend==='function') await InventoryMgr.pushSend({ mode:'test' }); }catch(e){}
+  window.__pg.testSent = true;
+  const hint = document.getElementById('pgTestHint'); if(hint) hint.textContent = '테스트 푸시를 발송했습니다. 상단 알림을 확인한 뒤 [알림 도착 확인 완료]를 눌러 주세요.';
+  updatePushGateState();
+}
+function pgConfirmArrival(){ if(!window.__pg.testSent) return; window.__pg.s3 = true; updatePushGateState(); }
+function updatePushGateState(){
+  const pg = window.__pg, ctx = window.__pgCtx || {}; if(!pg) return;
+  const s1 = document.getElementById('pgS1state');
+  if(s1){ s1.textContent = pg.s1 ? '✓ 완료' : '미완료'; s1.style.color = pg.s1 ? '#15803D' : '#B91C1C'; }
+  const arrive = document.getElementById('pgArriveBtn');
+  if(arrive){ arrive.disabled = !pg.testSent; arrive.style.opacity = pg.testSent ? '1' : '.5'; if(pg.s3){ arrive.textContent='✓ 확인 완료'; } }
+  const req = ctx.required || ['s1'];
+  const done = req.every(k => pg[k]);
+  const btn = document.getElementById('pgDoneBtn');
+  if(btn){ btn.disabled = !done; btn.style.opacity = done ? '1' : '.5'; }
+}
+async function completePushPriority(){
+  const pg = window.__pg, ctx = window.__pgCtx || {};
+  const req = ctx.required || ['s1'];
+  if(!req.every(k => pg[k])){ try{ toast('필수 단계를 모두 완료해 주세요.'); }catch(e){} return; }
+  const now = new Date().toISOString();
+  const plat = ctx.isAndroid ? 'android' : (ctx.isIOS ? 'ios' : 'pc');
+  try{ await sb.from('users').update({ push_priority_verified_at: now, push_priority_platform: plat }).eq('id', currentUser.id); }catch(e){}
+  currentUser.push_priority_verified_at = now;
+  pgClose(true);
+  try{ toast('알림 필수 설정이 완료되었습니다. 감사합니다.'); }catch(e){}
+}
+function pgClose(saved){ const ov=document.getElementById('pushPrioModal'); if(ov) ov.remove(); }
+// [본사] 직원별 알림 필수설정 완료 현황
+async function openPushPrioStatus(){
+  if(!(currentUser && (currentUser.is_master || currentUser.role==='admin'))){ alert('권한이 없습니다.'); return; }
+  let rows=[];
+  try{
+    const { data, error } = await sb.from('users').select('name,store,position,push_priority_verified_at,push_priority_platform').eq('active',true).order('store').order('name');
+    if(error) throw error;
+    rows = data||[];
+  }catch(e){ alert('현황 조회 실패 — push_priority_verified_at 컬럼이 없으면 push_priority.sql 을 먼저 실행하세요.\n\n('+(e.message||e)+')'); return; }
+  const done = rows.filter(r=>r.push_priority_verified_at);
+  const undone = rows.filter(r=>!r.push_priority_verified_at);
+  const who = u => esc(u.name||'') + (u.store?' <span style="color:var(--ts)">'+esc(u.store)+'</span>':'');
+  const doneRows = done.map(u=>'<div style="display:flex;gap:8px;padding:4px 0;border-bottom:0.5px solid var(--crm,#eee);font-size:12px"><span style="flex:1">'+who(u)+'</span><span style="color:var(--ts);font-size:11px">'+esc(u.push_priority_platform||'')+'</span><span style="color:#15803D;font-size:11px;white-space:nowrap">'+fmtDateTimeSec(u.push_priority_verified_at)+'</span></div>').join('');
+  const undoneRows = undone.map(u=>'<div style="display:flex;gap:8px;padding:4px 0;border-bottom:0.5px solid var(--crm,#eee);font-size:12px"><span style="flex:1">'+who(u)+'</span><span style="color:#B91C1C;font-size:11px;white-space:nowrap">미완료</span></div>').join('');
+  const ov=document.createElement('div'); ov.id='pgStatusModal'; ov.className='modal-bg open';
+  ov.innerHTML = '<div class="modal-box" style="max-width:520px;width:95%;max-height:86vh;display:flex;flex-direction:column">'
+    + '<div class="modal-title">알림 필수설정 현황</div>'
+    + '<div style="display:flex;gap:14px;font-size:12.5px;margin-bottom:10px"><span>완료 <b style="color:#15803D">'+done.length+'</b></span><span>미완료 <b style="color:#B91C1C">'+undone.length+'</b></span><span>전체 <b>'+rows.length+'</b></span></div>'
+    + '<div style="overflow:auto;flex:1">'
+    +   (undone.length ? '<div style="font-size:12px;font-weight:700;margin:4px 0;color:#B91C1C">미완료 '+undone.length+'명</div>'+undoneRows : '')
+    +   '<div style="font-size:12px;font-weight:700;margin:10px 0 4px;color:#15803D">완료 '+done.length+'명</div>'+(doneRows||'<div style="font-size:12px;color:var(--ts);padding:8px 0">아직 없음</div>')
+    + '</div>'
+    + '<div style="text-align:right;margin-top:10px"><button class="btn-submit" onclick="document.getElementById(\'pgStatusModal\').remove()">닫기</button></div>'
+    + '</div>';
+  ov.addEventListener('click', e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
 // 최초 비밀번호 설정 화면 진입
 // ── 슬랙 DM 인증 + 최초 비밀번호 설정 ──────────────
 let pwSetUser    = null;
@@ -1344,6 +1524,8 @@ async function loginAs(user) {
   // 슬랙 계정 미등록 시 안내 팝업
   loadNotifConfig();
   checkSlackSetup();
+  // 알림 최우선 수신 필수 설정 게이트(안드로이드 배터리 제한없음 등) — 슬랙 안내보다 뒤에 띄움
+  setTimeout(()=>{ try{ checkPushPriorityGate(); }catch(e){} }, 1200);
 }
 
 // 슬랙 계정 등록 안내
@@ -2628,6 +2810,7 @@ async function notifyNonViewers(postId){
       sent++;
     }catch(e){}
   }
+  try{ await postBackupChannel('🔔 ' + msg + '\n' + link); }catch(e){}
   try{ await logNotifSend('reminder_manual','post',postId,"'"+title+"' 미조회자 알림", sent); }catch(e){}
   updateNotifDot();
   alert('미조회자 '+sent+'명에게 알림을 발송했습니다.');
@@ -5690,6 +5873,7 @@ async function sendPostUpdateNotify(postId){
   }
   window.__notifBatchLog = false;
   await poTouch(postId);
+  try{ await postBackupChannel(notifEmoji('notice_updated') + ' ' + msg + '\n' + APP_BASE_URL + '?post=' + postId); }catch(e){}
   await logNotifSend('post_update','post',postId, "'"+title+"' 수정 알림", sent);
   alert('수정 알림을 '+sent+'명에게 발송했습니다.');
 }
@@ -5756,6 +5940,7 @@ async function sendRoleBasedPostNotify(postId, title) {
       if (pushStores.length) await window.InventoryMgr.pushSend({ mode:'notify_stores', stores:pushStores, title:'📢 새 공지', body:(title||'새 공지가 등록되었습니다'), url: APP_BASE_URL + '?post=' + postId });
     }
   } catch(e){}
+  try{ await postBackupChannel(notifEmoji('new_post') + ' ' + msg + '\n' + APP_BASE_URL + '?post=' + postId); }catch(e){}
   try{ await logNotifSend('new_post','post',postId, "'"+(title||'공지')+"' 새 공지 발송", sent); }catch(e){}
 }
 
@@ -6800,6 +6985,9 @@ async function loadAppSettings(){
   const {data} = await sb.from('app_settings').select('*');
   if(data){
     data.forEach(r=>{APP[r.key]=r.value;});
+    // 백업 알림 채널 상태 — sendSlackDM/postBackupChannel 에서 참조
+    window.__notifyMode = APP.notify_channel_mode || 'slack';   // slack | both | backup
+    window.__backupWebhookUrl = APP.backup_webhook_url || '';
     // 가장 최근 updated_at 찾기
     const times = data.map(r=>r.updated_at).filter(Boolean).sort();
     const latestSettingChange = times.length ? times[times.length-1] : null;
@@ -6837,7 +7025,7 @@ async function renderAppSettings(area){
   const tog = key => `<button class="toggle-switch${APP[key]==='true'?' on':''}" id="ts-${key}" onclick="this.classList.toggle('on');APP['${key}']=this.classList.contains('on')?'true':'false'"></button>`;
   area.innerHTML = `
     <div class="page-header"><div class="page-title">앱 관리</div><div class="page-sub">버전 <strong>v${APP.app_version}</strong>  ·  최근 업데이트: <strong>${APP_UPDATED_AT ? fmtDateTime(APP_UPDATED_AT).slice(0,10) : APP_BUILD_DATE}</strong></div></div>
-    ${(currentUser.is_master||currentUser.role==='admin') ? `<div class="notif-card" style="margin-bottom:12px"><div class="section-label" style="margin-bottom:8px"><i class="ti ti-speakerphone"></i> 전 직원 슬랙 일괄 안내</div><div style="font-size:12px;color:var(--th);margin-bottom:10px">슬랙 ID가 등록된 활성 직원에게 공지를 일괄 발송합니다. 발송 전 문구와 대상 인원을 반드시 확인합니다.</div><button class="btn-submit" style="font-size:13px" onclick="openSlackBroadcast()"><i class="ti ti-speakerphone"></i> 📢 새 앱 주소 슬랙 일괄 안내</button></div>` : ''}
+    ${(currentUser.is_master||currentUser.role==='admin') ? `<div class="notif-card" style="margin-bottom:12px"><div class="section-label" style="margin-bottom:8px"><i class="ti ti-speakerphone"></i> 전 직원 슬랙 일괄 안내</div><div style="font-size:12px;color:var(--th);margin-bottom:10px">슬랙 ID가 등록된 활성 직원에게 공지를 일괄 발송합니다. 발송 전 문구와 대상 인원을 반드시 확인합니다.</div><button class="btn-submit" style="font-size:13px" onclick="openSlackBroadcast()"><i class="ti ti-speakerphone"></i> 📢 새 앱 주소 슬랙 일괄 안내</button><button class="btn-cancel-sm" style="font-size:12px;margin-left:6px" onclick="openPushPrioStatus()"><i class="ti ti-checklist"></i> 알림 필수설정 현황</button></div>` : ''}
     ${(currentUser.is_master||currentUser.role==='admin') ? '<div id="attEvTypeCard" class="notif-card" style="margin-bottom:12px"><div class="section-label" style="margin-bottom:8px"><i class="ti ti-alarm"></i> 근태 증빙 종류 관리</div><div style="font-size:12px;color:var(--th)">불러오는 중...</div></div>' : ''}
     <div class="notif-card" style="margin-bottom:12px">
       <div class="section-label" style="margin-bottom:12px">UI 설정</div>
@@ -6886,6 +7074,34 @@ async function renderAppSettings(area){
       </div>
       <div style="text-align:right;margin-top:8px"><button class="btn-submit" style="font-size:13px;padding:8px 18px" onclick="saveUISettings()">UI 저장</button></div>
     </div>
+    ${(currentUser.is_master||currentUser.role==='admin') ? `<div class="notif-card" style="margin-bottom:12px">
+      <div class="section-label" style="margin-bottom:8px"><i class="ti ti-bell-bolt"></i> 백업 알림 채널 (슬랙 장애·미사용 대비)</div>
+      <div style="font-size:12px;color:var(--th);margin-bottom:12px;line-height:1.6">슬랙을 못 쓰게 될 때를 대비한 예비 발송 수단입니다. 발송 채널을 전환하면 모든 운영 공지 알림이 즉시 아래 채널로 나갑니다. (첫 로그인 슬랙 인증은 예외 — 슬랙 유지)</div>
+      <div class="form-row"><label class="form-label">발송 채널</label>
+        <select class="form-input" id="cfg-notifmode">
+          <option value="slack"${(APP.notify_channel_mode||'slack')==='slack'?' selected':''}>슬랙 기본 (현행)</option>
+          <option value="both"${APP.notify_channel_mode==='both'?' selected':''}>슬랙 + 백업 웹훅 동시발송</option>
+          <option value="backup"${APP.notify_channel_mode==='backup'?' selected':''}>백업 웹훅 단독전환 (슬랙 중단)</option>
+        </select>
+        <div style="font-size:11px;color:var(--ts);margin-top:3px">동시발송은 슬랙 DM과 백업 채널에 함께, 단독전환은 백업 채널로만 발송합니다.</div>
+      </div>
+      <div class="form-row"><label class="form-label">백업 웹훅 URL (네이버웍스 / 잔디 / 팀즈 Incoming Webhook)</label>
+        <input class="form-input" id="cfg-backupwebhook" value="${esc(APP.backup_webhook_url||'')}" placeholder="https://.../webhook/..." />
+        <div style="font-size:11px;color:var(--ts);margin-top:3px">메신저에서 발급한 수신 웹훅 주소를 넣으면, 전환 시 모든 공지 알림이 이 채널로 발송됩니다.</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-cancel-sm" style="font-size:12px" onclick="testBackupWebhook()"><i class="ti ti-plug-connected"></i> 백업 웹훅 테스트 발송</button></div>
+      <div id="backupWebhookTestResult" style="font-size:11px;margin-top:6px"></div>
+      <div style="border-top:0.5px solid var(--crd);margin:14px 0 10px"></div>
+      <div class="section-label" style="margin-bottom:8px;font-size:12px"><i class="ti ti-message-2"></i> 문자(SMS) / 카카오 알림톡 긴급발송 (솔라피·알리고)</div>
+      <div style="font-size:11px;color:var(--th);margin-bottom:8px;line-height:1.6">아래 키를 입력해 두면, 추후 긴급 상황에서 문자/알림톡 대체 발송으로 연결됩니다. (지금은 키 보관용)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><label class="form-label" style="font-size:11px">API Key</label><input class="form-input" id="cfg-smskey" value="${esc(APP.sms_api_key||'')}" placeholder="API Key" style="font-size:12px"/></div>
+        <div><label class="form-label" style="font-size:11px">API Secret</label><input class="form-input" id="cfg-smssecret" value="${esc(APP.sms_api_secret||'')}" placeholder="API Secret" style="font-size:12px"/></div>
+        <div><label class="form-label" style="font-size:11px">발신번호</label><input class="form-input" id="cfg-smssender" value="${esc(APP.sms_sender||'')}" placeholder="0000-0000" style="font-size:12px"/></div>
+        <div><label class="form-label" style="font-size:11px">템플릿 코드(알림톡)</label><input class="form-input" id="cfg-smstemplate" value="${esc(APP.sms_template_code||'')}" placeholder="템플릿 코드" style="font-size:12px"/></div>
+      </div>
+      <div style="text-align:right;margin-top:10px"><button class="btn-submit" style="font-size:13px;padding:8px 18px" onclick="saveBackupChannel()">백업 채널 저장</button></div>
+    </div>` : ''}
     <div class="notif-card" style="margin-bottom:12px">
       <div class="section-label" style="margin-bottom:12px">기능 ON/OFF</div>
       <div class="setting-row"><div><div class="setting-title">댓글 기능</div></div>${tog('comments_enabled')}</div>
@@ -8768,6 +8984,35 @@ async function saveUISettings(){
 async function saveFeatSettings(){
   await Promise.all(['comments_enabled','watermark_enabled','read_confirm_enabled','search_enabled','stats_enabled'].map(k=>saveAppSetting(k,APP[k])));
   alert('저장됨');
+}
+// 백업 알림 채널 저장 — 발송채널 전환 / 백업 웹훅 / 문자·알림톡 키
+async function saveBackupChannel(){
+  if(!(currentUser && (currentUser.is_master || currentUser.role==='admin'))){ alert('권한이 없습니다.'); return; }
+  const mode = document.getElementById('cfg-notifmode')?.value || 'slack';
+  const url  = (document.getElementById('cfg-backupwebhook')?.value || '').trim();
+  if((mode==='both'||mode==='backup') && !url){ alert('동시발송/단독전환을 선택하려면 백업 웹훅 URL을 먼저 입력해 주세요.'); return; }
+  if(mode==='backup' && !confirm('백업 웹훅 단독전환 시 슬랙 DM 발송이 중단되고 모든 공지 알림이 백업 채널로만 발송됩니다.\n(첫 로그인 슬랙 인증은 유지)\n\n전환하시겠습니까?')) return;
+  await Promise.all([
+    saveAppSetting('notify_channel_mode', mode),
+    saveAppSetting('backup_webhook_url', url),
+    saveAppSetting('sms_api_key', (document.getElementById('cfg-smskey')?.value||'').trim()),
+    saveAppSetting('sms_api_secret', (document.getElementById('cfg-smssecret')?.value||'').trim()),
+    saveAppSetting('sms_sender', (document.getElementById('cfg-smssender')?.value||'').trim()),
+    saveAppSetting('sms_template_code', (document.getElementById('cfg-smstemplate')?.value||'').trim())
+  ]);
+  window.__notifyMode = mode; window.__backupWebhookUrl = url;
+  alert('백업 채널 설정을 저장했습니다. (발송 채널: ' + ({slack:'슬랙 기본',both:'슬랙+백업 동시',backup:'백업 단독'}[mode]) + ')');
+}
+async function testBackupWebhook(){
+  const res = document.getElementById('backupWebhookTestResult');
+  const url = (document.getElementById('cfg-backupwebhook')?.value || '').trim();
+  if(!url){ if(res){ res.style.color='#B91C1C'; res.textContent='백업 웹훅 URL을 먼저 입력하세요.'; } return; }
+  if(res){ res.style.color='var(--ts)'; res.textContent='발송 중...'; }
+  try{
+    // 저장 전에도 테스트되도록 payload.url 동봉(서버가 app_settings 대신 이 URL 사용)
+    await InventoryMgr.pushSend({ mode:'backup_webhook', url:url, text:'[보난자 운영] 백업 알림 채널 테스트 메시지입니다. 이 메시지가 보이면 연동이 정상입니다.' });
+    if(res){ res.style.color='#15803D'; res.textContent='테스트 메시지를 전송했습니다. 해당 채널(네이버웍스/잔디/팀즈)을 확인하세요. (수신 안 되면 URL/권한 확인)'; }
+  }catch(e){ if(res){ res.style.color='#B91C1C'; res.textContent='전송 실패: '+(e.message||e); } }
 }
 
 // ── 프로필 ───────────────────────────────────────────────────────
@@ -20678,7 +20923,20 @@ async function slackNotify(channel, text){
 
 async function sendSlackDM(slackMemberId, msg) {
   if (!slackMemberId) return;
+  if ((window.__notifyMode || 'slack') === 'backup') return;   // 백업 단독 모드: 슬랙 DM 중단(백업 채널로 대체). OTP(slackNotify 직접호출)는 영향 없음.
   try { await slackNotify(slackMemberId, msg); } catch(e) { console.warn('슬랙 DM 오류:', e); }
+}
+// 백업 알림 채널 발송 — 동시발송/백업단독 모드일 때 백업 웹훅(네이버웍스/잔디/팀즈)에 1건 포스트.
+//   채널 단위 1건이므로 공지 발송 '원점'에서만 호출(수신자별 반복 호출 금지).
+async function postBackupChannel(text){
+  try{
+    const m = window.__notifyMode || 'slack';
+    if (m === 'slack') return;                                  // 기본 모드: 백업 미발송
+    if (!String(window.__backupWebhookUrl||'').trim()) return;  // URL 미설정 시 무시
+    if (window.InventoryMgr && typeof InventoryMgr.pushSend === 'function') {
+      await InventoryMgr.pushSend({ mode:'backup_webhook', text: text });
+    }
+  }catch(e){}
 }
 
 // ── 전 직원 슬랙 일괄 안내 (문구 확인 후 발송) ─────────────────────────

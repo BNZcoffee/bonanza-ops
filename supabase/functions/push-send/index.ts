@@ -45,12 +45,15 @@ async function resolveUser(token: string) {
   return u || null;
 }
 
+// Urgency: high + TTL — 안드로이드가 절전(Doze)에서도 즉시 깨어나 알림을 띄우도록 서버 발송 옵션 강제.
+//   urgency 'high' → FCM/WNS 가 즉시 전달 우선. TTL 86400s(24h) → 기기가 꺼져 있어도 24h 내 복귀 시 전달.
+const PUSH_OPTS = { urgency: 'high' as const, TTL: 86400 };
 async function sendToSubs(subs: any[], payload: object) {
   let ok = 0, gone: number[] = [];
   const body = JSON.stringify(payload);
   for (const s of subs) {
     try {
-      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body);
+      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body, PUSH_OPTS);
       ok++;
     } catch (err: any) {
       const code = err && err.statusCode;
@@ -110,6 +113,24 @@ Deno.serve(async (req) => {
       const subs = await activeSubsForStores(stores);
       const n = await sendToSubs(subs, { title: b.title || '보난자 운영 알림', body: b.body || '', tag: b.tag || 'notify', url: b.url || './index.html' });
       return json({ ok: true, sent: n, stores: stores.length });
+    }
+
+    // 백업 알림 채널 — 슬랙 장애/미사용 대비. app_settings.backup_webhook_url(또는 payload.url)로 서버에서 POST(CORS 無).
+    //   네이버웍스/잔디/팀즈 등 Incoming Webhook 은 { text } 페이로드를 대체로 수용. 단독/동시 전환은 프론트(__notifyMode)에서 결정.
+    if (mode === 'backup_webhook') {
+      let url = String(b.url || '').trim();
+      if (!url) {
+        const { data: s } = await admin.from('app_settings').select('value').eq('key', 'backup_webhook_url').maybeSingle();
+        url = String((s && s.value) || '').trim();
+      }
+      const text = String(b.text || '').trim();
+      if (!url || !text) return json({ ok: true, skipped: 'no_url_or_text' });
+      try {
+        const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+        return json({ ok: r.ok, status: r.status });
+      } catch (e) {
+        return json({ ok: false, error: String(e && (e as any).message || e) });
+      }
     }
 
     if (mode === 'inventory_reminders') {
