@@ -2401,8 +2401,19 @@ let readListHtml = '';
   const editBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openEditPost(${p.id})"><i class="ti ti-edit"></i> 수정</button>` : '';
   const deletePostBtn = canDeletePost(p) ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px;color:var(--rd);border-color:var(--rd)" onclick="deletePost(${p.id})"><i class="ti ti-trash"></i> 삭제</button>` : '';
   const remindBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px;color:var(--or,#B85C00);border-color:var(--or,#B85C00)" onclick="openRemindModal(${p.id})"><i class="ti ti-bell-ringing"></i> 리마인드</button>` : '';
-  const viewerBtn = (p.author_id === currentUser.id || currentUser.is_master) ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openViewerList(${p.id})"><i class="ti ti-eye-check"></i> 조회자 목록</button>` : '';
   const updateNotifyBtn = canWrite() ? `<button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px;color:var(--bl);border-color:var(--bl)" onclick="sendPostUpdateNotify(${p.id})"><i class="ti ti-refresh-alert"></i> 수정 알림</button>` : '';
+
+  // 조회자 인라인 표시(작성자/총괄 전용) — 이름 · 매장명 바로 노출
+  let viewerInlineHtml = '';
+  if (p.author_id === currentUser.id || currentUser.is_master) {
+    const { data: vlist } = await sb.from('post_views').select('last_at, users(name,store,position,part)').eq('post_id', p.id).order('last_at',{ascending:false});
+    const vs = vlist || [];
+    const chips = vs.map(v => { const u=v.users||{}; return '<span style="display:inline-flex;align-items:baseline;gap:4px;background:var(--cr,#faf7f2);border:0.5px solid var(--crd);border-radius:14px;padding:3px 10px;font-size:12px;margin:3px 4px 0 0"><b>'+esc(u.name||'')+'</b><span style="color:var(--ts);font-size:11px">'+esc(u.store||u.part||'')+'</span></span>'; }).join('');
+    viewerInlineHtml = '<div style="margin:14px 0;padding:12px 14px;border:0.5px solid var(--crd);border-radius:12px">'
+      + '<div style="display:flex;align-items:center;margin-bottom:8px"><div style="font-weight:bold;font-size:13px"><i class="ti ti-eye-check"></i> 조회자 '+vs.length+'명 · 이름 / 매장</div>'
+      + '<button class="btn-cancel-sm" style="margin-left:auto;font-size:11px;padding:3px 9px" onclick="openViewerList('+p.id+')">조회시간 · 미조회자 알림</button></div>'
+      + '<div>'+(chips||'<span style="font-size:12px;color:var(--ts)">아직 조회한 사람이 없습니다. (이 기능 적용 이후 열람분부터 집계됩니다)</span>')+'</div></div>';
+  }
 
   area.innerHTML = `
     <div style="margin-bottom:10px"><button class="btn-cancel-sm" onclick="goPage('board')"><i class="ti ti-arrow-left"></i> 목록</button></div>
@@ -2419,7 +2430,6 @@ let readListHtml = '';
             ${editBtn}
             ${deletePostBtn}
             ${remindBtn}
-            ${viewerBtn}
             ${updateNotifyBtn}
             <button class="btn-cancel-sm" id="favBtn" style="font-size:12px;padding:5px 10px;${isFav?'color:var(--gd);border-color:var(--gd)':''}" onclick="toggleFav(${p.id})"><i class="ti ti-bookmark${isFav?'-filled':''}"></i> ${isFav?'저장됨':'저장'}</button>
             <button class="btn-cancel-sm" style="font-size:12px;padding:5px 10px" onclick="openShareModal(${p.id})"><i class="ti ti-share"></i> 링크 공유</button>
@@ -2434,6 +2444,7 @@ let readListHtml = '';
       ${refHtml}
       ${confirmHtml}
       ${readListHtml}
+      ${viewerInlineHtml}
       ${cmtHtml}
     </div>`;
   // 본문 이미지 탭하면 확대 보기 (작게 넣은 이미지도 크게 볼 수 있게)
