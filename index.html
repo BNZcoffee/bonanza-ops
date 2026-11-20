@@ -950,6 +950,7 @@ let commentsOnNew = false;
 function toKST(s){if(!s)return '';return new Date(new Date(s).getTime()+9*3600000).toISOString();}
 function fmtDate(s){if(!s)return '';return toKST(s).slice(0,10);}
 function fmtDateTime(s){if(!s)return '';return toKST(s).slice(0,16).replace('T',' ');}
+function fmtDateTimeSec(s){if(!s)return '';return toKST(s).slice(0,19).replace('T',' ');}
 // KST 현재 시각 ISO 문자열 (DB 저장용 — 서울 기준 정확한 시각)
 function nowKST(){return new Date(Date.now()+9*3600000).toISOString();}
 // KST 오늘 날짜 문자열
@@ -2407,12 +2408,12 @@ let readListHtml = '';
   let viewerInlineHtml = '';
   if (p.author_id === currentUser.id || currentUser.is_master) {
     const { data: vlist } = await sb.from('post_views').select('last_at, users(name,store,position,part)').eq('post_id', p.id).order('last_at',{ascending:false});
-    const vs = vlist || [];
-    const chips = vs.map(v => { const u=v.users||{}; return '<span style="display:inline-flex;align-items:baseline;gap:4px;background:var(--cr,#faf7f2);border:0.5px solid var(--crd);border-radius:14px;padding:3px 10px;font-size:12px;margin:3px 4px 0 0"><b>'+esc(u.name||'')+'</b><span style="color:var(--ts);font-size:11px">'+esc(u.store||u.part||'')+'</span></span>'; }).join('');
+    const vs = vlist || [];  // 최근 조회순(last_at desc)
+    const rows = vs.map(v => { const u=v.users||{}; return '<div style="display:flex;align-items:baseline;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--crm,#eee);font-size:12px"><b style="min-width:62px">'+esc(u.name||'')+'</b><span style="color:var(--ts);min-width:52px">'+esc(u.store||u.part||'')+'</span><span style="color:var(--ts);font-size:11px;margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums">'+fmtDateTimeSec(v.last_at)+'</span></div>'; }).join('');
     viewerInlineHtml = '<div style="margin:14px 0;padding:12px 14px;border:0.5px solid var(--crd);border-radius:12px">'
-      + '<div style="display:flex;align-items:center;margin-bottom:8px"><div style="font-weight:bold;font-size:13px"><i class="ti ti-eye-check"></i> 조회자 '+vs.length+'명 · 이름 / 매장</div>'
-      + '<button class="btn-cancel-sm" style="margin-left:auto;font-size:11px;padding:3px 9px" onclick="openViewerList('+p.id+')">조회시간 · 미조회자 알림</button></div>'
-      + '<div>'+(chips||'<span style="font-size:12px;color:var(--ts)">아직 조회한 사람이 없습니다. (이 기능 적용 이후 열람분부터 집계됩니다)</span>')+'</div></div>';
+      + '<div style="display:flex;align-items:center;margin-bottom:8px"><div style="font-weight:bold;font-size:13px"><i class="ti ti-eye-check"></i> 조회자 '+vs.length+'명 (이름 / 매장 / 최근 조회시간 · 최근순)</div>'
+      + '<button class="btn-cancel-sm" style="margin-left:auto;font-size:11px;padding:3px 9px" onclick="openViewerList('+p.id+')">최초/최근 · 미조회자 알림</button></div>'
+      + '<div>'+(rows||'<span style="font-size:12px;color:var(--ts)">아직 조회한 사람이 없습니다. (이 기능 적용 이후 열람분부터 집계됩니다)</span>')+'</div></div>';
   }
 
   area.innerHTML = `
@@ -2590,8 +2591,8 @@ async function openViewerList(postId){
   const rows = list.map((v,i)=>'<tr>'
     + '<td style="padding:6px 8px;border-bottom:0.5px solid var(--crm,#eee);text-align:center">'+(i+1)+'</td>'
     + '<td style="padding:6px 8px;border-bottom:0.5px solid var(--crm,#eee)">'+vlabel(v.users)+'</td>'
-    + '<td style="padding:6px 8px;border-bottom:0.5px solid var(--crm,#eee);font-size:11px;color:var(--ts);white-space:nowrap">'+fmtDateTime(v.first_at)+'</td>'
-    + '<td style="padding:6px 8px;border-bottom:0.5px solid var(--crm,#eee);font-size:11px;color:var(--ts);white-space:nowrap">'+fmtDateTime(v.last_at)+'</td>'
+    + '<td style="padding:6px 8px;border-bottom:0.5px solid var(--crm,#eee);font-size:11px;color:var(--ts);white-space:nowrap;font-variant-numeric:tabular-nums">'+fmtDateTimeSec(v.first_at)+'</td>'
+    + '<td style="padding:6px 8px;border-bottom:0.5px solid var(--crm,#eee);font-size:11px;color:var(--ts);white-space:nowrap;font-variant-numeric:tabular-nums">'+fmtDateTimeSec(v.last_at)+'</td>'
     + '</tr>').join('');
   const old = document.getElementById('viewerListModal'); if(old) old.remove();
   const ov = document.createElement('div'); ov.id='viewerListModal'; ov.className='modal-overlay'; ov.style.display='flex';
