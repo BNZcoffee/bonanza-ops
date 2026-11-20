@@ -757,7 +757,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 window.sb = sb; window.SUPABASE_URL = SUPABASE_URL; window.SUPABASE_KEY = SUPABASE_KEY;
 /* 앱 기준 주소: 도메인/조직명이 바뀌면 이 한 줄만 수정하면 전체 앱·푸시·슬랙 링크에 반영됨 */
-const APP_BASE_URL = 'https://bonanzacoffee.github.io/bonanza-ops/'; window.APP_BASE_URL = APP_BASE_URL;
+const APP_BASE_URL = 'https://bonanzacoffee-ops.netlify.app/'; window.APP_BASE_URL = APP_BASE_URL;
 
 // ── PWA 홈화면 아이콘: 정적 파일(manifest.json + icon-192/512 + apple-touch-icon)로 일원화.
 //    과거에는 app_settings.logo_url 을 읽어 blob manifest 로 동적 교체했으나,
@@ -6922,7 +6922,7 @@ async function renderAppSettings(area){
         </div>
         <div style="color:var(--bl)"><i class="ti ti-chevron-right"></i></div>
       </div>` : ''}
-      <div class="setting-row"><div><div class="setting-title">호스팅</div><div class="setting-sub">GitHub Pages — bonanzacoffee.github.io/bonanza-ops</div></div></div>
+      <div class="setting-row"><div><div class="setting-title">호스팅</div><div class="setting-sub">Netlify — bonanzacoffee-ops.netlify.app</div></div></div>
     </div>
     ${hasPerm('cat_manage_full') ? `<div class="notif-card" style="margin-bottom:12px">
       <div class="section-label" style="margin-bottom:8px">게시판(카테고리) 설정</div>
